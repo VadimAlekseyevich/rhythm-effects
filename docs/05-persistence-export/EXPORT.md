@@ -1,503 +1,252 @@
 # Export
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> Export is deterministic offline rendering. It must not depend on realtime preview frame delivery or screen capture.
+> Export is deterministic offline rendering, never screen capture.
 
-## 1. MVP goal
+## 1. Output target
 
-Produce a standard playable MP4 containing:
+MVP:
 
-- rendered composition video;
-- project audio;
-- correct audiovisual synchronization.
+- container: MP4;
+- video codec: H.264 through the bundled/validated FFmpeg build;
+- final pixel format: yuv420p for broad compatibility;
+- audio: AAC when primary audio is present;
+- SDR sRGB-compatible output.
 
-Minimum codec/container target:
+The exact FFmpeg H.264 encoder implementation is a packaging capability, not project semantics. Release packaging must provide and validate one supported encoder.
 
-- H.264;
-- MP4.
+## 2. Snapshot
 
----
+At export start, create an immutable semantic Project snapshot and resolve required asset references.
 
-## 2. Core invariant
+Subsequent editor edits do not alter the running export.
 
-Preview and export share:
+The editor may remain responsive; export uses its snapshot.
 
-- Project data;
-- Time Model;
-- Animation evaluator;
-- visual scene semantics;
-- renderer/shaders as far as practical.
+## 3. Time
 
-They differ primarily in clock source and output target.
-
-### Preview
+For frame index N:
 
 ~~~text
-audio/editor clock
-→ evaluation time
-→ scene
-→ offscreen preview
+ProjectTimeNs =
+    N * fps_denominator * 1e9 / fps_numerator
 ~~~
 
-### Export
+with wide integer intermediates and explicit rounding.
+
+Never accumulate frame delta.
+
+## 4. Range
+
+Default export range is whole composition:
 
 ~~~text
-integer frame index
-→ exact frame timestamp
-→ same evaluation semantics
-→ offscreen export target
-→ encoder
+0 .. ProjectSettings.duration
 ~~~
 
----
+Custom in/out range is post-MVP.
 
-## 3. No realtime dependency
+## 5. Export settings
 
-Export must not assume it can render at playback speed.
+MVP UI exposes:
 
-Rendering may be:
+- destination;
+- output resolution preset/custom dimensions constrained to same composition aspect ratio;
+- output FPS preset;
+- quality: Fast / Balanced / High.
 
-- faster than realtime;
-- slower than realtime.
+Defaults:
 
-Audio is not “played” during export.
+- composition resolution;
+- composition FPS;
+- Balanced.
 
-The source audio is encoded/muxed against deterministic timeline timestamps.
+Supported common FPS presets include 24, 25, 30, 50, 60.
 
----
+Rational internals remain supported.
 
-## 4. Frame time
+## 6. Resolution scaling
 
-For rational frame rate:
+When output resolution differs but keeps aspect ratio:
 
 ~~~text
-timestamp(frame_index) =
-    frame_index * fps_denominator / fps_numerator
+output_scale = output_width / composition_width
 ~~~
 
-Derive timestamp directly from frame index.
+All composition-space geometry/effect units scale consistently into output pixels.
 
-Do not repeatedly add floating-point frame duration.
+Do not reinterpret project coordinates.
 
-This prevents accumulated timing drift.
+## 7. Rendering worker
 
----
+Export job owns separate export-renderer state while reusing the same shader/semantic code.
 
-## 5. Export range
+It may share thread-safe wgpu Device/Queue handles where implementation supports clean ownership, but it does not mutate preview renderer caches/state.
 
-MVP default:
+If concurrent GPU use hurts editor responsiveness, preview can be throttled while export runs; Project editing remains semantically independent.
 
-- entire composition duration.
-
-Optional in/out range can be deferred unless inexpensive.
-
-Export duration should not be implicitly limited to audio length if composition supports visual tail after audio.
-
----
-
-## 6. Export settings
-
-MVP surface:
-
-- destination path;
-- width;
-- height;
-- FPS;
-- quality preset.
-
-Possible quality UI:
-
-- Low;
-- Medium;
-- High;
-
-or a restrained single quality slider/preset.
-
-Do not expose dozens of encoder flags in MVP.
-
----
-
-## 7. Resolution
-
-Defaults to composition resolution.
-
-Allow override only if renderer can correctly scale composition semantics.
-
-If override complicates pixel-sensitive effects/text, MVP may initially require composition resolution.
-
-This should be decided during renderer/export spike.
-
----
-
-## 8. FPS
-
-Default to composition FPS.
-
-Supported initial values may include:
-
-- 24;
-- 25;
-- 30;
-- 50;
-- 60.
-
-Represent frame rate rationally internally.
-
-Do not couple animation keyframe positions to FPS.
-
----
-
-## 9. Rendering pipeline
-
-Conceptual pipeline:
+## 8. Render pipeline
 
 ~~~text
-load/freeze export project state
-→ prepare runtime assets
-→ for frame N:
-     derive exact timestamp
-     evaluate project
-     render composition to export texture
-     transfer/encode frame
-→ encode/mux project audio
-→ finalize container
-→ atomically publish output where practical
+snapshot
+-> validate/prepare assets
+-> for each frame index:
+     exact ProjectTimeNs
+     animation evaluation
+     full-resolution render
+     GPU sRGB RGBA/BGRA output conversion
+     bounded readback
+     FFmpeg raw-video pipe
+-> mux/encode primary audio
+-> finalize temp MP4
+-> publish destination
 ~~~
 
----
+## 9. Frame transport
 
-## 10. Project consistency during export
+MVP uses raw video through FFmpeg stdin/pipe.
 
-MVP preferred behavior:
+A bounded pool of at most 3 readback/frame buffers prevents memory growing with export length.
 
-Export operates on a stable snapshot of project semantic state captured at export start.
+Zero-copy hardware encoding is post-MVP.
 
-The user may either:
+## 10. Audio
 
-- continue editing while export uses snapshot, if implementation is safe;
-- or editor may restrict mutation during export initially.
+Primary audio comes from original audio asset file, not captured playback output.
 
-Do not allow export result to unpredictably combine states from different moments.
+Audio starts at project time 0 in MVP.
 
-A snapshot/clone cost should be measured.
+If composition ends before audio:
+- trim/mux to composition duration.
 
----
+If composition extends beyond audio:
+- video may continue after audio ends.
 
-## 11. GPU target
+No audio time-stretch or mixing.
 
-Export renders to an offscreen texture at requested output dimensions.
+A project without audio may export video-only MP4.
 
-No dependency on:
+## 11. A/V sync
 
-- viewport zoom;
-- window size;
-- monitor DPI;
-- whether editor window is visible;
-- swapchain contents.
+Release-critical.
 
----
+Use generated fixture with audio clicks and visual flashes at known ProjectTimeNs.
 
-## 12. Readback / encoder boundary
+No cumulative sync drift is allowed.
 
-Encoding H.264 through FFmpeg requires a clear frame transfer path.
+Export timing does not depend on realtime audio clock.
 
-MVP preferred integration:
+## 12. Preview parity
 
-- FFmpeg process boundary;
-- feed raw frames through pipe or temporary strategy;
-- capture stderr/progress diagnostics;
-- mux audio through explicit arguments/input.
+At any tested ProjectTimeNs:
 
-Exact implementation must be benchmarked.
+- same animation evaluator;
+- same object/effect semantics;
+- same text layout;
+- same color/alpha contract.
 
-Potential formats across pipe:
+Preview resolution may differ, but full-resolution export is semantic reference.
 
-- RGBA;
-- BGRA;
-- another format minimizing conversion cost.
+## 13. Asset readiness
 
-Avoid premature native FFmpeg bindings unless process-based approach proves inadequate.
+Before first frame:
 
----
+- all required image assets resolved/decoded;
+- required fonts resolved/fallback known;
+- source audio path available if audio included.
 
-## 13. Audio source
+Missing required asset blocks export with actionable list rather than silently producing broken output.
 
-Use project/source audio data aligned to project time.
+## 14. Progress
 
-Requirements:
+Show:
 
-- correct start offset;
-- correct duration;
-- preserve synchronization;
-- handle composition beginning before/after musical grid origin correctly.
+- current frame / total frames;
+- percent;
+- elapsed time.
 
-Do not derive export audio from live audio output capture.
+ETA may be shown only when enough throughput history exists and is labelled approximate.
 
----
+## 15. Cancellation
 
-## 14. Audio/video synchronization
+Atomic/cooperative cancellation:
 
-A/V sync is a release-critical correctness property.
+- stop producing new frames;
+- close/terminate FFmpeg safely;
+- release readback/resources;
+- delete incomplete temp output;
+- Project remains unchanged.
 
-Test using:
+## 16. Output publication
 
-- known click/transient audio;
-- visual event placed on exact beat;
-- exported file inspected at multiple timestamps;
-- long-duration projects.
-
-Define numerical tolerance in TESTING.md after prototype measurement.
-
----
-
-## 15. Color and alpha
-
-MVP MP4/H.264 output is opaque.
-
-Transparent video export is not required.
-
-Composition background should be resolved before encoding.
-
-Color-management sophistication beyond standard SDR output is not MVP.
-
-Exact color-space handling should still be explicit enough to avoid accidental obvious gamma differences.
-
----
-
-## 16. Effect parity
-
-Export must use the same effect parameter evaluation and shader semantics as preview.
-
-If an effect cannot render equivalently offline, it should not be considered finished for MVP.
-
----
-
-## 17. Text parity
-
-Text layout/font resolution must match preview.
-
-Missing font at export time is a blocking/recoverable error unless fallback semantics are explicitly the same as preview.
-
----
-
-## 18. Asset readiness
-
-Before frame loop, validate required assets.
-
-Possible behavior:
-
-- wait for required decode/loading;
-- fail with clear missing asset list.
-
-Do not produce silently broken final video when a required source asset cannot be resolved.
-
----
-
-## 19. Progress
-
-Expose:
-
-- current frame;
-- total frames;
-- percentage;
-- optional elapsed time;
-- optional estimated remaining time only if stable enough.
-
-Do not promise a precise ETA if throughput is highly variable.
-
----
-
-## 20. Cancellation
-
-Cancellation must:
-
-- stop scheduling new frames;
-- terminate/close encoder safely;
-- clean temporary output;
-- leave editor project unchanged;
-- not publish a corrupt file as successful output.
-
-Partial file policy should be explicit.
-
-Preferred: write temporary destination, then rename on success.
-
----
-
-## 21. Output publication
-
-Safer flow:
+Never encode directly into the only requested final file path.
 
 ~~~text
-destination.tmp
-→ complete encode
-→ verify FFmpeg success
-→ rename/move to requested destination
+destination.partial/temp
+-> FFmpeg success + close
+-> verify output exists/non-empty
+-> safe rename/publish
 ~~~
 
-If final rename fails, retain enough information to recover or clearly tell the user where temporary output exists.
+Failed/cancelled export is never reported as success.
 
----
+## 17. FFmpeg diagnostics
 
-## 22. FFmpeg errors
+Capture stderr.
 
-Translate common errors into understandable product messages:
+Translate common failures:
 
-- FFmpeg unavailable;
-- unsupported encoder/build;
-- destination permission denied;
+- encoder unavailable;
+- permission denied;
 - disk full;
-- pipe/process terminated;
-- invalid source audio;
-- encoder failure.
+- source audio invalid;
+- process terminated.
 
-Keep raw stderr in diagnostic logs.
+Raw stderr goes to logs/details.
 
-Do not show the raw command line as the primary UX.
+## 18. Encoder quality presets
 
----
+Fast/Balanced/High map to encoder-specific settings inside export backend.
 
-## 23. Packaging boundary
+The UI contract is stable even if bundled FFmpeg encoder implementation changes.
 
-If FFmpeg is distributed with the app:
+Document the concrete mapping in code/release notes once the release encoder is selected.
 
-- version is controlled;
-- executable path is known;
-- license obligations documented;
-- startup/export verifies expected executable.
+## 19. Color
 
-Do not rely on user PATH for normal MVP operation unless distribution policy explicitly chooses that tradeoff.
+Renderer performs creative linear working math.
 
-See PACKAGING.md.
+Final export conversion targets standard SDR sRGB appearance before FFmpeg YUV conversion.
 
----
+No HDR metadata or wide-gamut support in MVP.
 
-## 24. Performance
+## 20. Determinism
 
-Export throughput is secondary to correctness but should still be efficient.
+Semantic frame content is deterministic for the same:
 
-Measure:
+- Project snapshot;
+- frame index;
+- app rendering semantics.
 
-- animation evaluation/frame;
-- render/frame;
-- GPU readback;
-- CPU pixel conversion;
-- encoder throughput;
-- total memory.
+Bit-identical H.264 files are not required.
 
-Potential pipeline optimization later:
+## 21. Tests
 
-- multiple readback buffers;
-- pipelined GPU/CPU/encoder stages.
+- short 1080p60;
+- 720p scale;
+- 30 FPS override;
+- video-only;
+- audio included;
+- 1/5/10 minute sync fixture;
+- text/effects reference frames;
+- missing asset block;
+- cancel;
+- FFmpeg fail;
+- destination fail;
+- bounded memory;
+- output playable in common Windows/browser/player software.
 
-MVP should first implement a correct bounded-memory pipeline.
+## 22. Definition of Done
 
----
-
-## 25. Memory
-
-Never accumulate all rendered frames in RAM.
-
-Use streaming/bounded buffering.
-
-Long exports must have approximately bounded memory relative to resolution and pipeline depth.
-
----
-
-## 26. Determinism
-
-Given:
-
-- same project;
-- same application/render implementation;
-- same export settings;
-
-semantic visual state at frame N should be the same across runs.
-
-Bit-identical encoded H.264 output is not required.
-
-Frame evaluation semantics are.
-
----
-
-## 27. Testing
-
-### Basic
-
-- short 1080p project exports;
-- output plays;
-- audio present;
-- correct dimensions/FPS.
-
-### Timing
-
-- visual flash on known audio beat;
-- 1 minute;
-- 5+ minutes;
-- 29.97/30/60 if supported;
-- decimal BPM.
-
-### Parity
-
-Compare exported reference frames with offline renderer expected output at selected frame indices.
-
-### Failure
-
-- missing asset;
-- bad output path;
-- disk/write failure where simulatable;
-- FFmpeg termination;
-- cancel mid-export.
-
-### Memory
-
-Long export does not grow linearly with total frame count.
-
----
-
-## 28. Implementation sequence
-
-1. Implement exact frame-index timestamp API.
-2. Render one arbitrary timestamp to offscreen texture.
-3. Read one frame back to CPU.
-4. Encode a sequence of generated frames with FFmpeg.
-5. Feed real rendered frames.
-6. Add audio mux.
-7. Add progress.
-8. Add cancellation.
-9. Add temp-output publication.
-10. Add UI settings.
-11. Add sync/parity tests.
-12. Benchmark and pipeline only if needed.
-
----
-
-## 29. Open decisions
-
-- process pipe vs temporary frame transport;
-- pixel format;
-- exact quality presets;
-- whether resolution override is MVP;
-- supported FPS list;
-- audio encode/copy strategy;
-- FFmpeg distribution model;
-- editor mutability during export;
-- precise A/V sync tolerance;
-- standard SDR color-space convention.
-
----
-
-## 30. Definition of Done
-
-Export is MVP-ready when:
-
-- a full composition renders to H.264 MP4;
-- audio is present;
-- A/V sync passes defined tests;
-- frame time is derived deterministically from integer frame index;
-- preview/export visual semantics match at tested timestamps;
-- memory does not grow with total frame count;
-- missing assets fail clearly;
-- cancellation is safe;
-- failed export is not presented as a successful final file;
-- output plays correctly in common external players.
+Export is MVP-ready when deterministic frames, H.264 MP4, optional AAC audio, scale/FPS overrides, sync tests, bounded readback memory, cancellation, and safe output publication all pass.
