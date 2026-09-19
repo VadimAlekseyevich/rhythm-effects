@@ -182,7 +182,7 @@ TransformAnimation {
 
 Semantics come from DOMAIN_TYPES.md and COORDINATE_SYSTEMS.md.
 
-Recommended defaults:
+Accepted defaults:
 
 ~~~text
 position = composition center
@@ -211,7 +211,7 @@ Invariants:
 
 ## 12. Rectangle
 
-Recommended schema V1:
+Schema V1:
 
 ~~~rust
 RectangleObject {
@@ -221,7 +221,7 @@ RectangleObject {
 }
 ~~~
 
-If corner radius is removed from MVP UI before implementation, omit it from V1 instead of shipping unused schema.
+Corner Radius is part of MVP and schema V1.
 
 ## 13. Ellipse
 
@@ -252,7 +252,7 @@ GPU textures and decoded pixels are runtime state only.
 
 ## 15. Text
 
-Recommended MVP:
+Schema V1:
 
 ~~~rust
 TextObject {
@@ -264,9 +264,7 @@ TextObject {
 }
 ~~~
 
-Font size may remain static for MVP because transform scale already animates visual size.
-
-If prototype testing proves direct font-size animation essential, promote it to Animated<f32> before schema freeze.
+Font size is static in MVP; visual size animation uses Transform Scale.
 
 ## 16. FontReference
 
@@ -366,7 +364,7 @@ Effect {
 
 Typed effect variants only.
 
-Candidate MVP set:
+Schema V1 effect set:
 
 ~~~rust
 enum EffectKind {
@@ -377,8 +375,6 @@ enum EffectKind {
     RgbSplit(RgbSplitEffect),
 }
 ~~~
-
-The final list may shrink before schema freeze.
 
 Effect parameters use Animated<T> only where the product exposes animation.
 
