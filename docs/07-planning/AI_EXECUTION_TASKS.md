@@ -54,8 +54,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-034** — Implement Auto/Full/Half/Quarter preview-quality state in EditorSession placeholder state.
 - [x] **AI-035** — Add a renderer capability check for Rgba16Float render-attachment support.
 - [x] **AI-036** — Add a startup error path when no compatible GPU adapter/device can be created.
-- [ ] **AI-037** — Add a manual reference check for top-left composition orientation.
-- [ ] **AI-038** — Verify the shell at 1280x720 and normal 1920x1080 desktop sizes.
+- [x] **AI-037** — Add a manual reference check for top-left composition orientation.
+- [ ] **AI-038** — Verify the shell at 1280x720 and normal 1920x1080 desktop sizes. **Blocked on local visual Windows validation; follow `docs/06-quality/M2_MANUAL_VALIDATION.md`.**
 
 ## M3 — Domain/time/project/animation/history
 
