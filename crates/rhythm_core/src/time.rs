@@ -83,6 +83,54 @@ pub enum BpmError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameRateError {
+    ZeroNumerator,
+    ZeroDenominator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FrameRate {
+    numerator: u32,
+    denominator: u32,
+}
+
+impl FrameRate {
+    pub fn new(numerator: u32, denominator: u32) -> Result<Self, FrameRateError> {
+        if numerator == 0 {
+            return Err(FrameRateError::ZeroNumerator);
+        }
+        if denominator == 0 {
+            return Err(FrameRateError::ZeroDenominator);
+        }
+
+        let divisor = gcd_u32(numerator, denominator);
+        Ok(Self {
+            numerator: numerator / divisor,
+            denominator: denominator / divisor,
+        })
+    }
+
+    #[must_use]
+    pub const fn numerator(self) -> u32 {
+        self.numerator
+    }
+
+    #[must_use]
+    pub const fn denominator(self) -> u32 {
+        self.denominator
+    }
+}
+
+const fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
+    while b != 0 {
+        let remainder = a % b;
+        a = b;
+        b = remainder;
+    }
+    a
+}
+
 pub struct BpmMicros(u64);
 
 impl BpmMicros {
@@ -161,6 +209,30 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn frame_rate_normalizes_positive_rationals() {
+        let sixty = super::FrameRate::new(60, 1).expect("valid frame rate");
+        assert_eq!(sixty.numerator(), 60);
+        assert_eq!(sixty.denominator(), 1);
+
+        let ntsc = super::FrameRate::new(60_000, 1_001).expect("valid frame rate");
+        assert_eq!(ntsc.numerator(), 60_000);
+        assert_eq!(ntsc.denominator(), 1_001);
+
+        let reduced = super::FrameRate::new(120, 2).expect("valid frame rate");
+        assert_eq!(reduced.numerator(), 60);
+        assert_eq!(reduced.denominator(), 1);
+
+        assert_eq!(
+            super::FrameRate::new(0, 1),
+            Err(super::FrameRateError::ZeroNumerator)
+        );
+        assert_eq!(
+            super::FrameRate::new(60, 0),
+            Err(super::FrameRateError::ZeroDenominator)
+        );
+    }
 
     #[test]
     fn every_mvp_division_has_exact_tick_step() {
