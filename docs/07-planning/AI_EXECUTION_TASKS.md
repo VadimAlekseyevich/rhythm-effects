@@ -112,12 +112,12 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 - [x] **AI-087** — Add Symphonia, CPAL and Rubato dependencies with only required features.
 - [x] **AI-088** — Implement audio-file probing and decode result/error types in rhythm_engine.
-- [ ] **AI-089** — Implement WAV decode fixture support.
+- [x] **AI-089** — Implement WAV decode fixture support.
 - [ ] **AI-090** — Implement MP3 decode fixture support.
 - [ ] **AI-091** — Implement FLAC decode fixture support.
 - [ ] **AI-092** — Implement OGG/Vorbis decode fixture support.
 - [ ] **AI-093** — Implement AAC/M4A support for the pinned Symphonia feature set or return a clear unsupported error.
-- [ ] **AI-094** — Implement mono/stereo decoded f32 interleaved PCM representation.
+- [x] **AI-094** — Implement mono/stereo decoded f32 interleaved PCM representation.
 - [ ] **AI-095** — Reject unsupported multichannel input instead of undocumented downmix.
 - [ ] **AI-096** — Implement background output-rate resampling with Rubato.
 - [ ] **AI-097** — Implement immutable stereo PlaybackBuffer and release temporary source PCM after waveform handoff.
