@@ -1,6 +1,6 @@
 # User Flows
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document describes complete user journeys. It intentionally focuses on user intent and observable behavior rather than implementation.
 
@@ -333,3 +333,20 @@ During usability review, record for primary flows:
 - time to recover from an error.
 
 Metrics are diagnostic, not vanity targets. The goal is to find avoidable friction.
+
+
+---
+
+## 19. Accepted first-animation target
+
+For usability testing, a user familiar with basic creative software should be able to reach a first synchronized two-keyframe rectangle animation without documentation after discovering Import Audio and entering BPM.
+
+The exact time target is measured during prototype testing rather than guessed in advance, but any repeated confusion around:
+
+- BPM offset;
+- property animation enabling;
+- grid stepping;
+- Play/Pause;
+- keyframe placement
+
+is treated as a product defect rather than training failure.
