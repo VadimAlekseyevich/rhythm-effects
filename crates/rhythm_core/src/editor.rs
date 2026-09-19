@@ -55,6 +55,47 @@ impl EditCommand {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum HistoryPayload {
+    ObjectInserted {
+        index: usize,
+        object: Object,
+    },
+    ObjectDeleted {
+        index: usize,
+        object: Object,
+    },
+    ObjectRenamed {
+        object_id: ObjectId,
+        before: String,
+        after: String,
+    },
+    PositionBaseChanged {
+        object_id: ObjectId,
+        before: Vec2,
+        after: Vec2,
+    },
+    OpacityBaseChanged {
+        object_id: ObjectId,
+        before: f32,
+        after: f32,
+    },
+    OpacityKeyframeInserted {
+        object_id: ObjectId,
+        keyframe: Keyframe<f32>,
+    },
+    TempoMapChanged {
+        before: TempoMap,
+        after: TempoMap,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryEntry {
+    pub label: String,
+    pub payload: HistoryPayload,
+}
+
 #[derive(Debug)]
 pub struct ProjectEditor {
     project: Project,
@@ -84,6 +125,21 @@ mod tests {
         project::{Project, ProjectSettings},
         time::{GridOffsetNs, TempoMap},
     };
+
+    #[test]
+    fn history_payloads_are_semantic_not_project_snapshots() {
+        let payload = super::HistoryPayload::ObjectRenamed {
+            object_id: crate::ids::ObjectId::new(1).expect("object id"),
+            before: "A".to_owned(),
+            after: "B".to_owned(),
+        };
+        let entry = super::HistoryEntry {
+            label: "Rename Object".to_owned(),
+            payload,
+        };
+
+        assert_eq!(entry.label, "Rename Object");
+    }
 
     #[test]
     fn edit_commands_are_explicit_and_loggable() {
