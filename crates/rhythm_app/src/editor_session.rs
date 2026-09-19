@@ -25,11 +25,18 @@ impl PreviewQuality {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TimelineView {
+    start: ProjectTimeNs,
+    end: ProjectTimeNs,
+}
+
 #[derive(Debug)]
 pub struct EditorSession {
     pub preview_quality: PreviewQuality,
     playhead: ProjectTimeNs,
     authoring_division: BeatDivision,
+    timeline_view: Option<TimelineView>,
 }
 
 impl Default for EditorSession {
@@ -38,6 +45,7 @@ impl Default for EditorSession {
             preview_quality: PreviewQuality::Auto,
             playhead: ProjectTimeNs::new(0),
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
+            timeline_view: None,
         }
     }
 }
@@ -108,6 +116,98 @@ impl EditorSession {
         }
 
         self.step_playhead_by_ticks(tempo_map, duration, ticks_per_bar, direction)
+    }
+
+    #[must_use]
+    pub fn timeline_range(
+        &self,
+        duration: DurationNs,
+    ) -> (ProjectTimeNs, ProjectTimeNs) {
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let Some(view) = self.timeline_view else {
+            return (ProjectTimeNs::new(0), ProjectTimeNs::new(duration_ns));
+        };
+
+        let span = (view.end.get() - view.start.get()).clamp(1, duration_ns);
+        let start = view.start.get().clamp(0, duration_ns - span);
+        (
+            ProjectTimeNs::new(start),
+            ProjectTimeNs::new(start.saturating_add(span)),
+        )
+    }
+
+    pub fn zoom_timeline(
+        &mut self,
+        duration: DurationNs,
+        anchor: ProjectTimeNs,
+        zoom_factor: f32,
+    ) -> bool {
+        if !zoom_factor.is_finite() || zoom_factor <= 0.0 || (zoom_factor - 1.0).abs() < 0.000_1 {
+            return false;
+        }
+
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let (start, end) = self.timeline_range(duration);
+        let old_span = (end.get() - start.get()).max(1);
+        const MIN_TIMELINE_SPAN_NS: i64 = 1_000_000;
+        let min_span = MIN_TIMELINE_SPAN_NS.min(duration_ns);
+        let new_span = ((old_span as f64) / f64::from(zoom_factor))
+            .round()
+            .clamp(min_span as f64, duration_ns as f64) as i64;
+        if new_span == old_span {
+            return false;
+        }
+
+        let anchor_ns = anchor.get().clamp(start.get(), end.get());
+        let anchor_ratio = (anchor_ns - start.get()) as f64 / old_span as f64;
+        let desired_start = (anchor_ns as f64 - anchor_ratio * new_span as f64).round() as i64;
+        let new_start = desired_start.clamp(0, duration_ns - new_span);
+        let new_end = new_start.saturating_add(new_span);
+        self.timeline_view = Some(TimelineView {
+            start: ProjectTimeNs::new(new_start),
+            end: ProjectTimeNs::new(new_end),
+        });
+        true
+    }
+
+    pub fn pan_timeline_points(
+        &mut self,
+        duration: DurationNs,
+        content_delta_points: f32,
+        viewport_width_points: f32,
+    ) -> bool {
+        if !content_delta_points.is_finite()
+            || !viewport_width_points.is_finite()
+            || viewport_width_points <= 0.0
+            || content_delta_points.abs() < f32::EPSILON
+        {
+            return false;
+        }
+
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let (start, end) = self.timeline_range(duration);
+        let span = (end.get() - start.get()).max(1);
+        if span >= duration_ns {
+            return false;
+        }
+
+        let delta_ns =
+            (-(f64::from(content_delta_points)) / f64::from(viewport_width_points) * span as f64)
+                .round() as i64;
+        if delta_ns == 0 {
+            return false;
+        }
+
+        let new_start = start.get().saturating_add(delta_ns).clamp(0, duration_ns - span);
+        if new_start == start.get() {
+            return false;
+        }
+
+        self.timeline_view = Some(TimelineView {
+            start: ProjectTimeNs::new(new_start),
+            end: ProjectTimeNs::new(new_start.saturating_add(span)),
+        });
+        true
     }
 
     pub fn change_authoring_division(&mut self, finer: bool) -> bool {
@@ -184,6 +284,54 @@ mod tests {
             BpmMicros::new(120_000_000).expect("BPM"),
             TimeSignature::default(),
         )
+    }
+
+    #[test]
+    fn timeline_zoom_keeps_pointer_anchor_stable() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+
+        assert!(session.zoom_timeline(
+            duration,
+            ProjectTimeNs::new(5_000_000_000),
+            2.0,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(2_500_000_000),
+                ProjectTimeNs::new(7_500_000_000),
+            )
+        );
+    }
+
+    #[test]
+    fn timeline_pan_uses_content_motion_and_clamps_to_project() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(
+            duration,
+            ProjectTimeNs::new(5_000_000_000),
+            2.0,
+        ));
+
+        assert!(session.pan_timeline_points(duration, -100.0, 1_000.0));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(3_000_000_000),
+                ProjectTimeNs::new(8_000_000_000),
+            )
+        );
+
+        assert!(session.pan_timeline_points(duration, 10_000.0, 1_000.0));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(0),
+                ProjectTimeNs::new(5_000_000_000),
+            )
+        );
     }
 
     #[test]

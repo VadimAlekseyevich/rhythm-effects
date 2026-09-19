@@ -90,21 +90,70 @@ pub fn draw_timeline(
     project_duration: DurationNs,
     waveform: Option<&WaveformData>,
 ) {
-    let duration_ns = i64::try_from(project_duration.get())
-        .unwrap_or(i64::MAX)
-        .max(1);
-    let start_time = ProjectTimeNs::new(0);
-    let end_time = ProjectTimeNs::new(duration_ns);
+    let (mut start_time, mut end_time) = session.timeline_range(project_duration);
 
     let (ruler_rect, ruler_response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), RULER_ROW_HEIGHT),
         egui::Sense::click_and_drag(),
     );
-    let (waveform_rect, _waveform_response) = ui.allocate_exact_size(
+    let (waveform_rect, waveform_response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), WAVEFORM_ROW_HEIGHT),
-        egui::Sense::hover(),
+        egui::Sense::click_and_drag(),
     );
 
+    let grid_rect = egui::Rect::from_min_max(
+        egui::pos2(ruler_rect.left(), ruler_rect.top()),
+        egui::pos2(waveform_rect.right(), waveform_rect.bottom()),
+    );
+
+    let initial_transform = TimelineTransform::new(ruler_rect, start_time, end_time);
+    let pointer = ui.input(|input| input.pointer.hover_pos());
+    let pointer_over_timeline = pointer.is_some_and(|position| grid_rect.contains(position));
+
+    if pointer_over_timeline {
+        let (zoom_delta, scroll_delta, modifiers) = ui.input(|input| {
+            (
+                input.zoom_delta(),
+                input.smooth_scroll_delta(),
+                input.modifiers,
+            )
+        });
+
+        if modifiers.ctrl && (zoom_delta - 1.0).abs() >= 0.000_1 {
+            if let (Some(transform), Some(pointer)) = (initial_transform, pointer) {
+                let anchor = transform.x_to_project_time(pointer.x);
+                session.zoom_timeline(project_duration, anchor, zoom_delta);
+            }
+        } else if modifiers.shift {
+            let horizontal_delta = if scroll_delta.x.abs() > f32::EPSILON {
+                scroll_delta.x
+            } else {
+                scroll_delta.y
+            };
+            session.pan_timeline_points(
+                project_duration,
+                horizontal_delta,
+                ruler_rect.width(),
+            );
+        }
+    }
+
+    let middle_drag_delta = if ruler_response.dragged_by(egui::PointerButton::Middle) {
+        ruler_response.drag_delta().x
+    } else if waveform_response.dragged_by(egui::PointerButton::Middle) {
+        waveform_response.drag_delta().x
+    } else {
+        0.0
+    };
+    if middle_drag_delta.abs() > f32::EPSILON {
+        session.pan_timeline_points(
+            project_duration,
+            middle_drag_delta,
+            ruler_rect.width(),
+        );
+    }
+
+    (start_time, end_time) = session.timeline_range(project_duration);
     let Some(ruler_transform) = TimelineTransform::new(ruler_rect, start_time, end_time) else {
         return;
     };
@@ -113,7 +162,7 @@ pub fn draw_timeline(
         return;
     };
 
-    if (ruler_response.clicked() || ruler_response.dragged())
+    if (ruler_response.clicked() || ruler_response.dragged_by(egui::PointerButton::Primary))
         && let Some(pointer) = ruler_response.interact_pointer_pos()
     {
         session.seek_paused(ruler_transform.x_to_project_time(pointer.x));
@@ -121,10 +170,6 @@ pub fn draw_timeline(
 
     draw_waveform(ui, waveform_rect, waveform_transform, waveform);
 
-    let grid_rect = egui::Rect::from_min_max(
-        egui::pos2(ruler_rect.left(), ruler_rect.top()),
-        egui::pos2(waveform_rect.right(), waveform_rect.bottom()),
-    );
     draw_musical_grid(
         ui,
         grid_rect,
