@@ -26,5 +26,6 @@ ADRs capture decisions with meaningful alternatives or long-term consequences.
 - [0013](0013-fixed-point-bpm-and-nanosecond-project-time.md) — deterministic BPM/project-time representation.
 - [0014](0014-mvp-beat-division-set-and-snap-ties.md) — grid divisions and snap rounding.
 - [0015](0015-transform-coordinate-conventions.md) — composition and transform conventions.
+- [0016](0016-animation-segment-semantics.md) — musical interpolation and outgoing-key segment ownership.
 
 If an ADR is superseded, keep it and link to the replacement. Do not rewrite history.
