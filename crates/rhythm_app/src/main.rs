@@ -163,7 +163,9 @@ impl ApplicationHandler for RhythmApp {
                     let frame_time_ms = self
                         .last_frame_instant
                         .replace(now)
-                        .map_or(0.0, |previous| now.duration_since(previous).as_secs_f32() * 1000.0);
+                        .map_or(0.0, |previous| {
+                            now.duration_since(previous).as_secs_f32() * 1000.0
+                        });
 
                     if let Some(diagnostics) = self.diagnostics.as_mut() {
                         let size = window.inner_size();
