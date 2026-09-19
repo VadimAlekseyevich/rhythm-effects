@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod renderer;
+pub mod scene_eval;
 
 #[must_use]
 pub const fn status() -> &'static str {
