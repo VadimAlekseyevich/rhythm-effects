@@ -841,14 +841,22 @@ mod tests {
 
         let first = control.request_seek(120);
         assert_eq!(first.get(), 1);
-        assert_eq!(control.active_generation(), super::PlaybackGeneration::INITIAL);
+        assert_eq!(
+            control.active_generation(),
+            super::PlaybackGeneration::INITIAL
+        );
         assert!(!control.accepts_generation(first));
 
         assert_eq!(
             control.apply_pending_seek_at_callback_boundary(),
             Some(first)
         );
-        assert_eq!(control.frame_cursor.load(std::sync::atomic::Ordering::Acquire), 120);
+        assert_eq!(
+            control
+                .frame_cursor
+                .load(std::sync::atomic::Ordering::Acquire),
+            120
+        );
         assert!(control.accepts_generation(first));
 
         let second = control.request_seek(480);
@@ -860,7 +868,12 @@ mod tests {
             control.apply_pending_seek_at_callback_boundary(),
             Some(second)
         );
-        assert_eq!(control.frame_cursor.load(std::sync::atomic::Ordering::Acquire), 480);
+        assert_eq!(
+            control
+                .frame_cursor
+                .load(std::sync::atomic::Ordering::Acquire),
+            480
+        );
         assert!(!control.accepts_generation(first));
         assert!(control.accepts_generation(second));
     }
