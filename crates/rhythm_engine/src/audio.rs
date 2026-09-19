@@ -135,7 +135,6 @@ impl CpalPlaybackStream {
         self.control.stream_error_count.load(Ordering::Relaxed)
     }
 
-    #[must_use]
     pub fn stream(&self) -> &cpal::Stream {
         &self.stream
     }
@@ -524,7 +523,7 @@ fn resample_decoded_audio(
     }
 
     let channels = usize::from(audio.channel_layout.channels());
-    if audio.interleaved_f32.len() % channels != 0 {
+    if !audio.interleaved_f32.len().is_multiple_of(channels) {
         return Err(AudioDecodeError::InvalidPcmLength);
     }
     if !audio
