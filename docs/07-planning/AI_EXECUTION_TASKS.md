@@ -143,10 +143,10 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-114** — Implement stereo envelope combination across both channels.
 - [x] **AI-115** — Implement waveform mip pyramid by pairwise peak reduction.
 - [x] **AI-116** — Implement final partial waveform bucket behavior.
-- [ ] **AI-117** — Implement immutable waveform result keyed by AssetId generation.
-- [ ] **AI-118** — Implement background waveform worker request/result messages.
-- [ ] **AI-119** — Implement visible-range waveform slice query.
-- [ ] **AI-120** — Implement mip-level choice from visible time range and pixel width.
+- [x] **AI-117** — Implement immutable waveform result keyed by AssetId generation.
+- [x] **AI-118** — Implement background waveform worker request/result messages.
+- [x] **AI-119** — Implement visible-range waveform slice query.
+- [x] **AI-120** — Implement mip-level choice from visible time range and pixel width.
 - [ ] **AI-121** — Render the waveform as a batched egui mesh/shape rather than one widget per bucket.
 - [ ] **AI-122** — Implement one shared TimelineTransform for project-time to x and inverse mapping.
 - [ ] **AI-123** — Implement timeline ruler row.
