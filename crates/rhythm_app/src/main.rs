@@ -12,7 +12,7 @@ use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use rhythm_core::APP_NAME;
 use rhythm_engine::renderer::Renderer;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use winit::{
     application::ApplicationHandler,
@@ -21,6 +21,11 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
 };
+
+fn fail_startup(event_loop: &ActiveEventLoop, stage: &'static str, message: impl std::fmt::Display) {
+    error!(stage, error = %message, "fatal startup failure");
+    event_loop.exit();
+}
 
 #[derive(Default)]
 struct RhythmApp {
@@ -117,14 +122,12 @@ impl ApplicationHandler for RhythmApp {
                         self.window = Some(window);
                     }
                     Err(error) => {
-                        warn!(%error, "failed to initialize GPU");
-                        event_loop.exit();
+                        fail_startup(event_loop, "gpu_initialization", error);
                     }
                 }
             }
             Err(error) => {
-                warn!(%error, "failed to create application window");
-                event_loop.exit();
+                fail_startup(event_loop, "window_creation", error);
             }
         }
     }
