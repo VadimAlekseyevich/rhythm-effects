@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 echo.
 echo [Rhythm Effects] Updating repository...
-git pull --rebase origin main
+git pull --rebase --autostash origin main
 if errorlevel 1 (
     echo.
     echo [ERROR] Git pull failed. Check your internet connection or local Git state.
