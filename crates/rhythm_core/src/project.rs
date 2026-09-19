@@ -177,6 +177,14 @@ mod tests {
     use crate::{animation::Animated, domain::Vec2};
 
     #[test]
+    fn image_object_stores_only_asset_identity() {
+        let asset = crate::ids::AssetId::new(7).expect("nonzero asset id");
+        let image = super::ImageObject { asset };
+
+        assert_eq!(image.asset, asset);
+    }
+
+    #[test]
     fn rectangle_and_ellipse_store_only_accepted_mvp_fields() {
         let size = Animated::new_static(Vec2::new(100.0, 50.0).expect("finite size"));
         let fill = Animated::new_static(
