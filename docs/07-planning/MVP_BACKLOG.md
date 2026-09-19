@@ -1,424 +1,337 @@
 # MVP Backlog
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> This is an implementation-oriented index. Canonical behavior remains in subsystem specs.
+> This is the implementation index. Canonical behavior remains in subsystem specs.
 
-## Backlog principles
+## Rules
 
-- Work by vertical slice.
-- Every task references a spec.
-- Avoid giant "implement subsystem" tasks.
-- Prefer demonstrable capability at the end of each epic.
-- Performance/test work is included inside epics, not deferred completely to the end.
-- Anything outside MVP scope goes to Post-MVP rather than quietly entering active work.
+- work in milestone/vertical-slice order;
+- tests/performance instrumentation are part of the epic;
+- no speculative framework work;
+- a checkbox does not override a failed milestone gate;
+- post-MVP items require explicit promotion.
 
----
+## Epic 0 — Repository and development foundation
 
-# Epic 0 — Repository / Tooling
+- [ ] Cargo workspace with rhythm_core/rhythm_engine/rhythm_app.
+- [ ] Rust toolchain policy.
+- [ ] Cargo.lock.
+- [ ] Pin accepted dependencies/features.
+- [ ] rustfmt/clippy.
+- [ ] Windows CI build/test.
+- [ ] tracing/log bootstrap.
+- [ ] dev/release profiles.
+- [ ] diagnostics timing primitives.
+- [ ] build baseline record.
 
-## Goal
-Create a fast development foundation.
+Specs: ARCHITECTURE, TECH_STACK, PERFORMANCE, IMPLEMENTATION_READINESS.
 
-### Tasks
-- [ ] Create Cargo workspace.
-- [ ] Create rhythm_core.
-- [ ] Create rhythm_engine.
-- [ ] Create rhythm_app.
-- [ ] Pin initial dependency versions.
-- [ ] Configure rustfmt.
-- [ ] Configure clippy.
-- [ ] Add basic CI.
-- [ ] Add logging bootstrap.
-- [ ] Add debug/release profiles.
-- [ ] Add basic benchmark/timing utility.
+## Epic 1 — Window/UI/render integration
 
-### Exit
-M1 Window prerequisites ready.
+- [ ] winit lifecycle.
+- [ ] one wgpu Device/Queue.
+- [ ] egui-winit/egui-wgpu.
+- [ ] Rgba16Float composition target.
+- [ ] texture displayed in viewport.
+- [ ] resize/minimize/DPI.
+- [ ] five-region editor shell.
+- [ ] focus skeleton.
+- [ ] diagnostics overlay shell.
 
----
+Gate: M1/M2 foundation.
 
-# Epic 1 — Native App Shell
+## Epic 2 — Core domain/time
 
-### Tasks
-- [ ] winit event loop.
-- [ ] application window.
-- [ ] wgpu adapter/device/queue.
-- [ ] egui-winit integration.
-- [ ] egui-wgpu rendering.
-- [ ] base workspace panels.
-- [ ] DPI/resize handling.
-- [ ] frame timing overlay.
-- [ ] clean shutdown path.
+- [ ] all domain newtypes.
+- [ ] typed IDs/allocator.
+- [ ] BpmMicros.
+- [ ] ProjectTimeNs/Duration/GridOffset.
+- [ ] PPQ 960.
+- [ ] BeatDivision set.
+- [ ] TimeSignature/TempoMap.
+- [ ] rational FrameRate.
+- [ ] tick/time/frame conversions.
+- [ ] snap tie policy.
+- [ ] conversion tests.
 
-### Specs
-- ARCHITECTURE.md
-- TECH_STACK.md
-- EDITOR_UI.md
+## Epic 3 — Project schema/model
 
----
+- [ ] Project/File V1 Rust types.
+- [ ] Rectangle/Ellipse/Image/Text semantic data.
+- [ ] TransformAnimation.
+- [ ] AssetRecord.
+- [ ] AudioTrack.
+- [ ] five EffectKind variants.
+- [ ] FontReference.
+- [ ] validation/safety limits.
+- [ ] default project 1920×1080/60/10s/black.
 
-# Epic 2 — Core Time
+## Epic 4 — Animation
 
-### Tasks
-- [ ] MusicalTick newtype.
-- [ ] BPM validated type.
-- [ ] GridOffset type.
-- [ ] TimeSignature.
-- [ ] PPQ constant/contract.
-- [ ] GridResolution.
-- [ ] tick ↔ project time.
-- [ ] frame index ↔ project time.
-- [ ] snap nearest/floor/ceil.
-- [ ] negative/pre-roll tests.
-- [ ] decimal BPM tests.
+- [ ] Animated<T>/Keyframe<T>.
+- [ ] sorted uniqueness.
+- [ ] Hold/Linear/CubicBezier.
+- [ ] preset curves.
+- [ ] rotation/color semantics.
+- [ ] EvaluatedScene.
+- [ ] arbitrary-seek/determinism tests.
 
-### Exit
-No UI yet required; deterministic time unit tests pass.
+Gate: M3.
 
----
+## Epic 5 — Commands/history
 
-# Epic 3 — Project Model
-
-### Tasks
-- [ ] typed IDs.
-- [ ] Project root.
-- [ ] Composition settings.
-- [ ] Object enum/model.
-- [ ] Transform.
-- [ ] Asset records.
-- [ ] effect placeholder/model.
-- [ ] validation.
-- [ ] ID indexes/helpers.
-
----
-
-# Epic 4 — Animation Core
-
-### Tasks
-- [ ] Animated<T>.
-- [ ] Keyframe<T>.
-- [ ] sorted insert/delete.
-- [ ] Hold.
-- [ ] Linear.
-- [ ] easing presets.
-- [ ] cubic Bezier representation.
-- [ ] evaluate at arbitrary continuous time.
-- [ ] keyframe collision policy implementation.
-- [ ] unit tests.
-
-### Exit
-M3 First Motion core available.
-
----
-
-# Epic 5 — Minimal Renderer
-
-### Tasks
-- [ ] composition offscreen target.
-- [ ] viewport texture presentation.
-- [ ] rectangle.
-- [ ] alpha blending.
-- [ ] transform matrix.
-- [ ] background.
-- [ ] resize/recreate targets.
-- [ ] renderer profiling counters.
-
-### Exit
-M2 First Pixel, then integrate M3 First Motion.
-
----
-
-# Epic 6 — Commands / History
-
-### Tasks
 - [ ] ProjectEditor mutation boundary.
-- [ ] HistoryEntry model.
-- [ ] undo/redo cursor.
-- [ ] dirty revision model.
+- [ ] EditCommand intents.
+- [ ] specialized HistoryEntry.
 - [ ] transaction begin/update/commit/cancel.
-- [ ] object commands.
-- [ ] keyframe commands.
-- [ ] property commands.
-- [ ] tests.
+- [ ] dirty/saved revisions.
+- [ ] 500-entry capacity.
+- [ ] key-repeat coalescing.
+- [ ] compound import/create.
+- [ ] undo/redo tests.
 
----
+## Epic 6 — Base renderer
 
-# Epic 7 — Audio Decode / Playback
+- [ ] transform matrices matching spec.
+- [ ] rectangle analytic edge.
+- [ ] ellipse.
+- [ ] image texture/sRGB path.
+- [ ] painter order.
+- [ ] preview quality Auto/Full/Half/Quarter.
+- [ ] texture pool skeleton.
+- [ ] renderer counters/reference tests.
 
-### Tasks
-- [ ] Symphonia decode spike.
-- [ ] target format support.
-- [ ] PCM representation.
-- [ ] CPAL device/output.
-- [ ] buffering.
-- [ ] play/pause.
-- [ ] seek.
-- [ ] playback-position clock.
-- [ ] sample-rate mismatch/resampling spike.
-- [ ] underrun diagnostics.
-- [ ] audio fixture tests.
+## Epic 7 — Audio preparation/playback
 
-### Exit
-M4 First Sound.
+- [ ] Symphonia required formats.
+- [ ] mono/stereo source PCM.
+- [ ] waveform handoff.
+- [ ] Rubato output-rate preparation.
+- [ ] source PCM release.
+- [ ] CPAL default device.
+- [ ] callback format/channel adapter.
+- [ ] play/pause/seek/end/gain.
+- [ ] generation clock anchors.
+- [ ] CPAL playback timestamp verification.
+- [ ] documented fallback.
+- [ ] audio diagnostics/stress tests.
 
----
+Gate: M4.
 
-# Epic 8 — Waveform
+## Epic 8 — Waveform
 
-### Tasks
-- [ ] peak extraction.
-- [ ] multiresolution levels.
-- [ ] cache/query API.
-- [ ] background preprocess.
-- [ ] timeline waveform draw.
-- [ ] visible-range rendering.
-- [ ] generated waveform tests.
+- [ ] 64-frame base peaks.
+- [ ] mip pyramid.
+- [ ] background worker/generation.
+- [ ] visible-range query.
+- [ ] batched timeline drawing.
+- [ ] optional safe disk cache.
+- [ ] tests/benchmarks.
 
----
+## Epic 9 — Timeline foundation
 
-# Epic 9 — Timeline Foundation
+- [ ] shared time/x transform.
+- [ ] ruler/waveform fixed rows.
+- [ ] bar/beat/subdivision lines.
+- [ ] zoom around pointer.
+- [ ] horizontal pan.
+- [ ] continuous ruler playhead.
+- [ ] object/property rows.
+- [ ] vertical/horizontal virtualization.
+- [ ] focus/navigation shortcuts.
 
-### Tasks
-- [ ] ruler coordinates.
-- [ ] time ↔ x.
-- [ ] zoom/pan.
-- [ ] playhead.
-- [ ] bar/beat/subdivision grid.
-- [ ] waveform integration.
-- [ ] object rows.
-- [ ] property rows.
-- [ ] visible-range virtualization.
+Gate: M5.
 
-### Exit
-M5 First Beat.
+## Epic 10 — Timeline keyframe editing
 
----
-
-# Epic 10 — Keyframe Timeline Editing
-
-### Tasks
-- [ ] draw keyframes.
-- [ ] hit targets.
-- [ ] single select.
-- [ ] multi-select.
-- [ ] box select.
-- [ ] grid-constrained drag.
-- [ ] multi-drag.
-- [ ] delete.
-- [ ] copy/paste.
+- [ ] key glyph/hit box.
+- [ ] property create semantics.
+- [ ] single/multi/box selection.
+- [ ] grid drag.
+- [ ] integer multi-drag.
+- [ ] collision replacement.
+- [ ] copy/paste packet.
 - [ ] duplicate.
-- [ ] keyboard rhythm stepping.
-- [ ] collision behavior.
+- [ ] Alt/Ctrl+Alt movement.
+- [ ] easing indicators/actions.
 - [ ] undo integration.
 
-### Exit
-M6 First Rhythm Animation.
+Gate: M6.
 
----
+## Epic 11 — Viewport editing
 
-# Epic 11 — Viewport Editing
+- [ ] camera.
+- [ ] CPU inverse-transform hit testing.
+- [ ] object selection/Ctrl toggle.
+- [ ] lock/visibility behavior.
+- [ ] move + Shift axis.
+- [ ] scale + Shift uniform.
+- [ ] rotation + Shift 15°.
+- [ ] anchor marker.
+- [ ] multi-object move.
+- [ ] animated direct-edit semantics.
+- [ ] center guides.
 
-### Tasks
-- [ ] object selection.
-- [ ] pan/zoom.
-- [ ] transform gizmo.
-- [ ] position drag.
-- [ ] scale.
-- [ ] rotation.
-- [ ] anchor visualization.
-- [ ] transient commands.
-- [ ] selection synchronization.
+## Epic 12 — Inspector/focus/hotkeys
 
----
+- [ ] standard property row.
+- [ ] static/animated states.
+- [ ] P/S/R/O + K.
+- [ ] numeric edit transactions.
+- [ ] last-key removal policy.
+- [ ] multi-selection mixed states.
+- [ ] object-specific controls.
+- [ ] command search Ctrl+K.
+- [ ] physical-key dispatch with text-input protection.
 
-# Epic 12 — Inspector
+## Epic 13 — Assets/images
 
-### Tasks
-- [ ] common property rows.
-- [ ] numeric editing transaction.
-- [ ] keyframe affordance.
-- [ ] current-keyframe indication.
-- [ ] animated-state indication.
-- [ ] Rectangle/Ellipse properties.
-- [ ] Image properties.
-- [ ] Text properties.
-- [ ] progressive disclosure.
+- [ ] rfd dialogs.
+- [ ] PNG/JPEG/WebP decode.
+- [ ] external paths.
+- [ ] relative-on-project-dir policy.
+- [ ] duplicate path reuse.
+- [ ] runtime generation safety.
+- [ ] GPU upload.
+- [ ] thumbnails.
+- [ ] missing/relink.
+- [ ] referenced-delete block.
+- [ ] OS drag/drop.
 
----
+## Epic 14 — Text
 
-# Epic 13 — Additional Visual Objects
+- [ ] cosmic-text/glyphon integration.
+- [ ] system font list/cache.
+- [ ] Inter bundled fallback.
+- [ ] Cyrillic/Latin/multiline.
+- [ ] weight/style/alignment.
+- [ ] deterministic bounds.
+- [ ] animated color.
+- [ ] missing-font UI.
+- [ ] preview/export parity fixture.
 
-### Tasks
-- [ ] ellipse renderer.
-- [ ] image decode/upload.
-- [ ] image object.
-- [ ] text stack spike.
-- [ ] Cyrillic.
-- [ ] multiline.
-- [ ] text GPU rendering.
-- [ ] preview/export-compatible layout.
+## Epic 15 — Curves/easing
 
----
+- [ ] preset actions.
+- [ ] one-segment curve surface.
+- [ ] bounded x/y handles.
+- [ ] live preview.
+- [ ] transaction/cancel.
+- [ ] multi-selection preset application.
 
-# Epic 14 — Product Hotkeys / Focus
+## Epic 16 — Effects
 
-### Tasks
-- [ ] shortcut dispatcher.
-- [ ] focus scope model.
-- [ ] text-entry protection.
-- [ ] transport shortcuts.
-- [ ] beat/subdivision stepping.
-- [ ] delete/duplicate/copy/paste.
-- [ ] shortcut display in tooltips/menus.
-- [ ] prototype conflict tests.
+- [ ] effect stack Inspector.
+- [ ] isolated targets/pool.
+- [ ] Blur.
+- [ ] Glow.
+- [ ] Tint.
+- [ ] deterministic Noise.
+- [ ] RGB Split.
+- [ ] spatial preview compensation.
+- [ ] animated parameters.
+- [ ] reference/performance tests.
 
----
+Gate: M9.
 
-# Epic 15 — Easing / Curves
+## Epic 17 — Serialization/open/save
 
-### Tasks
-- [ ] preset easing UI.
-- [ ] apply easing to selection.
-- [ ] cubic Bezier evaluator.
-- [ ] minimal curve editor.
-- [ ] curve handle drag transaction.
-- [ ] curve tests.
-
----
-
-# Epic 16 — Effects
-
-### Tasks
-- [ ] effect data model final.
-- [ ] effect stack inspector.
-- [ ] intermediate targets/pooling.
-- [ ] first effect.
-- [ ] selected remaining MVP effects.
-- [ ] Animated<T> parameters.
-- [ ] performance measurements.
-- [ ] preview/export parity.
-
----
-
-# Epic 17 — Serialization
-
-### Tasks
-- [ ] choose JSON/RON ADR.
-- [ ] schema V1.
-- [ ] serializer.
-- [ ] parser.
-- [ ] semantic validation.
-- [ ] stable-ID round trip.
-- [ ] safe temp/replace save.
-- [ ] Save/Save As/Open.
+- [ ] .rhfx V1 JSON wrapper.
+- [ ] serializer/parser.
+- [ ] validation/limits.
+- [ ] transactional Open.
+- [ ] safe temp/replace Save.
+- [ ] Save As asset-relative rewrite.
 - [ ] migration framework.
-- [ ] fixtures.
+- [ ] V1 fixture.
+- [ ] corruption/failure tests.
 
-### Exit
-M8 First Project.
+## Epic 18 — Recovery
 
----
+- [ ] LocalAppData recovery root.
+- [ ] session metadata.
+- [ ] dirty 30-second trigger.
+- [ ] 1-second transaction quiet period.
+- [ ] one write/coalescing.
+- [ ] current/previous generations.
+- [ ] startup restore/discard.
+- [ ] 14-day stale cleanup.
+- [ ] forced-crash tests.
 
-# Epic 18 — Recovery
+Gate: M8.
 
-### Tasks
-- [ ] recovery directory.
-- [ ] session ID/metadata.
-- [ ] autosave trigger.
-- [ ] background recovery write.
-- [ ] clean-shutdown lifecycle.
-- [ ] startup scan.
-- [ ] Restore/Discard UI.
-- [ ] crash/recovery tests.
+## Epic 19 — Export
 
----
+- [ ] snapshot.
+- [ ] exact frame timestamps.
+- [ ] export renderer state.
+- [ ] full-resolution scaling.
+- [ ] <=3 bounded readbacks.
+- [ ] raw-video FFmpeg pipe.
+- [ ] H.264/yuv420p.
+- [ ] AAC/source audio mux.
+- [ ] quality presets backend.
+- [ ] progress/cancel.
+- [ ] temp output publish.
+- [ ] sync/reference tests.
 
-# Epic 19 — Export
+Gate: M10.
 
-### Tasks
-- [ ] exact frame-index timestamps.
-- [ ] export offscreen target.
-- [ ] GPU readback.
-- [ ] FFmpeg process spike.
-- [ ] raw frame feed.
-- [ ] audio mux.
-- [ ] progress.
-- [ ] cancel.
-- [ ] temporary output publication.
-- [ ] sync tests.
+## Epic 20 — Performance/stability
 
-### Exit
-M10 First Export.
+- [ ] all benchmark fixtures.
+- [ ] Medium frame p95/p99.
+- [ ] timeline stress.
+- [ ] 30-minute audio.
+- [ ] memory buckets.
+- [ ] startup/open/save.
+- [ ] build regression baselines.
+- [ ] asset/renderer/audio failure stress.
+- [ ] project/recovery corruption stress.
 
----
+## Epic 21 — UX/design acceptance
 
-# Epic 20 — Performance / Stability
+- [ ] Inter UI/design tokens.
+- [ ] dark theme.
+- [ ] 1280×720.
+- [ ] 100/125/150 DPI.
+- [ ] tooltip/shortcut discoverability.
+- [ ] 3 first-use observations.
+- [ ] experienced shortcut workflow.
+- [ ] 60-minute edit session.
+- [ ] resolve repeated core friction.
 
-### Tasks
-- [ ] create benchmark fixtures.
-- [ ] profile timeline.
-- [ ] profile renderer.
-- [ ] profile animation.
-- [ ] measure audio underruns.
-- [ ] measure memory.
-- [ ] measure startup.
-- [ ] measure build times.
-- [ ] fix major regressions.
-- [ ] stress undo/save/open.
+## Epic 22 — Package/release
 
----
-
-# Epic 21 — UX / Design Pass
-
-### Tasks
-- [ ] establish final design tokens.
-- [ ] typography.
-- [ ] target sizes.
-- [ ] focus visuals.
-- [ ] selected states.
-- [ ] empty states.
-- [ ] tooltip consistency.
-- [ ] shortcut discoverability.
-- [ ] user observation sessions.
-- [ ] action-count review.
-- [ ] resolve common friction.
-
----
-
-# Epic 22 — Packaging / MVP QA
-
-### Tasks
 - [ ] release profile.
-- [ ] FFmpeg packaging.
-- [ ] license notices.
-- [ ] portable package.
-- [ ] installer decision.
-- [ ] clean-machine test.
-- [ ] Windows 10/11 test.
-- [ ] DPI test.
-- [ ] GPU matrix.
-- [ ] audio device matrix.
-- [ ] full acceptance scenario.
+- [ ] pinned bundled FFmpeg/capability validation.
+- [ ] Inter/runtime assets.
+- [ ] licenses/provenance.
+- [ ] logs/cache/recovery paths.
+- [ ] portable ZIP.
+- [ ] non-ASCII path tests.
+- [ ] Windows 10/11 clean-machine smoke.
+- [ ] dependency/security review.
+- [ ] release checksum.
 - [ ] known limitations.
+- [ ] GitHub Release.
 
----
+Gate: M11/M12.
 
-# Post-MVP bucket
+## Post-MVP
 
-Do not pull into MVP without explicit scope decision:
+Do not pull in without scope update:
 
-- 3D;
-- particles;
-- advanced masks;
-- motion tracking;
-- scripting/expressions;
-- plugins;
-- node graph;
-- cloud/collaboration;
+- macOS/Linux;
+- installer/updater/signing work beyond release need;
+- SVG/video;
+- parenting;
+- 3D/particles/masks/motion tracking;
+- scripts/expressions/plugins/nodes;
 - multi-track audio;
-- automatic BPM detection unless promoted;
+- BPM detection;
 - packed project;
-- macOS/Linux release;
-- sophisticated typography;
-- auto-update.
+- imported fonts;
+- temporal effects;
+- cloud/collaboration/AI generation.

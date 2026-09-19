@@ -1,223 +1,196 @@
 # Milestones
 
-> **Status: Draft**
->
-> Milestones are vertical-slice capability gates. They exist to prevent months of isolated subsystem work without a usable product.
+> **Status: Accepted for MVP**
 
-## M0 — Product Contract
+Milestones are end-to-end capability gates, not module-completion labels.
 
-### Goal
-Enough documentation exists to start implementation deliberately.
+## M0 — Architecture Contract — COMPLETE
 
-### Exit criteria
-- philosophy accepted;
-- MVP scope drafted;
-- architecture/time model coherent;
-- core risks identified;
-- initial tech stack chosen;
-- first implementation backlog available.
+Exit criteria:
 
----
+- philosophy/scope accepted;
+- product/interaction contracts accepted;
+- time/domain/project semantics accepted;
+- engine/editor/persistence/export contracts accepted;
+- quality/release gates accepted;
+- ADR/decision indexes established;
+- implementation backlog established;
+- IMPLEMENTATION_READINESS says no architecture blocker.
 
-## M1 — Window
+M0 completion does not mean the assumptions are proven on hardware; those are explicit M1–M4 verification tasks.
 
-### Goal
-Native application starts quickly and presents editor shell.
+## M1 — Window / Foundation
 
-### Exit criteria
+Goal: native app shell and measurable development loop.
+
+Exit:
+
+- Cargo workspace: rhythm_core/rhythm_engine/rhythm_app;
+- pinned toolchain/dependencies/Cargo.lock;
 - winit window;
-- wgpu device;
+- wgpu Device/Queue;
 - egui integration;
-- base workspace regions;
-- logging;
-- debug frame timing;
-- CI builds/tests scaffold.
-
-No project functionality required yet.
-
----
+- Rgba16Float offscreen spike;
+- base editor regions;
+- tracing/logs;
+- debug timing overlay shell;
+- CI fmt/clippy/test/build;
+- initial build-performance baseline recorded.
 
 ## M2 — First Pixel
 
-### Goal
-Composition renderer draws a visual object inside viewport.
+Goal: creative renderer visible through editor.
 
-### Exit criteria
+Exit:
+
 - offscreen composition target;
-- rectangle primitive;
-- viewport displays result;
-- resize/DPI works;
-- basic composition coordinates defined.
-
----
+- rectangle;
+- accepted coordinate/transform convention;
+- viewport pan/zoom;
+- sRGB/premultiplied reference checks;
+- resize/DPI path;
+- Full/Half preview spike.
 
 ## M3 — First Motion
 
-### Goal
-A project property is animated through core animation evaluator.
+Goal: deterministic Project-driven animation.
 
-### Exit criteria
-- Project model exists;
-- MusicalTick/time model implemented;
-- Animated<T>/keyframes;
-- Hold/Linear minimum;
-- renderer consumes evaluated transform;
-- deterministic unit tests.
+Exit:
 
-Audio not required yet.
-
----
+- domain/time types;
+- Project core model/IDs;
+- Animated<T>;
+- Hold/Linear/Bezier evaluator;
+- EvaluatedScene;
+- rectangle Position/Scale/Rotation/Opacity;
+- ProjectEditor/history basic transactions;
+- deterministic tests.
 
 ## M4 — First Sound
 
-### Goal
-User imports and plays a music file.
+Goal: authoritative music playback clock.
 
-### Exit criteria
-- decode one target format minimum;
-- audio output;
-- play/pause;
-- seek;
-- playback position exposed independently of editor FPS;
-- no normal callback underruns in simple test.
+Exit:
 
----
+- required decode path baseline;
+- prepared PCM;
+- Rubato mismatch conversion;
+- CPAL output;
+- play/pause/seek;
+- timestamp-clock spike passes or documented fallback implemented;
+- generation semantics;
+- no callback allocations/file I/O/decode;
+- initial sync tests.
 
 ## M5 — First Beat
 
-### Goal
-Waveform and BPM grid align to music.
+Goal: waveform + BPM grid usable.
 
-### Exit criteria
-- waveform preprocessing/cache;
+Exit:
+
+- 64-frame waveform peaks/mips;
 - timeline ruler;
-- BPM;
-- offset;
-- beat/subdivision grid;
+- BPM/offset;
+- accepted divisions;
 - playhead;
-- rhythm stepping;
-- grid visuals remain smooth while zooming.
-
----
+- rhythm keyboard navigation;
+- smooth visible-range waveform/grid rendering.
 
 ## M6 — First Rhythm Animation
 
-### Goal
-Prove the product thesis.
+Goal: prove the product thesis end to end.
 
-### Exit criteria
-- create/select rectangle;
-- add keyframe on valid grid point;
-- move to another grid point;
-- second keyframe;
-- playback audio;
-- motion visibly synchronized;
-- keyframe drag constrained to musical grid;
-- undo basic keyframe edit.
+Exit:
 
-This is the first true product proof-of-concept.
-
----
+- property keyframe affordance;
+- two-key animation created on BPM grid;
+- audio-driven playback;
+- grid-constrained key drag;
+- multi/key selection basics;
+- undo/redo;
+- key collision policy;
+- no UI-delta clock.
 
 ## M7 — Editor Core
 
-### Goal
-Basic motion-design workflow is coherent.
+Exit:
 
-### Exit criteria
-- rectangle/ellipse/image/text;
+- Rectangle/Ellipse/Image/Text;
 - object list;
 - inspector;
-- viewport transforms;
-- position/scale/rotation/opacity animation;
-- multi-keyframe selection;
-- copy/paste;
-- easing presets;
-- consistent focus/shortcuts;
-- meaningful undo/redo.
+- viewport move/scale/rotate;
+- property-scoped animation;
+- multi-keyframe select/drag/copy/paste/duplicate;
+- shortcuts/focus;
+- easing presets + custom timing curve;
+- external asset relink.
 
----
+## M8 — First Durable Project
 
-## M8 — First Project
+Exit:
 
-### Goal
-Creative work survives application restart.
-
-### Exit criteria
-- schema v1;
-- Save/Save As/Open;
-- safe save;
-- stable IDs;
-- asset references;
-- semantic round-trip tests;
-- minimal autosave/recovery.
-
----
+- .rhfx V1 fixture committed;
+- versioned JSON;
+- safe Save/Save As/Open;
+- migration framework;
+- relative/absolute assets;
+- missing-asset handling;
+- 30-second two-generation recovery;
+- forced-crash restore test.
 
 ## M9 — Visual Depth
 
-### Goal
-MVP has enough visual capability to produce convincing examples.
+Exit:
 
-### Exit criteria
-- selected MVP effects;
-- effect parameter animation;
-- reliable text;
-- basic curve editor/custom easing if still in scope;
-- preview performance remains acceptable.
-
----
+- all five effects;
+- effect animation/order;
+- cosmic-text/glyphon;
+- Cyrillic;
+- system fonts + Inter fallback;
+- preview scale semantic parity;
+- representative performance still acceptable.
 
 ## M10 — First Export
 
-### Goal
-Create a shareable final video.
+Exit:
 
-### Exit criteria
-- deterministic frame timestamps;
-- offline offscreen rendering;
-- H.264 MP4;
-- audio mux;
-- progress/cancel;
-- tested A/V sync;
-- external playback success.
-
----
+- exact frame-index time;
+- export snapshot;
+- full-resolution offline render;
+- bounded readback;
+- FFmpeg H.264 MP4/yuv420p;
+- AAC source audio;
+- progress/cancel/safe publication;
+- A/V sync fixture passes.
 
 ## M11 — MVP Candidate
 
-### Goal
-Entire workflow works without release blockers.
+Feature freeze except blockers.
 
-### Exit criteria
-- primary acceptance scenario passes;
-- performance baseline passes;
-- critical crash/data-loss bugs resolved;
-- clean Windows package;
-- QA matrix executed;
-- UX review complete.
+Exit:
 
-Feature freeze begins except release blockers.
+- PRODUCT_SPEC acceptance scenario passes;
+- Medium performance gate passes;
+- 30-minute audio stress passes;
+- schema/recovery/export tests pass;
+- 3-person formative usability observation completed;
+- 60-minute editing session reviewed;
+- clean Windows portable package;
+- known limitations recorded;
+- no critical data-loss/corruption/drift/export blockers.
 
----
+## M12 — MVP Release
 
-## M12 — MVP
+Exit:
 
-### Goal
-Release build can be handed to external users for real creative work.
+- clean Windows 10/11 smoke;
+- package contains FFmpeg/licenses/Inter/runtime assets;
+- non-ASCII path smoke;
+- recovery force-test;
+- export external playback/sync;
+- GitHub Release ZIP + checksum;
+- all deferred work explicitly outside MVP backlog.
 
-### Exit criteria
-- release smoke test passes on clean machine;
-- recovery tested;
-- export tested;
-- known limitations documented;
-- build/version packaged;
-- milestone backlog closed or explicitly deferred.
+## Rule
 
----
-
-## Milestone rule
-
-Do not mark a milestone complete because individual modules exist.
-
-The end-to-end user-visible capability must work.
+A milestone is complete only when its user-visible/invariant exit criteria work together.

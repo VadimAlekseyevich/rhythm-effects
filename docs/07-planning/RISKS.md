@@ -1,6 +1,6 @@
 # Risk Register
 
-> **Status: Draft**
+> **Status: Accepted — living register**
 >
 > This register tracks risks that can materially affect product quality, architecture, or MVP schedule.
 
@@ -288,7 +288,7 @@ Manual BPM/offset alignment is too slow.
 ### Mitigation
 - excellent offset nudge UX;
 - waveform;
-- tap tempo candidate;
+- strong manual nudge UX;
 - future BPM detection after MVP;
 - clear beat hierarchy.
 
@@ -321,7 +321,7 @@ Large deleted objects/keyframe sets consume memory.
 ### Mitigation
 - semantic minimal history payloads;
 - measure;
-- history cap later if needed;
+- 500-entry history cap plus memory measurement;
 - no whole-project snapshot per edit.
 
 ---
@@ -368,3 +368,109 @@ Review risks at:
 - significant performance regression.
 
 Add/remove risks based on evidence.
+
+
+---
+
+## R21 — Prepared audio memory on long/high-rate tracks
+
+**Probability:** Medium  
+**Impact:** Medium-High
+
+### Risk
+
+Fully prepared output-rate PCM consumes significant memory for unusually long/high-rate tracks.
+
+### Mitigation
+
+- release temporary source PCM after waveform/playback preparation;
+- track playback-buffer memory;
+- test 10+ minute fixtures;
+- MVP optimized for music-track workloads;
+- move to streaming only if measurement proves necessary.
+
+### Trigger
+
+Representative user projects create unacceptable steady-state memory or allocation failure.
+
+---
+
+## R22 — Rgba16Float bandwidth / adapter compatibility
+
+**Probability:** Low-Medium  
+**Impact:** High
+
+### Risk
+
+Chosen working target is too expensive or unsupported in a meaningful target-adapter configuration.
+
+### Mitigation
+
+- M1/M2 compatibility spike;
+- Auto Half/Quarter preview;
+- pool intermediates;
+- explicit fallback only with preserved linear/premultiplied semantics.
+
+### Trigger
+
+Representative supported GPU cannot sustain basic 1080p scene or target format path.
+
+---
+
+## R23 — External system-font portability
+
+**Probability:** High  
+**Impact:** Medium
+
+### Risk
+
+A .rhfx moved to another machine lacks the requested system font and appearance changes.
+
+### Mitigation
+
+- visible missing-font state;
+- deterministic Inter fallback;
+- document limitation;
+- imported/packed fonts post-MVP.
+
+---
+
+## R24 — Unsigned portable Windows package warnings
+
+**Probability:** High  
+**Impact:** Medium
+
+### Risk
+
+SmartScreen/antivirus makes early distribution less smooth.
+
+### Mitigation
+
+- clear release provenance/checksum;
+- stable package structure;
+- evaluate code signing before broad public distribution;
+- avoid unnecessary native binaries.
+
+---
+
+## R25 — Documentation implementation drift
+
+**Probability:** Medium  
+**Impact:** High
+
+### Risk
+
+Accepted contracts become stale once code exists.
+
+### Mitigation
+
+- implementation changes update docs in same change;
+- ADR for semantic changes;
+- milestone reviews include doc-state review;
+- move Accepted -> Implemented only after tests/code match.
+
+---
+
+## Register state
+
+This document is intentionally a living Accepted register. Risk probability/mitigation may change from implementation evidence without implying that architecture is undocumented.
