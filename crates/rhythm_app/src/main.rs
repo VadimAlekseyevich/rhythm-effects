@@ -136,8 +136,8 @@ impl ApplicationHandler for RhythmApp {
                     self.egui_renderer.as_mut(),
                 ) {
                     let raw_input = egui_state.take_egui_input(window);
-                    let full_output = egui_context.run_ui(raw_input, |_root_ui| {
-                        editor_ui::draw_editor_shell(egui_context);
+                    let full_output = egui_context.run_ui(raw_input, |root_ui| {
+                        editor_ui::draw_editor_shell(root_ui);
                     });
                     let paint_jobs =
                         egui_context.tessellate(full_output.shapes, full_output.pixels_per_point);
