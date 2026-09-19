@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use cpal::traits::{DeviceTrait, HostTrait};
 use rhythm_core::time::{DurationNs, SampleRate};
 use rubato::{Fft, FixedSync, Resampler, audioadapter_buffers::owned::InterleavedOwned};
 use symphonia::core::{
@@ -83,6 +84,95 @@ impl PlaybackBuffer {
     pub fn memory_bytes(&self) -> usize {
         self.interleaved_stereo_f32.len() * std::mem::size_of::<f32>()
     }
+}
+
+#[derive(Debug)]
+pub enum AudioOutputInitError {
+    NoDefaultOutputDevice,
+    Device(String),
+}
+
+#[derive(Debug)]
+pub struct CpalOutputEndpoint {
+    device: cpal::Device,
+    config: cpal::SupportedStreamConfig,
+    device_label: String,
+}
+
+impl CpalOutputEndpoint {
+    #[must_use]
+    pub fn device_label(&self) -> &str {
+        &self.device_label
+    }
+
+    #[must_use]
+    pub const fn sample_rate(&self) -> u32 {
+        self.config.sample_rate()
+    }
+
+    #[must_use]
+    pub const fn channels(&self) -> u16 {
+        self.config.channels()
+    }
+
+    #[must_use]
+    pub const fn sample_format(&self) -> cpal::SampleFormat {
+        self.config.sample_format()
+    }
+
+    #[must_use]
+    pub fn stream_config(&self) -> cpal::StreamConfig {
+        self.config.config()
+    }
+}
+
+pub fn initialize_default_output() -> Result<CpalOutputEndpoint, AudioOutputInitError> {
+    let host = cpal::default_host();
+    let device = host
+        .default_output_device()
+        .ok_or(AudioOutputInitError::NoDefaultOutputDevice)?;
+    let default_config = device
+        .default_output_config()
+        .map_err(|error| AudioOutputInitError::Device(error.to_string()))?;
+
+    let supported = device.supported_output_configs().ok();
+    let config = select_preferred_output_config(default_config, supported);
+    let device_label = device.to_string();
+
+    Ok(CpalOutputEndpoint {
+        device,
+        config,
+        device_label,
+    })
+}
+
+fn select_preferred_output_config(
+    default_config: cpal::SupportedStreamConfig,
+    supported: Option<impl Iterator<Item = cpal::SupportedStreamConfigRange>>,
+) -> cpal::SupportedStreamConfig {
+    if default_config.channels() == 2 {
+        return default_config;
+    }
+
+    let Some(supported) = supported else {
+        return default_config;
+    };
+
+    let preferred_range = supported
+        .filter(|range| range.channels() == 2)
+        .max_by(cpal::SupportedStreamConfigRange::cmp_default_heuristics);
+
+    let Some(range) = preferred_range else {
+        return default_config;
+    };
+
+    if range.contains_rate(default_config.sample_rate()) {
+        return range.with_sample_rate(default_config.sample_rate());
+    }
+
+    range
+        .try_with_standard_sample_rate()
+        .unwrap_or_else(|| range.with_max_sample_rate())
 }
 
 #[derive(Debug)]
@@ -387,6 +477,55 @@ mod tests {
 
     fn temp_fixture_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn preferred_output_config_selects_stereo_when_default_is_mono() {
+        let default = cpal::SupportedStreamConfig::new(
+            1,
+            44_100,
+            cpal::SupportedBufferSize::Range {
+                min: 128,
+                max: 1_024,
+            },
+            cpal::SampleFormat::F32,
+        );
+        let supported = vec![cpal::SupportedStreamConfigRange::new(
+            2,
+            44_100,
+            48_000,
+            cpal::SupportedBufferSize::Range {
+                min: 128,
+                max: 1_024,
+            },
+            cpal::SampleFormat::F32,
+        )];
+
+        let selected = super::select_preferred_output_config(default, Some(supported.into_iter()));
+
+        assert_eq!(selected.channels(), 2);
+        assert_eq!(selected.sample_rate(), 44_100);
+        assert_eq!(selected.sample_format(), cpal::SampleFormat::F32);
+    }
+
+    #[test]
+    fn preferred_output_config_keeps_stereo_default() {
+        let default = cpal::SupportedStreamConfig::new(
+            2,
+            48_000,
+            cpal::SupportedBufferSize::Range {
+                min: 128,
+                max: 1_024,
+            },
+            cpal::SampleFormat::I16,
+        );
+
+        let selected = super::select_preferred_output_config(
+            default,
+            Some(std::iter::empty::<cpal::SupportedStreamConfigRange>()),
+        );
+
+        assert_eq!(selected, default);
     }
 
     #[test]
