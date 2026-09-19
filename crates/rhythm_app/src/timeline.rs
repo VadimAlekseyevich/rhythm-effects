@@ -53,21 +53,19 @@ impl TimelineTransform {
     #[must_use]
     pub fn project_time_to_x(self, project_time: ProjectTimeNs) -> f32 {
         let span_ns = (i128::from(self.end_time.get()) - i128::from(self.start_time.get())) as f64;
-        let offset_ns =
-            (i128::from(project_time.get()) - i128::from(self.start_time.get())) as f64;
+        let offset_ns = (i128::from(project_time.get()) - i128::from(self.start_time.get())) as f64;
         let normalized = offset_ns / span_ns;
         self.rect.left() + (normalized * f64::from(self.rect.width())) as f32
     }
 
     #[must_use]
     pub fn x_to_project_time(self, x: f32) -> ProjectTimeNs {
-        let normalized =
-            ((x - self.rect.left()) / self.rect.width()).clamp(0.0, 1.0) as f64;
+        let normalized = ((x - self.rect.left()) / self.rect.width()).clamp(0.0, 1.0) as f64;
         let start_ns = i128::from(self.start_time.get());
         let span_ns = i128::from(self.end_time.get()) - start_ns;
         let offset_ns = (span_ns as f64 * normalized).round() as i128;
-        let project_ns = (start_ns + offset_ns)
-            .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
+        let project_ns =
+            (start_ns + offset_ns).clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
         ProjectTimeNs::new(project_ns)
     }
 }
@@ -338,11 +336,7 @@ fn ticks_per_bar(meter: rhythm_core::time::TimeSignature) -> i64 {
         .unwrap_or(0)
 }
 
-fn grid_spacing_px(
-    tempo_map: &TempoMap,
-    tick_delta: i64,
-    transform: TimelineTransform,
-) -> f32 {
+fn grid_spacing_px(tempo_map: &TempoMap, tick_delta: i64, transform: TimelineTransform) -> f32 {
     let Ok(a) = tempo_map.project_time_for_tick(MusicalTick::new(0)) else {
         return 0.0;
     };
@@ -376,8 +370,7 @@ fn draw_waveform(
 
     let level_index =
         waveform.choose_level_for_view(visible_start_frame, visible_end_frame, rect.width());
-    let Some(slice) =
-        waveform.visible_slice(level_index, visible_start_frame, visible_end_frame)
+    let Some(slice) = waveform.visible_slice(level_index, visible_start_frame, visible_end_frame)
     else {
         return;
     };
@@ -420,11 +413,14 @@ fn build_waveform_mesh(
         else {
             continue;
         };
-        let Some(peak_end_time) = project_time_for_source_frame(peak_end, source_sample_rate) else {
+        let Some(peak_end_time) = project_time_for_source_frame(peak_end, source_sample_rate)
+        else {
             continue;
         };
 
-        let x0 = transform.project_time_to_x(peak_start_time).max(rect.left());
+        let x0 = transform
+            .project_time_to_x(peak_start_time)
+            .max(rect.left());
         let mut x1 = transform.project_time_to_x(peak_end_time).min(rect.right());
         x1 = x1.max(x0 + 0.75).min(rect.right());
         if x1 <= x0 {
@@ -468,9 +464,8 @@ fn source_frame_for_project_time(project_time: ProjectTimeNs, sample_rate: u32) 
         return 0;
     }
 
-    let frames = (project_time.get() as u128)
-        .saturating_mul(u128::from(sample_rate))
-        / 1_000_000_000_u128;
+    let frames =
+        (project_time.get() as u128).saturating_mul(u128::from(sample_rate)) / 1_000_000_000_u128;
     u64::try_from(frames).unwrap_or(u64::MAX)
 }
 
@@ -486,8 +481,7 @@ mod tests {
 
     #[test]
     fn timeline_transform_round_trips_project_time_and_x() {
-        let rect =
-            egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
         let transform = TimelineTransform::new(
             rect,
             ProjectTimeNs::new(1_000_000_000),
@@ -520,19 +514,15 @@ mod tests {
             BpmMicros::new(120_000_000).expect("BPM"),
             TimeSignature::default(),
         );
-        let rect =
-            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 100.0));
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 100.0));
         let transform = TimelineTransform::new(
             rect,
             ProjectTimeNs::new(0),
             ProjectTimeNs::new(2_000_000_000),
         )
         .expect("transform");
-        let lines = collect_musical_grid_lines(
-            &tempo,
-            BeatDivision::new(4).expect("division"),
-            transform,
-        );
+        let lines =
+            collect_musical_grid_lines(&tempo, BeatDivision::new(4).expect("division"), transform);
 
         assert_eq!(
             lines
@@ -570,12 +560,8 @@ mod tests {
         .expect("transform");
 
         assert!(
-            collect_musical_grid_lines(
-                &tempo,
-                BeatDivision::new(4).expect("division"),
-                transform,
-            )
-            .is_empty()
+            collect_musical_grid_lines(&tempo, BeatDivision::new(4).expect("division"), transform,)
+                .is_empty()
         );
     }
 
@@ -597,14 +583,10 @@ mod tests {
             frames_per_peak: 64,
             peaks: &peaks,
         };
-        let rect =
-            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 64.0));
-        let transform = TimelineTransform::new(
-            rect,
-            ProjectTimeNs::new(0),
-            ProjectTimeNs::new(128_000_000),
-        )
-        .expect("valid transform");
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 64.0));
+        let transform =
+            TimelineTransform::new(rect, ProjectTimeNs::new(0), ProjectTimeNs::new(128_000_000))
+                .expect("valid transform");
 
         let mesh = build_waveform_mesh(slice, 1_000, transform, egui::Color32::WHITE);
 
