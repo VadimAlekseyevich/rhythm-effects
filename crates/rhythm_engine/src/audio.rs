@@ -1,8 +1,10 @@
 use std::{
     fs::File,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
+use rhythm_core::time::{DurationNs, SampleRate};
 use rubato::{Fft, FixedSync, Resampler, audioadapter_buffers::owned::InterleavedOwned};
 use symphonia::core::{
     codecs::{AudioDecoderOptions, CodecParameters},
@@ -49,6 +51,40 @@ impl DecodedAudio {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PlaybackBuffer {
+    sample_rate: SampleRate,
+    interleaved_stereo_f32: Arc<[f32]>,
+    duration: DurationNs,
+}
+
+impl PlaybackBuffer {
+    #[must_use]
+    pub const fn sample_rate(&self) -> SampleRate {
+        self.sample_rate
+    }
+
+    #[must_use]
+    pub const fn duration(&self) -> DurationNs {
+        self.duration
+    }
+
+    #[must_use]
+    pub fn interleaved_stereo_f32(&self) -> &[f32] {
+        &self.interleaved_stereo_f32
+    }
+
+    #[must_use]
+    pub fn frame_count(&self) -> usize {
+        self.interleaved_stereo_f32.len() / 2
+    }
+
+    #[must_use]
+    pub fn memory_bytes(&self) -> usize {
+        self.interleaved_stereo_f32.len() * std::mem::size_of::<f32>()
+    }
+}
+
 #[derive(Debug)]
 pub enum AudioDecodeError {
     Io(std::io::Error),
@@ -58,6 +94,7 @@ pub enum AudioDecodeError {
     InvalidSampleRate,
     InvalidPcmLength,
     NonFinitePcm,
+    DurationOverflow,
     NoAudioTrack,
     MissingSampleRate,
     MissingChannelLayout,
@@ -259,6 +296,50 @@ fn resample_decoded_audio(
     })
 }
 
+pub fn spawn_playback_buffer_prepare(
+    audio: DecodedAudio,
+    output_sample_rate: u32,
+) -> std::thread::JoinHandle<Result<PlaybackBuffer, AudioDecodeError>> {
+    std::thread::spawn(move || prepare_playback_buffer(audio, output_sample_rate))
+}
+
+/// Consumes temporary decoded source PCM and returns the only full PCM buffer
+/// retained for steady-state playback. Callers should derive waveform peaks
+/// before handing ownership of `audio` to this function.
+pub fn prepare_playback_buffer(
+    audio: DecodedAudio,
+    output_sample_rate: u32,
+) -> Result<PlaybackBuffer, AudioDecodeError> {
+    let prepared = resample_decoded_audio(audio, output_sample_rate)?;
+    let source_frames = prepared.frame_count();
+
+    let interleaved_stereo_f32 = match prepared.channel_layout {
+        AudioChannelLayout::Stereo => prepared.interleaved_f32,
+        AudioChannelLayout::Mono => {
+            let mut stereo = Vec::with_capacity(source_frames.saturating_mul(2));
+            for sample in prepared.interleaved_f32 {
+                stereo.push(sample);
+                stereo.push(sample);
+            }
+            stereo
+        }
+    };
+
+    let frame_count = interleaved_stereo_f32.len() / 2;
+    let duration_ns = (frame_count as u128)
+        .checked_mul(1_000_000_000)
+        .and_then(|value| value.checked_div(u128::from(output_sample_rate)))
+        .ok_or(AudioDecodeError::DurationOverflow)?;
+    let duration_ns =
+        u64::try_from(duration_ns).map_err(|_| AudioDecodeError::DurationOverflow)?;
+
+    Ok(PlaybackBuffer {
+        sample_rate: SampleRate::new(output_sample_rate),
+        interleaved_stereo_f32: Arc::from(interleaved_stereo_f32),
+        duration: DurationNs::new(duration_ns),
+    })
+}
+
 fn channel_layout_from_count(channel_count: usize) -> Result<AudioChannelLayout, AudioDecodeError> {
     match channel_count {
         1 => Ok(AudioChannelLayout::Mono),
@@ -307,6 +388,46 @@ mod tests {
 
     fn temp_fixture_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn playback_buffer_duplicates_mono_to_stereo_and_consumes_source_pcm() {
+        let decoded = DecodedAudio {
+            sample_rate: 48_000,
+            channel_layout: AudioChannelLayout::Mono,
+            interleaved_f32: vec![0.25, -0.5, 1.0],
+        };
+
+        let playback =
+            super::prepare_playback_buffer(decoded, 48_000).expect("prepare playback buffer");
+
+        assert_eq!(playback.sample_rate().get(), 48_000);
+        assert_eq!(playback.frame_count(), 3);
+        assert_eq!(
+            playback.interleaved_stereo_f32(),
+            &[0.25, 0.25, -0.5, -0.5, 1.0, 1.0]
+        );
+        assert_eq!(playback.duration().get(), 62_500);
+        assert_eq!(playback.memory_bytes(), 6 * std::mem::size_of::<f32>());
+    }
+
+    #[test]
+    fn playback_buffer_preserves_stereo_samples() {
+        let decoded = DecodedAudio {
+            sample_rate: 48_000,
+            channel_layout: AudioChannelLayout::Stereo,
+            interleaved_f32: vec![0.1, 0.2, 0.3, 0.4],
+        };
+
+        let playback =
+            super::prepare_playback_buffer(decoded, 48_000).expect("prepare playback buffer");
+
+        assert_eq!(playback.frame_count(), 2);
+        assert_eq!(
+            playback.interleaved_stereo_f32(),
+            &[0.1, 0.2, 0.3, 0.4]
+        );
+        assert_eq!(playback.duration().get(), 41_666);
     }
 
     #[test]
