@@ -84,9 +84,7 @@ impl EntityIdAllocator {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AssetId, EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId,
-    };
+    use super::{AssetId, EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId};
 
     #[test]
     fn zero_is_reserved_for_every_project_id_type() {
@@ -101,7 +99,10 @@ mod tests {
         assert_eq!(ObjectId::new(1).map(ObjectId::get), Some(1));
         assert_eq!(AssetId::new(2).map(AssetId::get), Some(2));
         assert_eq!(EffectId::new(3).map(EffectId::get), Some(3));
-        assert_eq!(KeyframeId::new(u64::MAX).map(KeyframeId::get), Some(u64::MAX));
+        assert_eq!(
+            KeyframeId::new(u64::MAX).map(KeyframeId::get),
+            Some(u64::MAX)
+        );
     }
 
     #[test]
