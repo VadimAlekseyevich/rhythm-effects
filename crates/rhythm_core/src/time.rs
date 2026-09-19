@@ -82,6 +82,12 @@ pub enum BpmError {
     TooManyFractionDigits,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeConversionError {
+    TempoUnavailable,
+    Overflow,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TempoSegment {
     start_tick: MusicalTick,
@@ -150,6 +156,39 @@ impl TempoMap {
     #[must_use]
     pub fn initial_segment(&self) -> Option<TempoSegment> {
         self.segments.first().copied()
+    }
+
+    pub fn project_time_for_tick(
+        &self,
+        tick: MusicalTick,
+    ) -> Result<ProjectTimeNs, TimeConversionError> {
+        let segment = self
+            .initial_segment()
+            .ok_or(TimeConversionError::TempoUnavailable)?;
+
+        let numerator = i128::from(tick.get()) * 60_000_000_000_i128 * 1_000_000_i128;
+        let denominator = i128::from(segment.bpm().get()) * i128::from(PPQ);
+        let delta_ns = div_round_nearest_ties_away_from_zero(numerator, denominator);
+        let project_ns = i128::from(self.grid_offset.get()) + delta_ns;
+        let project_ns = i64::try_from(project_ns).map_err(|_| TimeConversionError::Overflow)?;
+
+        Ok(ProjectTimeNs::new(project_ns))
+    }
+}
+
+fn div_round_nearest_ties_away_from_zero(numerator: i128, denominator: i128) -> i128 {
+    debug_assert!(denominator > 0);
+
+    let quotient = numerator / denominator;
+    let remainder = numerator % denominator;
+    let twice_abs_remainder = remainder.abs() * 2;
+
+    if twice_abs_remainder < denominator {
+        quotient
+    } else if numerator >= 0 {
+        quotient + 1
+    } else {
+        quotient - 1
     }
 }
 
@@ -327,6 +366,44 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn tick_to_project_time_uses_exact_integer_math() {
+        let bpm = BpmMicros::new(120_000_000).expect("valid BPM");
+        let map = super::TempoMap::with_initial_tempo(
+            GridOffsetNs::new(350_000_000),
+            bpm,
+            super::TimeSignature::default(),
+        );
+
+        assert_eq!(
+            map.project_time_for_tick(MusicalTick::new(0))
+                .expect("tempo available")
+                .get(),
+            350_000_000
+        );
+        assert_eq!(
+            map.project_time_for_tick(MusicalTick::new(960))
+                .expect("tempo available")
+                .get(),
+            850_000_000
+        );
+        assert_eq!(
+            map.project_time_for_tick(MusicalTick::new(-960))
+                .expect("tempo available")
+                .get(),
+            -150_000_000
+        );
+    }
+
+    #[test]
+    fn tick_to_project_time_reports_unset_tempo() {
+        let map = super::TempoMap::unset(GridOffsetNs::new(0));
+        assert_eq!(
+            map.project_time_for_tick(MusicalTick::new(0)),
+            Err(super::TimeConversionError::TempoUnavailable)
+        );
+    }
 
     #[test]
     fn tempo_map_initial_segment_starts_at_tick_zero() {

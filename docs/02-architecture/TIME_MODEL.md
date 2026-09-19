@@ -119,7 +119,7 @@ delta_ns =
 project_time_ns = O + rounded(delta_ns)
 ~~~
 
-Implementation uses wide integer intermediates and explicit rounding.
+Implementation uses wide integer intermediates and rounds to the nearest integer nanosecond. Exact half-nanosecond ties round away from zero.
 
 Never accumulate time tick-by-tick.
 
