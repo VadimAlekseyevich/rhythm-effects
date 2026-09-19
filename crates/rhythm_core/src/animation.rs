@@ -97,6 +97,13 @@ pub enum AnimationInvariantError {
     DuplicateTick(MusicalTick),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct AnimationSegment<'a, T> {
+    pub from: &'a Keyframe<T>,
+    pub to: &'a Keyframe<T>,
+    pub progress: f64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Animated<T> {
     base_value: T,
@@ -181,6 +188,39 @@ impl<T> Animated<T> {
             })
             .ok()
             .map(|index| &self.keyframes[index].value)
+    }
+
+    #[must_use]
+    pub fn segment_at(&self, continuous_tick: f64) -> Option<AnimationSegment<'_, T>> {
+        if self.keyframes.len() < 2 {
+            return None;
+        }
+
+        let first_tick = self.keyframes.first()?.tick.get() as f64;
+        let last_tick = self.keyframes.last()?.tick.get() as f64;
+        if continuous_tick <= first_tick || continuous_tick >= last_tick {
+            return None;
+        }
+
+        let upper_index = self
+            .keyframes
+            .partition_point(|keyframe| (keyframe.tick.get() as f64) <= continuous_tick);
+
+        if upper_index == 0 || upper_index >= self.keyframes.len() {
+            return None;
+        }
+
+        let from = &self.keyframes[upper_index - 1];
+        let to = &self.keyframes[upper_index];
+
+        if continuous_tick == from.tick.get() as f64 {
+            return None;
+        }
+
+        let tick_span = (to.tick.get() - from.tick.get()) as f64;
+        let progress = ((continuous_tick - from.tick.get() as f64) / tick_span).clamp(0.0, 1.0);
+
+        Some(AnimationSegment { from, to, progress })
     }
 }
 
@@ -275,6 +315,40 @@ mod tests {
             value,
             Interpolation::Linear,
         )
+    }
+
+    #[test]
+    fn segment_lookup_is_binary_stateless_and_order_independent() {
+        let animated = Animated::with_keyframes(
+            0.0,
+            vec![
+                keyframe(1, 0, 10.0),
+                keyframe(2, 240, 20.0),
+                keyframe(3, 480, 30.0),
+                keyframe(4, 960, 40.0),
+            ],
+        )
+        .expect("unique ticks");
+
+        let late = animated.segment_at(720.0).expect("interior segment");
+        assert_eq!(late.from.tick.get(), 480);
+        assert_eq!(late.to.tick.get(), 960);
+        assert_eq!(late.progress, 0.5);
+
+        let early = animated.segment_at(120.0).expect("interior segment");
+        assert_eq!(early.from.tick.get(), 0);
+        assert_eq!(early.to.tick.get(), 240);
+        assert_eq!(early.progress, 0.5);
+
+        let late_again = animated.segment_at(720.0).expect("same lookup");
+        assert_eq!(late_again.from.id, late.from.id);
+        assert_eq!(late_again.to.id, late.to.id);
+        assert_eq!(late_again.progress, late.progress);
+
+        assert!(animated.segment_at(-1.0).is_none());
+        assert!(animated.segment_at(0.0).is_none());
+        assert!(animated.segment_at(240.0).is_none());
+        assert!(animated.segment_at(960.0).is_none());
     }
 
     #[test]
