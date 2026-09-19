@@ -77,7 +77,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-054** — Implement frame-index to ProjectTimeNs conversion derived independently from N.
 - [x] **AI-055** — Implement LinearRgba with finite-value validation and normalized alpha.
 - [x] **AI-056** — Implement Vec2/domain validation needed by project transforms.
-- [ ] **AI-057** — Implement the accepted TransformAnimation semantic fields.
+- [x] **AI-057** — Implement the accepted TransformAnimation semantic fields.
 - [ ] **AI-058** — Implement ProjectSettings defaulting to 1920x1080, 60 FPS, 10 seconds and black background.
 - [ ] **AI-059** — Implement the Project root, metadata, Composition and Object structures for schema V1.
 - [ ] **AI-060** — Implement RectangleObject with animated size/fill/corner radius.

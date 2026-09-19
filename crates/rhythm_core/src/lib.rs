@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
+pub mod animation;
 pub mod domain;
 
 pub mod ids;
+pub mod project;
 pub mod time;
 
 pub const APP_NAME: &str = "Rhythm Effects";
