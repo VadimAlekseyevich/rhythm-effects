@@ -348,9 +348,7 @@ mod tests {
         project::{
             Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
         },
-        time::{
-            BpmMicros, GridOffsetNs, MusicalTick, ProjectTimeNs, TempoMap, TimeSignature,
-        },
+        time::{BpmMicros, GridOffsetNs, MusicalTick, ProjectTimeNs, TempoMap, TimeSignature},
     };
 
     fn transform(position: Animated<Vec2>) -> TransformAnimation {
@@ -419,8 +417,8 @@ mod tests {
             });
         }
 
-        let scene = evaluate_scene(&project, ProjectTimeNs::new(250_000_000))
-            .expect("scene evaluation");
+        let scene =
+            evaluate_scene(&project, ProjectTimeNs::new(250_000_000)).expect("scene evaluation");
         assert_eq!(scene.objects.len(), 2);
         assert_eq!(scene.objects[0].id.get(), 1);
         assert_eq!(scene.objects[1].id.get(), 5);
