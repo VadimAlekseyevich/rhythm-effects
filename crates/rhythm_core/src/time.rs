@@ -1,3 +1,5 @@
+pub const PPQ: i64 = 960;
+
 macro_rules! signed_time_type {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -133,6 +135,11 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn ppq_is_schema_constant() {
+        assert_eq!(super::PPQ, 960);
+    }
 
     #[test]
     fn bpm_range_is_inclusive_and_validated() {
