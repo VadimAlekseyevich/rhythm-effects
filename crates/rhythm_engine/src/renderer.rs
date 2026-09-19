@@ -168,7 +168,7 @@ impl Renderer {
         let preview_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Rhythm Effects preview pipeline layout"),
-                bind_group_layouts: &[&preview_bind_group_layout],
+                bind_group_layouts: &[Some(&preview_bind_group_layout)],
                 immediate_size: 0,
             });
         let preview_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
