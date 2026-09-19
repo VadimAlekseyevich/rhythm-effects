@@ -246,10 +246,7 @@ impl History {
 
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
-    ObjectPosition {
-        object_id: ObjectId,
-        before: Vec2,
-    },
+    ObjectPosition { object_id: ObjectId, before: Vec2 },
 }
 
 #[derive(Debug)]
@@ -345,7 +342,11 @@ impl ProjectEditor {
     pub fn update_position_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
             Some(ActiveTransaction::ObjectPosition { object_id, .. }) => object_id,
-            None => return Err(EditError::HistoryInvariant("no active position transaction")),
+            None => {
+                return Err(EditError::HistoryInvariant(
+                    "no active position transaction",
+                ));
+            }
         };
 
         let index = self.object_index(object_id)?;
@@ -739,9 +740,7 @@ mod tests {
         project::{
             Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
         },
-        time::{
-            BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature,
-        },
+        time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
     };
 
     fn object(id: u64, name: &str) -> Object {
