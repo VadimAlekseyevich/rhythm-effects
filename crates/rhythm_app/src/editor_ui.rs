@@ -127,7 +127,6 @@ pub fn draw_editor_shell(
     });
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::fit_composition_preview;

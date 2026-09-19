@@ -18,7 +18,10 @@ mod tests {
 
     #[test]
     fn preview_quality_defaults_to_auto() {
-        assert_eq!(EditorSession::default().preview_quality, PreviewQuality::Auto);
+        assert_eq!(
+            EditorSession::default().preview_quality,
+            PreviewQuality::Auto
+        );
     }
 
     #[test]
