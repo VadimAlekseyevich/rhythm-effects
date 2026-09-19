@@ -146,10 +146,19 @@ impl History {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum ActiveTransaction {
+    ObjectPosition {
+        object_id: ObjectId,
+        before: Vec2,
+    },
+}
+
 #[derive(Debug)]
 pub struct ProjectEditor {
     project: Project,
     history: History,
+    transaction: Option<ActiveTransaction>,
 }
 
 impl ProjectEditor {
@@ -158,6 +167,7 @@ impl ProjectEditor {
         Ok(Self {
             project,
             history: History::default(),
+            transaction: None,
         })
     }
 
@@ -187,6 +197,12 @@ impl ProjectEditor {
     }
 
     pub fn execute(&mut self, command: EditCommand) -> Result<bool, EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant(
+                "cannot execute command while transaction is active",
+            ));
+        }
+
         let Some(entry) = self.apply_command(command)? else {
             return Ok(false);
         };
@@ -194,7 +210,88 @@ impl ProjectEditor {
         Ok(true)
     }
 
+    pub fn begin_position_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let index = self.object_index(object_id)?;
+        let before = *self.project.composition.objects[index]
+            .transform
+            .position
+            .base_value();
+
+        self.transaction = Some(ActiveTransaction::ObjectPosition { object_id, before });
+        Ok(())
+    }
+
+    pub fn update_position_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
+        let object_id = match self.transaction {
+            Some(ActiveTransaction::ObjectPosition { object_id, .. }) => object_id,
+            None => return Err(EditError::HistoryInvariant("no active position transaction")),
+        };
+
+        let index = self.object_index(object_id)?;
+        *self.project.composition.objects[index]
+            .transform
+            .position
+            .base_value_mut() = value;
+        Ok(())
+    }
+
+    pub fn commit_transaction(&mut self) -> Result<bool, EditError> {
+        let Some(transaction) = self.transaction.take() else {
+            return Ok(false);
+        };
+
+        match transaction {
+            ActiveTransaction::ObjectPosition { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                let after = *self.project.composition.objects[index]
+                    .transform
+                    .position
+                    .base_value();
+
+                if before == after {
+                    return Ok(false);
+                }
+
+                self.history.push(HistoryEntry {
+                    label: "Move Object".to_owned(),
+                    payload: HistoryPayload::PositionBaseChanged {
+                        object_id,
+                        before,
+                        after,
+                    },
+                });
+                Ok(true)
+            }
+        }
+    }
+
+    pub fn cancel_transaction(&mut self) -> Result<bool, EditError> {
+        let Some(transaction) = self.transaction.take() else {
+            return Ok(false);
+        };
+
+        match transaction {
+            ActiveTransaction::ObjectPosition { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .position
+                    .base_value_mut() = before;
+            }
+        }
+
+        Ok(true)
+    }
+
     pub fn undo(&mut self) -> Result<bool, EditError> {
+        if self.transaction.is_some() {
+            self.cancel_transaction()?;
+        }
+
         let Some(entry) = self.history.undo_entry().cloned() else {
             return Ok(false);
         };
@@ -205,6 +302,10 @@ impl ProjectEditor {
     }
 
     pub fn redo(&mut self) -> Result<bool, EditError> {
+        if self.transaction.is_some() {
+            self.cancel_transaction()?;
+        }
+
         let Some(entry) = self.history.redo_entry().cloned() else {
             return Ok(false);
         };
@@ -552,6 +653,38 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn cancelled_position_transaction_restores_before_state() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_position_transaction(object_id)
+            .expect("begin transaction");
+        editor
+            .update_position_transaction(Vec2::new(50.0, 25.0).expect("finite position"))
+            .expect("preview transaction");
+
+        assert_eq!(
+            editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value()
+                .x(),
+            50.0
+        );
+        assert_eq!(editor.cancel_transaction(), Ok(true));
+        assert_eq!(
+            editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value()
+                .x(),
+            0.0
+        );
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]

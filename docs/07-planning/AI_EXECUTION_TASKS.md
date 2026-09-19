@@ -102,7 +102,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-079** — Implement explicit EditCommand intent types for first object/property/keyframe mutations.
 - [x] **AI-080** — Implement HistoryEntry before/after payloads without whole-Project snapshots.
 - [x] **AI-081** — Implement undo/redo cursor and redo-branch truncation.
-- [ ] **AI-082** — Implement begin/update/commit/cancel transaction support.
+- [x] **AI-082** — Implement begin/update/commit/cancel transaction support.
 - [ ] **AI-083** — Implement dirty/saved revision semantics.
 - [ ] **AI-084** — Implement the 500 logical history-entry capacity.
 - [ ] **AI-085** — Add tests proving one drag transaction becomes one undo entry.
