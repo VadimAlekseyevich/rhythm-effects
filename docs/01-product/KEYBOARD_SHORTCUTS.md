@@ -1,338 +1,173 @@
 # Keyboard Shortcuts
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> This document defines shortcut architecture and an initial MVP map. Exact bindings may change after prototype testing, but shortcut families and scope rules should remain coherent.
+> Shortcuts are part of the product architecture. They must remain fast, discoverable, and predictable around focus.
 
-## 1. Goals
+## 1. Input model
 
-Shortcuts should make the rhythm-authoring loop dramatically faster.
+Default editor letter shortcuts are mapped from physical key codes when the active control is not accepting text.
 
-They must be:
+This allows the same editing layout while the OS keyboard layout is English or Russian.
 
-- learnable;
-- grouped by purpose;
-- discoverable in UI/tooltips;
-- predictable by context;
-- safe around text entry;
-- efficient for repeated beat/subdivision operations.
+When a text/numeric field is actively editing, text-entry semantics take priority.
 
----
+## 2. Global shortcuts
 
-## 2. Scope classes
-
-### Global
-
-Work almost everywhere unless text editing requires interception.
-
-### Timeline
-
-Require timeline context/focus.
-
-### Viewport
-
-Require viewport context/focus.
-
-### Property/Object
-
-Operate on selected objects/properties.
-
-### Text Entry
-
-When a field is active, normal editing shortcuts win.
-
----
-
-## 3. Proposed global bindings
-
-| Action | Proposed binding | Notes |
-|---|---|---|
-| Save | Ctrl+S | Standard |
-| Save As | Ctrl+Shift+S | Standard |
-| Open | Ctrl+O | Standard |
-| New Project | Ctrl+N | Standard |
-| Undo | Ctrl+Z | Standard |
-| Redo | Ctrl+Shift+Z / Ctrl+Y | support Windows convention |
-| Copy | Ctrl+C | contextual semantic selection |
-| Paste | Ctrl+V | contextual |
-| Duplicate | Ctrl+D | object/keyframe context |
-| Select All | Ctrl+A | active region |
-| Delete | Delete | active semantic selection |
-| Play/Pause | Space | unless text entry / temporary pan conflict |
-| Command Search | Ctrl+K or Ctrl+Shift+P | final choice TBD |
-| Cancel | Esc | interaction hierarchy |
-
-Bindings that conflict with viewport Space-pan require careful resolution.
-
----
-
-## 4. Rhythm navigation family
-
-These actions are core product functionality and need exceptionally easy bindings.
-
-Required actions:
-
-- previous subdivision;
-- next subdivision;
-- previous beat;
-- next beat;
-- previous bar;
-- next bar;
-- go to previous keyframe;
-- go to next keyframe.
-
-Candidate model:
-
-| Action | Candidate |
+| Action | Binding |
 |---|---|
-| Previous subdivision | Left |
-| Next subdivision | Right |
-| Previous beat | Ctrl+Left |
-| Next beat | Ctrl+Right |
-| Previous bar | Ctrl+Shift+Left |
-| Next bar | Ctrl+Shift+Right |
-| Previous keyframe | Alt+Left |
-| Next keyframe | Alt+Right |
+| New Project | Ctrl+N |
+| Open | Ctrl+O |
+| Save | Ctrl+S |
+| Save As | Ctrl+Shift+S |
+| Undo | Ctrl+Z |
+| Redo | Ctrl+Shift+Z and Ctrl+Y |
+| Copy | Ctrl+C |
+| Paste | Ctrl+V |
+| Duplicate | Ctrl+D |
+| Select All in active region | Ctrl+A |
+| Delete active semantic selection | Delete |
+| Play/Pause | Space |
+| Command Search | Ctrl+K |
+| Cancel current transient interaction | Esc |
+| Rename selected object | F2 |
 
-This is provisional and must be tested against selection/nudge expectations.
+## 3. Timeline rhythm navigation
 
-Important invariant: rhythm stepping should work without forcing the user to click a tiny timeline control first.
+When timeline navigation is available and no text field owns the keys:
 
----
-
-## 5. Grid subdivision
-
-The user needs a fast way to make the authoring grid finer/coarser.
-
-Required commands:
-
-- finer subdivision;
-- coarser subdivision;
-- choose common subdivision directly if useful.
-
-Candidate bindings are TBD after keyboard layout testing.
-
-The UI must always show current subdivision when these commands are used.
-
----
-
-## 6. Keyframe actions
-
-Required commands:
-
-- add/remove keyframe for focused property;
-- delete selected keyframes;
-- move selected keyframes one subdivision left/right;
-- move one beat left/right;
-- duplicate selected pattern;
-- apply common easing presets.
-
-Potential model:
-
-| Action | Candidate |
+| Action | Binding |
 |---|---|
-| Move keyframes one grid step | Alt+Left/Right or another family |
-| Apply Linear | shortcut TBD |
-| Apply Ease In | shortcut TBD |
-| Apply Ease Out | shortcut TBD |
-| Apply Ease In-Out | shortcut TBD |
+| Playhead previous grid step | Left |
+| Playhead next grid step | Right |
+| Playhead previous beat | Ctrl+Left |
+| Playhead next beat | Ctrl+Right |
+| Playhead previous bar | Ctrl+Shift+Left |
+| Playhead next bar | Ctrl+Shift+Right |
+| Move selected keyframes one grid step left/right | Alt+Left / Alt+Right |
+| Move selected keyframes one beat left/right | Ctrl+Alt+Left / Ctrl+Alt+Right |
+| Project start | Home |
+| Project end | End |
+| Coarser authoring grid | [ |
+| Finer authoring grid | ] |
 
-Do not assign arbitrary mnemonic shortcuts before testing frequent workflows.
+Keyframe movement is exact integer tick arithmetic and never becomes off-grid.
 
----
+## 4. Property quick access
 
-## 7. Property quick access
+| Property | Binding |
+|---|---|
+| Position | P |
+| Scale | S |
+| Rotation | R |
+| Opacity | O |
 
-A high-value possibility is direct access to common transform properties.
+These shortcuts reveal/focus the relevant property for the current object. They do not modify values by themselves.
 
-Candidates inspired by motion-design conventions:
+## 5. Keyframe action
 
-- P — Position;
-- S — Scale;
-- R — Rotation;
-- O or T — Opacity.
+K is the primary property-keyframe command.
 
-However, these conventions conflict with typing/search and potentially tool keys.
+For the focused/recently revealed animatable property:
 
-Decision must consider:
+- if the property is static, K creates the first keyframe at the nearest current grid point and moves playhead there;
+- if a keyframe exists at the resolved grid point, K removes it;
+- if the property is animated but no key exists there, K creates one using the current evaluated value.
 
-- whether pressing the key focuses the property;
-- expands property row;
-- creates a keyframe;
-- or merely selects a transform tool.
+The UI must always reveal what property K will affect.
 
-Do not overload one press with surprising destructive behavior.
+If there is no unambiguous property target, K does nothing and the UI indicates that a property must be focused.
 
-A safer MVP approach may be:
+## 6. Viewport navigation
 
-1. property shortcut focuses/reveals property;
-2. dedicated keyframe action creates/removes keyframe at current grid position.
+| Action | Binding |
+|---|---|
+| Pan | Middle mouse drag |
+| Zoom | Mouse wheel |
+| Frame selected object(s) | F |
+| Fit composition | Shift+F |
 
----
+Space is never overloaded as viewport pan in MVP.
 
-## 8. Viewport navigation
+## 7. Timeline pointer navigation
 
-Required:
+- wheel: normal vertical scroll where applicable;
+- Shift+wheel: horizontal timeline pan;
+- Ctrl+wheel: timeline zoom around pointer;
+- middle mouse drag: horizontal pan;
+- ruler click/drag: continuous playhead seek.
 
-- pan;
-- zoom;
-- fit composition;
-- frame selection;
-- reset view.
+## 8. Selection
 
-Candidate:
+- Ctrl+click toggles an item in selection;
+- box drag from empty edit area replaces selection;
+- Ctrl+box drag adds/toggles according to panel semantics;
+- Shift may extend ranges only where a meaningful ordered range exists.
 
-- middle mouse drag: pan;
-- wheel: zoom;
-- Space + drag: optional temporary pan;
-- F: frame selection or fit;
-- Home: fit composition candidate.
+## 9. Easing
 
-Space interaction must not make Play/Pause unreliable.
+MVP does not dedicate global hotkeys to individual easing presets.
 
-One possible policy:
+Ease commands are available through:
 
-- Space tap = Play/Pause;
-- Space hold + pointer drag = temporary pan.
+- context menu;
+- command search;
+- curve/easing UI.
 
-This needs prototype validation because timing ambiguity may feel bad.
+This keeps the default shortcut vocabulary small.
 
-Middle-drag-only pan is simpler.
+## 10. Command search
 
----
+Ctrl+K opens a searchable command surface.
 
-## 9. Timeline navigation
+Each entry may show:
 
-Required:
+- command name;
+- current shortcut;
+- context;
+- disabled reason.
 
-- zoom;
-- horizontal pan;
-- center playhead;
-- follow playhead toggle if included;
-- jump start/end.
+The command surface is a deliberate scalability mechanism so infrequent functionality does not become permanent chrome.
 
-Candidate standards:
+## 11. Shortcut remapping
 
-- wheel = vertical/appropriate scroll;
-- Shift+wheel = horizontal;
-- Ctrl+wheel = zoom;
-- Home = project start;
-- End = project end.
+User remapping is post-MVP.
 
-Exact behavior depends on platform conventions and egui/winit event quality.
+Implementation must still define shortcuts through a central data/command map, not scattered raw key checks.
 
----
+## 12. Repeat behavior
 
-## 10. Object actions
+Held playhead-navigation keys may repeat using normal OS repeat.
 
-Required:
+Held selected-keyframe movement may repeat, but the history system should coalesce one continuous key-repeat burst into one logical history action where practical.
 
-- create object through menu/command search;
-- duplicate;
-- delete;
-- rename;
-- reorder if shortcuts are useful;
-- visibility/lock may remain pointer-first for MVP.
+Delete and other destructive actions must not repeat unexpectedly.
 
-Rename candidate: F2.
+## 13. Focus priority
 
----
+Shortcut resolution priority:
 
-## 11. Shortcut discoverability
+1. active text/numeric editor;
+2. active transient drag/edit cancel/commit semantics;
+3. global safe commands;
+4. focused-region commands;
+5. command search fallback/discoverability.
 
-Shortcuts should appear in:
+No key event may intentionally trigger two semantic commands.
 
-- tooltips;
-- menus;
-- context menus;
-- command search results.
+## 14. Usability acceptance
 
-Do not require a separate cheat sheet to discover basic commands.
+The keyboard model is accepted only if this sequence is comfortable without focus gymnastics:
 
-A dedicated shortcut reference page can still exist.
+1. P;
+2. K;
+3. Right several times;
+4. change Position;
+5. K/update key;
+6. Ctrl+Right;
+7. edit another transform property;
+8. Space preview;
+9. Alt+Left/Right move selected key pattern;
+10. Ctrl+S.
 
----
-
-## 12. Remapping
-
-Custom remapping is not required for MVP.
-
-However shortcut definitions should be data-driven enough that remapping can be added later without rewriting every panel.
-
-Avoid hardcoding key checks throughout UI code.
-
----
-
-## 13. Keyboard layout considerations
-
-Do not assume only US QWERTY for essential non-letter rhythm operations.
-
-Test:
-
-- standard Latin layout;
-- switching to Cyrillic/Russian input;
-- modifier behavior;
-- numpad where relevant.
-
-Critical transport and rhythm navigation should preferably use physical/navigation keys or command mapping independent of typed character where technically appropriate.
-
----
-
-## 14. Shortcut conflict rules
-
-Priority:
-
-1. active text-entry control;
-2. active transient interaction cancellation/commit;
-3. explicit global non-destructive action;
-4. focused-panel contextual action;
-5. fallback command.
-
-No key should silently trigger two actions.
-
----
-
-## 15. Repetition
-
-Holding a rhythm navigation key may repeat.
-
-Key repeat must not:
-
-- queue excessive commands;
-- create accidental keyframes;
-- continue after focus changes;
-- lag behind input.
-
-For destructive actions, repeat behavior should be conservative.
-
----
-
-## 16. Shortcut usability test scenarios
-
-Measure keyboard-only or keyboard-dominant completion of:
-
-1. move playhead four subdivisions;
-2. create a transform keyframe;
-3. move one beat;
-4. create second keyframe;
-5. select several keyframes;
-6. shift pattern by one beat;
-7. apply easing;
-8. play/pause;
-9. save.
-
-If this sequence requires awkward focus gymnastics, the shortcut model has failed.
-
----
-
-## 17. Open decisions
-
-- exact command search binding;
-- Space playback vs temporary pan;
-- exact rhythm-navigation modifier family;
-- exact property quick-access behavior;
-- whether common easing presets need dedicated hotkeys;
-- whether grid subdivision gets direct number-key shortcuts;
-- whether numpad becomes a rhythm-entry surface later.
-
-These should be resolved with a working prototype, not by convention alone.
+Shortcuts may be tuned after prototype testing, but changing the command families or semantics requires updating this document.
