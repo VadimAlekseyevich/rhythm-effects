@@ -1,7 +1,11 @@
 use crate::editor_session::EditorSession;
-use rhythm_core::time::{
-    BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
-    floor_tick_position_to_grid,
+use rhythm_core::{
+    ids::{EffectId, ObjectId},
+    project::{EffectKind, ObjectContent, Project},
+    time::{
+        BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
+        floor_tick_position_to_grid,
+    },
 };
 use rhythm_engine::waveform::{WaveformData, WaveformSlice};
 
@@ -68,6 +72,274 @@ impl TimelineTransform {
             (start_ns + offset_ns).clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
         ProjectTimeNs::new(project_ns)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TimelineEffectProperty {
+    BlurRadius,
+    GlowRadius,
+    GlowIntensity,
+    GlowThreshold,
+    GlowColor,
+    TintColor,
+    TintAmount,
+    NoiseAmount,
+    NoiseSize,
+    NoiseEvolution,
+    RgbSplitAmount,
+    RgbSplitAngle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TimelineProperty {
+    Position,
+    Scale,
+    Rotation,
+    Anchor,
+    Opacity,
+    RectangleSize,
+    RectangleFill,
+    RectangleCornerRadius,
+    EllipseSize,
+    EllipseFill,
+    TextColor,
+    Effect {
+        effect_id: EffectId,
+        property: TimelineEffectProperty,
+    },
+}
+
+impl TimelineProperty {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Position => "Position",
+            Self::Scale => "Scale",
+            Self::Rotation => "Rotation",
+            Self::Anchor => "Anchor",
+            Self::Opacity => "Opacity",
+            Self::RectangleSize | Self::EllipseSize => "Size",
+            Self::RectangleFill | Self::EllipseFill => "Fill",
+            Self::RectangleCornerRadius => "Corner Radius",
+            Self::TextColor => "Color",
+            Self::Effect { property, .. } => match property {
+                TimelineEffectProperty::BlurRadius => "Blur Radius",
+                TimelineEffectProperty::GlowRadius => "Glow Radius",
+                TimelineEffectProperty::GlowIntensity => "Glow Intensity",
+                TimelineEffectProperty::GlowThreshold => "Glow Threshold",
+                TimelineEffectProperty::GlowColor => "Glow Color",
+                TimelineEffectProperty::TintColor => "Tint Color",
+                TimelineEffectProperty::TintAmount => "Tint Amount",
+                TimelineEffectProperty::NoiseAmount => "Noise Amount",
+                TimelineEffectProperty::NoiseSize => "Noise Size",
+                TimelineEffectProperty::NoiseEvolution => "Noise Evolution",
+                TimelineEffectProperty::RgbSplitAmount => "RGB Split Amount",
+                TimelineEffectProperty::RgbSplitAngle => "RGB Split Angle",
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TimelineRow<'a> {
+    Object {
+        object_id: ObjectId,
+        name: &'a str,
+        visible: bool,
+        locked: bool,
+    },
+    Property {
+        object_id: ObjectId,
+        property: TimelineProperty,
+        keyframe_count: usize,
+    },
+}
+
+impl TimelineRow<'_> {
+    #[must_use]
+    pub const fn height(self) -> f32 {
+        match self {
+            Self::Object { .. } => 30.0,
+            Self::Property { .. } => 28.0,
+        }
+    }
+}
+
+#[must_use]
+pub fn build_timeline_rows(project: &Project) -> Vec<TimelineRow<'_>> {
+    let mut rows = Vec::new();
+
+    for object in &project.composition.objects {
+        rows.push(TimelineRow::Object {
+            object_id: object.id,
+            name: &object.name,
+            visible: object.visible,
+            locked: object.locked,
+        });
+
+        let mut push_property = |property, keyframe_count| {
+            rows.push(TimelineRow::Property {
+                object_id: object.id,
+                property,
+                keyframe_count,
+            });
+        };
+
+        push_property(
+            TimelineProperty::Position,
+            object.transform.position.keyframes().len(),
+        );
+        push_property(
+            TimelineProperty::Scale,
+            object.transform.scale.keyframes().len(),
+        );
+        push_property(
+            TimelineProperty::Rotation,
+            object.transform.rotation_degrees.keyframes().len(),
+        );
+        push_property(
+            TimelineProperty::Anchor,
+            object.transform.anchor.keyframes().len(),
+        );
+        push_property(
+            TimelineProperty::Opacity,
+            object.transform.opacity.keyframes().len(),
+        );
+
+        match &object.content {
+            ObjectContent::Rectangle(rectangle) => {
+                push_property(
+                    TimelineProperty::RectangleSize,
+                    rectangle.size.keyframes().len(),
+                );
+                push_property(
+                    TimelineProperty::RectangleFill,
+                    rectangle.fill.keyframes().len(),
+                );
+                push_property(
+                    TimelineProperty::RectangleCornerRadius,
+                    rectangle.corner_radius.keyframes().len(),
+                );
+            }
+            ObjectContent::Ellipse(ellipse) => {
+                push_property(TimelineProperty::EllipseSize, ellipse.size.keyframes().len());
+                push_property(TimelineProperty::EllipseFill, ellipse.fill.keyframes().len());
+            }
+            ObjectContent::Image(_) => {}
+            ObjectContent::Text(text) => {
+                push_property(TimelineProperty::TextColor, text.color.keyframes().len());
+            }
+        }
+
+        for effect in &object.effects {
+            let effect_id = effect.id;
+            match &effect.kind {
+                EffectKind::Blur(blur) => {
+                    push_property(
+                        TimelineProperty::Effect {
+                            effect_id,
+                            property: TimelineEffectProperty::BlurRadius,
+                        },
+                        blur.radius_px.keyframes().len(),
+                    );
+                }
+                EffectKind::Glow(glow) => {
+                    for (property, keyframe_count) in [
+                        (
+                            TimelineEffectProperty::GlowRadius,
+                            glow.radius_px.keyframes().len(),
+                        ),
+                        (
+                            TimelineEffectProperty::GlowIntensity,
+                            glow.intensity.keyframes().len(),
+                        ),
+                        (
+                            TimelineEffectProperty::GlowThreshold,
+                            glow.threshold.keyframes().len(),
+                        ),
+                        (
+                            TimelineEffectProperty::GlowColor,
+                            glow.color.keyframes().len(),
+                        ),
+                    ] {
+                        push_property(
+                            TimelineProperty::Effect {
+                                effect_id,
+                                property,
+                            },
+                            keyframe_count,
+                        );
+                    }
+                }
+                EffectKind::Tint(tint) => {
+                    for (property, keyframe_count) in [
+                        (
+                            TimelineEffectProperty::TintColor,
+                            tint.color.keyframes().len(),
+                        ),
+                        (
+                            TimelineEffectProperty::TintAmount,
+                            tint.amount.keyframes().len(),
+                        ),
+                    ] {
+                        push_property(
+                            TimelineProperty::Effect {
+                                effect_id,
+                                property,
+                            },
+                            keyframe_count,
+                        );
+                    }
+                }
+                EffectKind::Noise(noise) => {
+                    for (property, keyframe_count) in [
+                        (
+                            TimelineEffectProperty::NoiseAmount,
+                            noise.amount.keyframes().len(),
+                        ),
+                        (
+                            TimelineEffectProperty::NoiseSize,
+                            noise.size_px.keyframes().len(),
+                        ),
+                        (
+                            TimelineEffectProperty::NoiseEvolution,
+                            noise.evolution.keyframes().len(),
+                        ),
+                    ] {
+                        push_property(
+                            TimelineProperty::Effect {
+                                effect_id,
+                                property,
+                            },
+                            keyframe_count,
+                        );
+                    }
+                }
+                EffectKind::RgbSplit(split) => {
+                    for (property, keyframe_count) in [
+                        (
+                            TimelineEffectProperty::RgbSplitAmount,
+                            split.amount_px.keyframes().len(),
+                        ),
+                        (
+                            TimelineEffectProperty::RgbSplitAngle,
+                            split.angle_degrees.keyframes().len(),
+                        ),
+                    ] {
+                        push_property(
+                            TimelineProperty::Effect {
+                                effect_id,
+                                property,
+                            },
+                            keyframe_count,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    rows
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -542,6 +814,80 @@ mod tests {
         BeatDivision, BpmMicros, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
     };
     use rhythm_engine::waveform::{WavePeak, WaveformSlice};
+
+    #[test]
+    fn timeline_rows_include_object_transform_content_and_effect_properties() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            ids::{EffectId, ObjectId},
+            project::{
+                BlurEffect, Effect, Object, ObjectContent, Project, ProjectSettings,
+                RectangleObject, TransformAnimation,
+            },
+            time::{GridOffsetNs, TempoMap},
+        };
+
+        let mut project = Project::new(
+            "Rows",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id: ObjectId::new(1).expect("object id"),
+            name: "Rect".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(Vec2::new(0.0, 0.0).expect("position")),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(100.0, 50.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: vec![Effect {
+                id: EffectId::new(2).expect("effect id"),
+                enabled: true,
+                kind: rhythm_core::project::EffectKind::Blur(BlurEffect {
+                    radius_px: Animated::new_static(4.0),
+                }),
+            }],
+        });
+
+        let rows = super::build_timeline_rows(&project);
+
+        assert_eq!(rows.len(), 10);
+        assert!(matches!(
+            rows[0],
+            super::TimelineRow::Object {
+                object_id,
+                name: "Rect",
+                ..
+            } if object_id.get() == 1
+        ));
+        assert!(matches!(
+            rows[1],
+            super::TimelineRow::Property {
+                property: super::TimelineProperty::Position,
+                ..
+            }
+        ));
+        assert!(matches!(
+            rows[9],
+            super::TimelineRow::Property {
+                property: super::TimelineProperty::Effect {
+                    property: super::TimelineEffectProperty::BlurRadius,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn ruler_midpoint_maps_to_continuous_project_time() {

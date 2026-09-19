@@ -162,7 +162,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-133** — Implement Ctrl+wheel timeline zoom around mouse position.
 - [x] **AI-134** — Implement Shift+wheel horizontal timeline pan.
 - [x] **AI-135** — Implement middle-mouse horizontal timeline pan.
-- [ ] **AI-136** — Implement object-row and property-row data models for the timeline UI.
+- [x] **AI-136** — Implement object-row and property-row data models for the timeline UI.
 - [ ] **AI-137** — Implement vertical visible-row virtualization.
 - [ ] **AI-138** — Implement horizontal visible-MusicalTick keyframe query API.
 - [ ] **AI-139** — Implement timeline empty states for no audio, no BPM and no objects.
