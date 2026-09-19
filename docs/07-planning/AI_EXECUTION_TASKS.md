@@ -139,10 +139,10 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 ## M5 — Waveform and beat timeline
 
-- [ ] **AI-113** — Implement 64-source-frame WavePeak min/max base aggregation.
-- [ ] **AI-114** — Implement stereo envelope combination across both channels.
-- [ ] **AI-115** — Implement waveform mip pyramid by pairwise peak reduction.
-- [ ] **AI-116** — Implement final partial waveform bucket behavior.
+- [x] **AI-113** — Implement 64-source-frame WavePeak min/max base aggregation.
+- [x] **AI-114** — Implement stereo envelope combination across both channels.
+- [x] **AI-115** — Implement waveform mip pyramid by pairwise peak reduction.
+- [x] **AI-116** — Implement final partial waveform bucket behavior.
 - [ ] **AI-117** — Implement immutable waveform result keyed by AssetId generation.
 - [ ] **AI-118** — Implement background waveform worker request/result messages.
 - [ ] **AI-119** — Implement visible-range waveform slice query.

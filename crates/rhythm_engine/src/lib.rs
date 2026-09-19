@@ -3,6 +3,7 @@
 pub mod audio;
 pub mod renderer;
 pub mod scene_eval;
+pub mod waveform;
 
 #[must_use]
 pub const fn status() -> &'static str {
