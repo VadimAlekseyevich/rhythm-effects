@@ -54,17 +54,12 @@ impl BezierEasing {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Interpolation {
     Hold,
+    #[default]
     Linear,
     CubicBezier(BezierEasing),
-}
-
-impl Default for Interpolation {
-    fn default() -> Self {
-        Self::Linear
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
