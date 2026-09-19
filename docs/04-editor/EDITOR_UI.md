@@ -1,356 +1,220 @@
 # Editor UI
 
-> **Status: Draft**
->
-> This document defines the top-level editor workspace. The design must remain spacious, shallow, and predictable as functionality grows.
+> **Status: Accepted for MVP**
 
-## 1. Primary workspace
+## 1. Default workspace
 
-Default layout:
+The default workspace has five persistent functional regions:
 
 ~~~text
-┌────────────────────────────────────────────────────────────┐
-│ Top bar / project actions                                  │
-├───────────────┬───────────────────────────┬────────────────┤
-│ Object list   │                           │ Inspector      │
-│               │         Viewport          │                │
-│               │                           │                │
-├───────────────┴───────────────────────────┴────────────────┤
-│ Transport / BPM / Grid                                    │
-├────────────────────────────────────────────────────────────┤
-│ Timeline                                                   │
-│ waveform + grid + object/property rows + keyframes         │
-└────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ Top bar / project actions                                   │
+├──────────────┬───────────────────────────┬───────────────────┤
+│ Object list  │                           │ Inspector         │
+│              │         Viewport          │                   │
+│              │                           │                   │
+├──────────────┴───────────────────────────┴───────────────────┤
+│ Transport / rhythm strip                                    │
+├──────────────────────────────────────────────────────────────┤
+│ Timeline: ruler + waveform + object/property rows            │
+└──────────────────────────────────────────────────────────────┘
 ~~~
 
-The exact proportions are adjustable, but the conceptual regions stay stable.
+No fully dockable IDE-style workspace in MVP.
 
----
+## 2. Initial sizing
 
-## 2. UI principles
+At a normal 1920×1080 desktop:
 
-- no tab maze;
-- no permanent panel for every subsystem;
-- readable text;
-- comfortable hit targets;
-- strong keyboard path;
-- predictable focus;
-- timeline and viewport remain primary;
-- context appears in inspector rather than spawning more windows.
+- left object panel: about 240 px;
+- right inspector: about 320 px;
+- timeline: about 35–40% of editor height;
+- viewport receives remaining central area.
 
----
+Minimum practical app window target: 1280×720.
 
-## 3. Default panel roles
+Panels are resizable with comfortable splitter targets.
 
-### Object list
+## 3. Collapse behavior
 
-Answers: "What exists in the composition and in what order?"
+Object list and Inspector may collapse to recover viewport space.
 
-### Viewport
+Timeline and Viewport remain primary and are not hidden behind tabs during normal editing.
 
-Answers: "What does the composition look like and what object am I manipulating?"
+Do not add tabbed stacks of major panels.
 
-### Inspector
+## 4. Top bar
 
-Answers: "What properties can I edit for the current context?"
+Keep compact.
 
-### Timeline
+MVP content:
 
-Answers: "When does animation happen relative to music?"
+- project menu/actions;
+- Add/Create;
+- undo/redo indicators/actions where useful;
+- export entry;
+- command-search entry;
+- minimal status.
 
-### Transport/rhythm strip
+Do not place every tool/effect in top bar.
 
-Answers: "Where am I in time, what is the BPM/grid, and is playback active?"
+## 5. Transport/rhythm strip
 
----
+Located immediately above timeline.
 
-## 4. Panel resizing
-
-Panels should resize with forgiving splitters.
-
-Rules:
-
-- splitter hit target larger than visual line;
-- sensible minimum widths/heights;
-- timeline minimum height large enough for useful editing;
-- inspector cannot shrink text into unreadability;
-- viewport keeps a nonzero useful area.
-
-MVP does not need a fully dockable IDE framework.
-
----
-
-## 5. Panel collapsing
-
-Optional collapse is allowed where it helps small windows.
-
-Likely candidates:
-
-- object list;
-- inspector.
-
-Timeline and viewport should not both disappear during normal editing.
-
-Collapsed state can be app/workspace preference, not project data.
-
----
-
-## 6. Top bar
-
-Keep minimal.
-
-Potential contents:
-
-- project name/dirty indicator;
-- New/Open/Save access through menu;
-- Export entry;
-- optional command search.
-
-Do not place every object/effect tool permanently here.
-
----
-
-## 7. Creation actions
-
-Object creation can be exposed through:
-
-- one Add button/menu;
-- command search;
-- shortcuts later.
-
-Avoid four giant permanent buttons if they consume workspace.
-
-The Add surface should remain shallow:
-
-- Rectangle
-- Ellipse
-- Image
-- Text
-
-Effects are added contextually from inspector, not the object-creation menu.
-
----
-
-## 8. Transport/rhythm strip
-
-Keep near timeline.
-
-Core controls:
+Contains:
 
 - Play/Pause;
 - current musical position;
-- current time optional;
 - BPM;
-- offset adjustment entry;
-- grid subdivision;
-- snap/grid state if needed.
+- grid offset access;
+- current BeatDivision;
+- preview-quality control;
+- optional follow-playhead toggle.
 
-Avoid moving BPM controls to distant project settings because BPM alignment is frequent creative work.
+This keeps music/time controls spatially attached to timeline.
 
----
+## 6. Add/Create surface
 
-## 9. Focus model
+One Add action opens a shallow searchable/popover list:
 
-Focused region should be visually understandable.
+- Rectangle;
+- Ellipse;
+- Image;
+- Text.
 
-Regions:
+Effects are added from Inspector, not the global Add menu.
 
-- viewport;
-- timeline;
-- object list;
-- inspector;
-- text/numeric field.
+## 7. Focus
 
-Contextual shortcuts depend on focus, but global transport/save remain available where safe.
+Exactly one editor region has primary contextual keyboard focus:
 
-Do not require clicking a panel before every rhythm-navigation action if a more global mapping is unambiguous.
+- Object list;
+- Viewport;
+- Timeline;
+- Inspector/control;
+- command surface.
 
----
+Focus is visible but subtle.
 
-## 10. Selection synchronization
+Text/numeric fields override physical-key editor shortcuts while editing.
 
-Object selection is shared semantically across:
+## 8. Selection synchronization
 
-- object list;
-- viewport;
-- timeline.
+Selecting an object anywhere synchronizes:
 
-Selecting an object in one place updates the others without unexpected scrolling unless needed.
+- Object list;
+- Viewport;
+- Inspector.
 
-Keyframe selection is timeline-specific but inspector/object context should identify the property/object involved.
+Timeline keyframe selection identifies the owning object/property without unexpectedly collapsing other user context.
 
----
+Selection uses stable IDs.
 
-## 11. Inspector context
+## 9. Inspector context
 
-Inspector contents follow current semantic selection.
+No selection:
 
-Priority examples:
+- neutral explanation and Add hint.
 
-1. text editing control has local field state;
-2. explicit effect selection may show effect controls;
-3. object selection shows object properties/effects;
-4. no selection shows useful empty state.
+One object:
 
-Avoid inspector tabs for Transform / Appearance / Effects unless later usability testing proves they are necessary.
+- full relevant properties.
 
-Prefer vertical sections.
+Multiple objects:
 
----
+- common transform controls and mixed-value states;
+- object-type-specific controls hidden unless all selected objects share compatible type.
 
-## 12. Timeline visibility
+## 10. Timeline persistence
 
-Timeline remains accessible during:
+Timeline remains visible during ordinary object/property editing.
 
-- object editing;
-- effect editing;
-- text editing;
-- playback.
+Curve editing expands contextually within timeline area rather than opening a separate window.
 
-Do not open a separate "animation mode."
+## 11. Temporary surfaces
 
-Animation is always part of the main workspace.
+Use shallow popovers/menus for:
 
----
+- Add Object;
+- Add Effect;
+- grid choice;
+- font picker;
+- easing presets;
+- command search.
 
-## 13. Temporary surfaces
+Avoid multi-level submenu chains.
 
-Allowed:
+## 12. Dialog policy
 
-- context menu;
-- popover;
-- command search;
-- compact export surface;
-- file picker.
+OS/native dialogs are used for file open/save/import.
 
-Temporary surfaces close with Escape where safe and do not create long-lived navigation state.
+Modal app dialogs are limited to:
 
----
+- unsaved-data close decision;
+- unrecoverable project-open problem requiring choice;
+- recovery Restore/Discard where necessary.
 
-## 14. Status feedback
+Routine property editing is never modal.
 
-Use unobtrusive feedback for:
+## 13. Status/error area
 
-- saving;
-- waveform processing;
+Background/recoverable status uses non-modal banner/toast area.
+
+Examples:
+
 - missing asset;
-- export progress;
-- audio device failure.
+- audio device lost;
+- autosave failure;
+- export complete/fail.
 
-Do not reserve a giant permanent status bar unless actual information density requires it.
+Do not generate a toast for every successful ordinary edit.
 
----
+## 14. Empty project
 
-## 15. Empty project
+A new empty project shows a strong Import Audio action and a secondary Add Object action.
 
-Initial editor should guide without a wizard.
+The editor itself is already usable before audio import.
 
-Suggested viewport/timeline empty state:
+## 15. Workspace persistence
 
-- Import Audio as primary action;
-- Add Object remains available;
-- BPM setup becomes prominent once audio exists.
+Creative .rhfx does not store layout.
 
----
+MVP may store panel widths/collapse state in AppSettings if inexpensive.
 
-## 16. No selection
+Failure to load settings falls back to default layout.
 
-Inspector displays:
+## 16. Scaling
 
-- project/composition summary or neutral prompt;
-- no stale selected-object fields.
+UI follows logical-pixel/DPI scaling.
 
----
+Do not solve small windows by shrinking typography below design-system minimums.
 
-## 17. Error placement
+At constrained width, side panels collapse before text/control shrinkage.
 
-Contextual errors appear near affected feature where practical.
+## 17. Performance
 
-Examples:
+UI layout/draw should depend on visible content.
 
-- missing asset in inspector/object row;
-- invalid BPM near BPM field;
-- audio device error near transport.
+Avoid:
 
-Global blocking failures can use a dialog.
+- full project property traversal every frame;
+- per-frame filesystem/font scans;
+- rebuilding command maps;
+- one widget per invisible timeline keyframe.
 
----
+## 18. Growth policy
 
-## 18. UI state persistence
+New feature exposure order:
 
-Potential app-level persistence:
+1. existing inspector/property group;
+2. context-sensitive control;
+3. collapsed advanced subsection;
+4. command search;
+5. new persistent panel only when the task requires persistent spatial context.
 
-- panel sizes;
-- collapsed panels;
-- last workspace layout;
-- optional theme;
-- recent projects.
+Nested tab hierarchies are a design smell.
 
-Do not store these inside creative Project unless intentionally required.
+## 19. Definition of Done
 
----
-
-## 19. Scaling
-
-Editor respects Windows DPI scaling.
-
-Minimum text/hit sizes are design-system constraints.
-
-Timeline can remain visually dense, but interaction targets must stay forgiving.
-
----
-
-## 20. Performance
-
-Avoid rebuilding expensive lists or layouts for invisible content.
-
-Examples:
-
-- timeline virtualization;
-- asset thumbnail caching;
-- inspector only lays out current context;
-- object list only handles visible rows where large.
-
-No editor panel may perform blocking decode/file IO during render.
-
----
-
-## 21. Growth policy
-
-Before adding a new permanent panel, ask:
-
-1. Can it be contextual in inspector?
-2. Can it be a temporary popover?
-3. Can it be an expandable timeline row?
-4. Can command search expose it?
-5. Does it really require persistent spatial context?
-
-A new panel is the last option.
-
----
-
-## 22. MVP usability tests
-
-Test:
-
-- first audio import;
-- BPM alignment;
-- first keyframe;
-- repeated beat-step editing;
-- object selection across viewport/list/timeline;
-- effect editing;
-- save/export;
-- recovery from missing asset.
-
-Record focus errors and unnecessary pointer travel.
-
----
-
-## 23. Definition of Done
-
-- default workspace supports entire MVP workflow;
-- no routine task requires nested tabs;
-- focus behavior is predictable;
-- timeline/viewport remain primary;
-- UI works at common DPI values;
-- panel sizes and targets meet design-system review.
+Editor shell is MVP-ready when layout, collapse, focus, selection synchronization, transport placement, error surfaces, DPI behavior, and 1280×720 constrained behavior are all tested without violating design tokens.

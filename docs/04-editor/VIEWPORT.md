@@ -1,326 +1,211 @@
 # Viewport
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 
 ## 1. Responsibilities
 
-Viewport displays the composition and provides direct object manipulation.
+Viewport displays composition and supports:
 
-It owns editor interaction overlays, not creative rendering semantics.
+- object selection;
+- pan/zoom;
+- move/scale/rotation gizmos;
+- selection bounds;
+- direct manipulation;
+- editor-only overlays.
 
----
+It does not own creative rendering or Project state.
 
 ## 2. Composition display
 
-Renderer produces offscreen composition texture.
+Viewport displays the renderer's offscreen composition texture.
 
-Viewport:
+Outside-composition area is editor chrome/background.
 
-- positions it within available panel;
-- scales according to viewport zoom;
-- pans according to viewport camera;
-- clips to viewport rectangle.
+Preview quality may be Auto/Full/Half/Quarter without changing composition-space coordinates.
 
-Composition texture remains at project resolution.
+## 3. Camera
 
----
+ViewportCamera is EditorSession state:
 
-## 3. Viewport camera
+- pan;
+- zoom.
 
-Editor-only state:
-
-~~~rust
-ViewportCamera {
-    zoom,
-    pan,
-}
-~~~
-
-Not part of Project.
-
----
+Fit Composition and Frame Selection modify only camera state.
 
 ## 4. Zoom
 
-Required:
+Mouse wheel zooms around pointer location so the composition point under cursor remains approximately stable.
 
-- wheel/pinch;
-- fit composition;
-- 100% view optional;
-- frame selection desirable.
-
-Zoom anchor should feel predictable, ideally under cursor.
-
----
+Clamp to practical min/max.
 
 ## 5. Pan
 
-Preferred:
+Middle-mouse drag pans.
 
-- middle mouse drag;
-- optional temporary Space+drag only if it does not conflict with Play/Pause.
+Space is reserved for Play/Pause.
 
-Do not create permanent "hand tool" unless usability proves necessary.
+## 6. Selection
 
----
+Single click selects topmost unlocked visible object whose hit-test passes.
 
-## 6. Object selection
+Click empty space clears object selection.
 
-Click visible unlocked object.
+Ctrl+click toggles.
 
-Selection order when objects overlap:
-
-- frontmost hit first;
-- possible cycling modifier later.
-
-Locked objects are not directly selectable in viewport unless explicit override exists.
-
----
+Box selection from empty space selects intersecting visible/unlocked objects.
 
 ## 7. Hit testing
 
-MVP options:
-
-- CPU geometric hit-test from evaluated object bounds;
-- avoid GPU picking unless necessary.
-
-Need handle:
-
-- transforms;
-- rotation;
-- text/image bounds;
-- ellipse shape vs bounding box tradeoff.
-
-Bounding-box hit may be acceptable initially for text/image but shapes should feel sensible.
-
----
-
-## 8. Multi-selection
-
-Ctrl-click adds/removes.
-
-Box selection selects visible unlocked objects intersecting selection rect according to explicit containment/intersection rule.
-
----
-
-## 9. Selection outline
-
-Editor overlay only.
-
-Must remain readable over varied composition colors.
-
-Use strong but restrained visual treatment.
-
-Not exported.
-
----
-
-## 10. Transform gizmos
-
-MVP needs:
-
-- move;
-- scale;
-- rotation.
-
-Possible single universal selection box with handles.
-
-Avoid a large traditional toolbar of separate tools unless necessary.
-
----
-
-## 11. Move
-
-Direct drag selected object body can move when not conflicting with text editing.
-
-Movement updates transient project value.
-
-Commit one undo step.
-
-Spatial snapping/guides are optional; musical time snapping is unrelated.
-
----
-
-## 12. Scale
-
-Selection handles.
-
-Rules:
-
-- obvious corner/edge handles;
-- larger invisible hit region;
-- modifier for aspect lock if supported;
-- transform around anchor or opposite handle according to defined model.
-
-Need consistency with Transform math.
-
----
-
-## 13. Rotation
-
-Rotation handle or contextual gesture.
-
-Display angle during drag.
-
-No automatic shortest-path rule affects stored keyframe interpolation; this is property editing only.
-
----
-
-## 14. Anchor
-
-Anchor/pivot is visible when relevant.
-
-MVP can provide simple draggable anchor if implementation is manageable.
-
-Changing anchor while preserving visual position requires explicit transform math.
-
-Do not ship confusing anchor behavior.
-
----
-
-## 15. Animated transforms
-
-When playhead is at exact keyframe:
-
-- dragging transform edits that keyframe value.
-
-When property is animated but no keyframe at current playhead:
-
-Default policy should not silently create off-context keys.
-
-Options:
-
-- require explicit keyframe first;
-- if auto-key enabled, snap/create at grid.
-
-Final behavior coordinated with Inspector/Interaction Model.
-
----
-
-## 16. Playhead between grid points
-
-Directly changing an animated property between keyframes is potentially ambiguous.
-
-MVP safest behavior:
-
-- allow preview manipulation only after user intentionally creates/selects keyframe;
-- or snap creation through explicit animation control.
-
-Avoid hidden key creation.
-
----
-
-## 17. Text editing
-
-Double click may enter text edit mode.
-
-While editing text:
-
-- viewport transform drag is suppressed;
-- typing stays with text editor;
-- Escape exits/cancels according to policy;
-- object remains visually selected.
-
-Exact text editing may use inspector first for MVP if in-canvas editing becomes complex.
-
----
-
-## 18. Image aspect
-
-Scaling behavior must distinguish:
-
-- object transform scale;
-- intrinsic image size/fit.
-
-Keep transform model simple.
-
----
-
-## 19. Guides
-
-Post-MVP unless inexpensive.
-
-Potential:
-
-- composition center;
-- edge alignment;
-- smart guides.
-
-Do not let spatial snapping interfere with BPM time snapping concepts.
-
----
-
-## 20. Safe frame
-
-Not required.
-
-Can add composition bounds and center indicators only.
-
----
-
-## 21. Performance
-
-Viewport itself should not rerender project through CPU.
-
-It displays GPU texture + light overlays.
-
-Hit testing should use evaluated/bounds cache, not reconstruct full render scene repeatedly.
-
----
-
-## 22. DPI
-
-Pointer coordinates:
+Use CPU geometry:
 
 ~~~text
-window physical/logical
-→ egui point coordinates
-→ viewport local
-→ composition coordinates
+pointer screen
+-> inverse viewport camera
+-> composition point
+-> inverse object transform
+-> local object test
 ~~~
 
-Centralize transforms and test at 125%, 150%, 200% Windows scale.
+No GPU readback picking.
 
----
+Text uses layout bounds, image uses local rectangle, rectangle/ellipse use geometry.
 
-## 23. Resize
+## 8. Locked/hidden objects
 
-Viewport panel resize changes visible area only.
+Hidden objects are not rendered or pointer-selectable.
 
-Composition target resolution stays project-defined.
+Locked objects render but are skipped by normal viewport selection/manipulation.
 
----
+They remain selectable from Object list if product UX allows inspection; direct transform editing stays disabled.
 
-## 24. Empty state
+## 9. Multi-selection
 
-With no object:
+Multiple selected objects show one combined bounding context.
 
-- composition still visible;
-- object creation discoverable;
-- audio/timeline work unaffected.
+MVP transform behavior:
 
----
+- Move can move all selected objects by one composition-space delta.
+- Scale/Rotate multi-selection may be limited to a group bounding transform only if implementation remains predictable.
+- If multi-scale/rotate becomes risky, MVP may expose them through inspector rather than shipping inconsistent gizmo behavior.
 
-## 25. Required tests
+Single-object gizmos are release-critical; multi-object move is required.
 
-- coordinate conversion round-trip;
-- rotated object selection;
-- zoom anchor behavior;
-- pan;
-- multi-select;
-- transform drag undo;
-- DPI;
-- viewport resize;
-- locked object behavior.
+## 10. Move gizmo
 
----
+Direct drag of selected object/bounds moves Position.
 
-## 26. Definition of Done
+Shift constrains dominant movement axis.
 
-- composition texture displays correctly;
-- select/multi-select works;
-- move/scale/rotation work;
-- interactions create one undo entry;
-- overlays not exported;
-- DPI mapping correct;
-- viewport remains responsive.
+One drag = one history transaction.
+
+Animated Position follows per-property keyframing semantics: at an animated property without a key at current playhead, direct manipulation creates/updates the nearest-grid key and resolves playhead there.
+
+## 11. Scale gizmo
+
+Single object:
+
+- corner handles adjust X/Y scale;
+- Shift constrains to uniform scale;
+- edge handles adjust one axis.
+
+Scale acts around Anchor.
+
+Negative scale through crossing the anchor may be allowed if interaction remains stable; numeric inspector always supports negative values.
+
+## 12. Rotation gizmo
+
+Rotation handle adjusts rotation around Anchor.
+
+Shift snaps preview/commit to 15-degree increments.
+
+Without Shift, rotation is continuous degrees.
+
+Rotation animation uses the same keyframing rules.
+
+## 13. Anchor
+
+Viewport displays anchor marker for selected object.
+
+MVP edits Anchor primarily through Inspector.
+
+Dragging anchor in viewport is post-MVP because preserving visual placement while changing normalized anchor adds interaction complexity.
+
+## 14. Text editing
+
+Double click TextObject selects/opens text-edit intent.
+
+MVP may focus Inspector text field rather than implementing rich inline canvas editing.
+
+## 15. Image aspect
+
+Image intrinsic bounds come from source pixels.
+
+Scale X/Y can distort intentionally.
+
+Shift-constrained corner scale gives convenient aspect-preserving resize.
+
+## 16. Guides
+
+MVP includes minimal visual helpers:
+
+- composition center axes while moving near center;
+- composition boundary.
+
+General rulers/custom guides/snapping are post-MVP.
+
+These guides do not affect BPM/keyframe snapping.
+
+## 17. Safe frame
+
+No broadcast/title-safe overlay required for MVP.
+
+Could be added later as editor-only overlay.
+
+## 18. Performance
+
+Viewport interaction does not trigger:
+
+- image re-decode;
+- text reshape for pure transform;
+- project serialization;
+- GPU readback.
+
+Direct manipulation updates EvaluatedScene/renderer immediately.
+
+## 19. DPI
+
+Pointer/UI logical coordinates convert through viewport camera into composition units.
+
+DPI never changes Project transform values.
+
+## 20. Resize
+
+Viewport panel resize changes camera display region only.
+
+Fit mode may recompute if explicitly active; normal manual camera should not jump unexpectedly.
+
+## 21. Empty state
+
+No objects:
+
+- show composition;
+- unobtrusive Add Object hint;
+- audio/timeline workflow remains available.
+
+## 22. Tests
+
+- topmost hit selection;
+- locked skip;
+- rotated hit test;
+- negative scale hit inversion;
+- center anchor;
+- move transaction;
+- Shift axis constraint;
+- scale/Shift uniform;
+- rotation +15 snap;
+- animated transform creates grid key;
+- DPI/camera round trip.
+
+## 23. Definition of Done
+
+Viewport is MVP-ready when selection, pan/zoom, single-object move/scale/rotation, direct animated edits, hit testing, overlays, and coordinate parity with renderer all pass.

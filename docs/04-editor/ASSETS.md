@@ -1,231 +1,222 @@
 # Assets
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 
 ## 1. Scope
 
-MVP asset types:
+MVP asset kinds:
 
-- primary audio;
-- images;
-- fonts if custom font import is accepted.
+- one primary Audio asset;
+- Image assets;
+- system fonts are references, not AssetRecords.
 
-SVG remains optional.
-
----
-
-## 2. Project vs runtime
-
-Persisted AssetRecord:
-
-- ID;
-- kind;
-- source path/reference;
-- semantic metadata.
-
-Runtime AssetState:
-
-- loading;
-- ready;
-- missing;
-- failed;
-- decoded/GPU cache handles.
-
----
-
-## 3. Import entry points
-
-- Add Image;
-- Import Audio;
-- file picker;
-- drag & drop desirable.
-
-Do not require opening a separate asset-manager window.
-
----
-
-## 4. Path policy
-
-Need stable, portable enough references.
-
-MVP proposal:
-
-- store project-relative path when asset lies near/inside project structure;
-- otherwise store normalized external path;
-- on open, resolve relative to project file first.
-
-Packed project can come later.
-
----
-
-## 5. Missing file
-
-Asset record remains.
-
-Runtime state = Missing.
-
-UI:
-
-- clear missing indicator;
-- Locate/Relink action;
-- composition uses placeholder rather than crashing.
-
-Relink updates asset source in one undoable/project edit if considered creative data.
-
----
-
-## 6. Image decode
-
-Run off UI thread.
-
-Target formats:
+Supported image formats:
 
 - PNG;
 - JPEG;
-- WebP desirable.
+- WebP.
 
-Decode to consistent pixel format before GPU upload.
+SVG is post-MVP.
 
----
+## 2. Project vs runtime
 
-## 7. GPU upload
+Project stores:
 
-Upload once when asset becomes ready.
+- AssetId;
+- kind;
+- source path reference;
+- basic metadata.
 
-Cache texture by AssetId + relevant decode generation.
+Runtime stores:
 
-Do not upload every frame.
+- decoded image pixels while loading;
+- GPU textures;
+- prepared audio PCM;
+- waveform peaks;
+- thumbnails.
 
----
+Derived runtime data is rebuildable.
 
-## 8. Thumbnails
+## 3. AssetSource path
 
-Object/asset UI may use cached thumbnails.
+Schema concept:
 
-Do not build thumbnails synchronously in panel render.
+~~~rust
+AssetSource::File {
+    path: String,
+    relative_to_project: bool,
+}
+~~~
 
----
+If project already has a path:
 
-## 9. Audio asset
+- asset under project directory tree is stored relative where practical;
+- other files remain absolute.
 
-Primary audio asset has additional runtime:
+For unsaved project:
 
-- decoded PCM;
-- waveform cache;
-- duration/sample rate metadata.
+- imports begin as absolute paths;
+- on first Save/Save As, sources under new project directory may be rewritten to relative references.
 
-Project tempo is separate from audio asset metadata.
+The source file is never copied automatically in MVP.
 
----
+## 4. Resolution on load
 
-## 10. Font assets
+For relative path:
 
-Decision pending.
+~~~text
+project directory + stored relative path
+~~~
 
-If custom font import is in MVP:
+For absolute path:
 
-- treat font file as Asset;
-- runtime font system loads it;
-- project TextObject references semantic font/asset relation.
+~~~text
+stored absolute path
+~~~
 
-System-font-only MVP is simpler but less portable.
+Missing source does not invalidate Project.
 
----
+It creates unresolved runtime state.
 
-## 11. Duplicate imports
+## 5. Missing asset UX
 
-Do not over-engineer deduplication.
+Object/project opens.
 
-MVP may reuse same AssetId if user selects an already imported exact path, but behavior should be deterministic.
+Missing image/audio is shown clearly.
 
-Content hashing can come later.
+Actions:
 
----
+- Relink;
+- Locate/reselect file.
 
-## 12. Delete asset
+Other project content remains editable.
 
-If referenced:
+Missing primary audio disables playback/waveform but not visual editing.
 
-- block deletion and explain references;
-- or require explicit confirmation causing missing references.
+## 6. Import
 
-Preferred MVP: block normal delete while referenced.
+Entry points:
 
-Unused assets can be removed.
+- Import Audio;
+- Add Image from File;
+- drag-and-drop file into app/viewport where unambiguous.
 
----
+Import runs probe/decode in background.
 
-## 13. Asset browser
+Project mutation uses compound commands where creative state changes.
 
-Keep lightweight.
+## 7. Duplicate imports
 
-Possible content:
+If the same normalized/canonical file path is imported again in the same session/project, reuse existing compatible AssetRecord rather than creating duplicates.
 
-- type icon/thumbnail;
+Do not deduplicate by filename alone.
+
+## 8. Image decode/upload
+
+Worker:
+
+~~~text
+read file
+-> image decode
+-> finite dimensions/metadata
+-> decoded pixels result
+~~~
+
+Main/renderer:
+
+~~~text
+validate AssetId generation
+-> GPU upload
+-> runtime ready
+~~~
+
+Worker never mutates renderer/project directly.
+
+## 9. Image limits
+
+Reject absurd dimensions/allocation sizes before decoding/uploading where library metadata allows.
+
+Exact max dimension may follow GPU limits; user gets clear unsupported-image error.
+
+## 10. Audio
+
+One Project AudioTrack references one Audio AssetId.
+
+Replacing primary audio is an explicit project command and invalidates prepared playback/waveform runtime generations.
+
+## 11. Thumbnails
+
+Asset browser image thumbnails are derived runtime/cache data.
+
+They are not required for creative correctness.
+
+Thumbnail failure does not make asset unusable.
+
+## 12. Asset browser
+
+MVP browser is simple:
+
 - name;
-- missing/loading state.
+- type;
+- thumbnail/icon;
+- missing state;
+- Relink where needed.
 
-No nested folder system for MVP.
+No folder/tag/library management.
 
-Search can be added if list grows.
+## 13. Drag image to viewport
 
----
+Dragging image asset into viewport creates one ImageObject at a sensible composition location.
 
-## 14. Drag to viewport
+The object references existing AssetId.
 
-Desirable:
+If dragging a new OS file, import + object creation is one compound undoable action.
 
-- drag image asset into viewport to create Image object.
+## 14. Delete asset
 
-Not required for first technical milestone.
+Normal delete of an AssetRecord is blocked while referenced.
 
----
+Deleting an unreferenced asset removes only the project record/runtime cache.
 
-## 15. Replacement/relink
+It never deletes the user's source file from disk.
 
-Relinking keeps AssetId so all referencing objects update automatically.
+## 15. Relink
 
-This is a reason not to store raw paths directly on every ImageObject.
+Relink keeps AssetId stable.
 
----
+It updates source reference and increments runtime generation.
 
-## 16. Cache invalidation
+Objects continue referencing the same AssetId.
 
-If source file changes externally during session, MVP does not need full file-watch hot reload.
+Late decode results from old generation are discarded.
 
-Manual relink/reload is acceptable.
+## 16. External file changes
 
----
+Automatic filesystem watching/reload is post-MVP.
 
-## 17. Import jobs
+MVP provides explicit Reload/Relink behavior or reloads on project reopen.
 
-Each job has identity/generation.
+This avoids hidden live mutation of creative work.
 
-If project closes or asset is replaced:
+## 17. Cache invalidation
 
-- result can be discarded safely.
+Runtime caches key at least on:
 
-Worker never directly mutates Project.
+- AssetId;
+- source generation;
+- relevant decoding options.
 
----
+Changing source invalidates decoded/GPU/thumbnail/waveform state.
 
 ## 18. Error handling
 
-Decode failure reports:
+Unsupported/corrupt file:
 
-- which asset;
-- reason category;
-- project remains usable.
-
-Raw decoder details go to logs.
-
----
+- import command fails atomically;
+- no half-valid AssetRecord remains unless it is explicitly useful unresolved state;
+- user sees readable error;
+- raw decoder detail is logged.
 
 ## 19. Definition of Done
 
-- audio/image import works;
-- missing asset recoverable;
-- runtime loading does not block editor;
-- GPU textures cached;
-- paths survive save/reopen;
-- stale background results cannot attach incorrectly.
+Assets are MVP-ready when relative/absolute paths, missing state, background import, generation safety, image GPU upload, primary audio replacement, compound image creation, relink, and referenced-delete protection all pass.

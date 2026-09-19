@@ -1,190 +1,108 @@
 # Curve Editor
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> MVP curve editing should make easing powerful without turning the product into a full graph-editor clone.
+> Curve Editor edits timing easing only. It is not a full value/speed graph.
 
-## 1. Scope
+## 1. Fast path
 
-Support timing easing between keyframes.
-
-MVP does not require:
-
-- full value graph across entire timeline;
-- spatial path editing;
-- separate speed/value graph modes;
-- expressions;
-- per-component graph complexity.
-
----
-
-## 2. Fast path first
-
-Most users should use presets without opening curve editor:
+Most users should apply:
 
 - Linear;
 - Ease In;
 - Ease Out;
-- Ease In-Out.
+- Ease In-Out
 
-Curve editor is the advanced path.
+without opening the custom editor.
 
----
+## 2. Representation
 
-## 3. Representation
-
-Cubic Bezier timing curve:
+Custom easing is cubic Bezier timing owned by the outgoing keyframe.
 
 ~~~text
-(0,0)
-  \
-   P1 ---- P2
-             \
-             (1,1)
+(0,0) -> (x1,y1) -> (x2,y2) -> (1,1)
 ~~~
 
-Control points:
+For MVP:
 
-- x constrained according to valid easing semantics;
-- y may be allowed outside 0..1 only if overshoot semantics are intentionally supported.
+- x handles constrained to [0,1];
+- y handles constrained to [0,1];
+- no overshoot easing;
+- no spring/bounce procedural curves.
 
-Initial MVP should likely keep a safe bounded curve.
+This keeps timing monotonic and property ranges predictable.
 
----
+## 3. Placement
 
-## 4. UI placement
+Curve editor appears contextually within/above the timeline area.
 
-Prefer one of:
+It does not open a detached modal window.
 
-- temporary lower timeline subpanel;
-- contextual inspector section.
+Suggested working height: about 180–220 logical px.
 
-Avoid opening a separate full application mode/window.
+## 4. Selection context
 
-The user should retain timeline context.
+Custom curve editor targets one active outgoing segment at a time.
 
----
+If multiple keyframes are selected:
 
-## 5. Selection context
+- preset easing can apply to all compatible outgoing segments;
+- custom handle editing requires one primary segment.
 
-Curve editor operates on:
+This avoids ambiguous multi-curve handle manipulation.
 
-- selected keyframe/transition;
-- or selected multiple transitions if compatible.
+## 5. Handles
 
-If selection is ambiguous, show clear neutral state.
+Two control points are draggable.
 
----
+Hit areas are larger than visible points.
 
-## 6. Preset interaction
+Dragging is one history transaction.
 
-Preset selection updates Bezier parameters.
+Escape restores original curve.
 
-Custom drag turns it into custom curve.
+## 6. Live preview
 
-Reset returns to selected preset/default.
+Changing handles updates scene preview immediately at current playhead.
 
----
+No playback restart required.
 
-## 7. Handles
+## 7. Hold/Linear
 
-Large forgiving hit targets.
+Hold has no editable Bezier handles.
 
-Display:
+Linear maps to exact diagonal timing and can be converted to custom Bezier representation only when semantically identical/explicit.
 
-- curve;
-- control points;
-- handles;
-- optionally numeric values.
+## 8. No value graph
 
-No tiny professional-VFX-style graph controls in MVP.
+MVP does not graph property magnitude, velocity, or spatial path.
 
----
+Only normalized timing curve is shown.
 
-## 8. Live preview
+This prevents graph-editor complexity from dominating the rhythm workflow.
 
-Dragging handle updates animation preview immediately.
+## 9. Keyboard/accessibility
 
-One drag = one undo entry.
+Tab/focus can reach preset controls and numeric handle values if exposed.
 
-Escape restores previous curve.
+Mouse drag is not the sole way to reset/apply presets.
 
----
+## 10. Performance
 
-## 9. Time-only easing
+Curve UI evaluates only selected segment(s).
 
-Curve changes normalized progress, not property value graph topology.
+No scanning/rendering of all project curves.
 
-Same curve system works for:
+## 11. Tests
 
-- position;
-- scale;
-- rotation;
-- opacity;
-- effect parameters.
+- preset canonical points;
+- handle bounds;
+- exact endpoints;
+- solver monotonic behavior;
+- outgoing-key ownership;
+- undo/cancel;
+- multi-selection preset application.
 
----
+## 12. Definition of Done
 
-## 10. Hold
-
-Hold has no editable Bezier.
-
-UI communicates that curve editing is unavailable.
-
----
-
-## 11. Linear
-
-Linear preset = straight line.
-
-Can be represented without special curve data or canonical Bezier.
-
----
-
-## 12. Multi-selection
-
-MVP can apply preset easing to many selected transitions.
-
-Custom simultaneous Bezier editing for heterogeneous existing curves can be deferred.
-
----
-
-## 13. Keyboard
-
-Required:
-
-- Escape cancel drag;
-- Delete not destructive to keyframes while handle focus is ambiguous;
-- arrow fine-adjust optional;
-- preset shortcuts optional.
-
-Do not overload timeline navigation keys inside active numeric curve field.
-
----
-
-## 14. Performance
-
-Curve UI is tiny.
-
-Main requirement is no expensive full-scene rebuild beyond normal animation re-evaluation.
-
----
-
-## 15. Tests
-
-- preset maps to expected parameters;
-- linear exact;
-- handle drag transaction undo;
-- invalid curve prevented/clamped;
-- evaluator matches visual curve;
-- selected transition changes correctly.
-
----
-
-## 16. Definition of Done
-
-- presets require no graph opening;
-- custom cubic curve editable;
-- interaction is simple and readable;
-- one drag = one undo;
-- curve semantics match animation engine.
+Preset path is fast, one-segment custom editing is clear, handles are comfortable, edits are undoable, and engine evaluation matches displayed timing curve.

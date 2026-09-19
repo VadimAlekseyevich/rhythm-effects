@@ -1,510 +1,308 @@
 # Timeline
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> The timeline is the central product surface. It combines waveform, BPM grid, playhead, object/property rows, and musical keyframes.
+> Timeline is the primary rhythm-animation authoring surface.
 
-## 1. Product objective
+## 1. Objective
 
-The timeline must make this loop exceptionally fast:
+Optimize:
 
 ~~~text
 hear moment
-→ identify beat/subdivision
-→ navigate there
-→ place/move keyframe
-→ preview
+-> find musical position
+-> create/select keyframe
+-> edit visual value
+-> preview
 ~~~
 
-It is not a generic video NLE timeline.
+It is not a generic NLE timeline.
 
----
+## 2. Shared horizontal transform
 
-## 2. Time coordinate system
+One TimelineTransform maps ProjectTimeNs to screen x.
 
-One canonical timeline transform maps ProjectTime to screen x.
+Waveform, musical grid, playhead, and keyframes use the same conversion.
 
-Concept:
+No independent rounding per layer.
 
-~~~rust
-TimelineTransform {
-    visible_start,
-    seconds_per_pixel,
-    viewport_rect,
-}
-~~~
+## 3. Vertical structure
 
-All layers use this transform:
+From top to bottom:
 
-- waveform;
-- grid;
-- playhead;
-- keyframes;
-- markers later.
+- ruler: about 28 px;
+- waveform: about 64 px;
+- object/property rows.
 
-Never let waveform and keyframes use independent rounding.
+Object row: about 30 px.
 
----
+Property row: about 28 px.
 
-## 3. Musical coordinate helpers
+Actual token tuning may move by a few logical pixels without changing contract.
 
-Timeline also needs:
+## 4. Ruler/grid hierarchy
 
-- ProjectTime ↔ continuous musical tick;
-- MusicalTick → ProjectTime;
-- current GridResolution.
-
-Keyframes draw from their MusicalTick-derived absolute position.
-
----
-
-## 4. Horizontal zoom
-
-Zoom should preserve orientation.
-
-Preferred behavior:
-
-- Ctrl+wheel or equivalent;
-- anchor at mouse cursor when over timeline;
-- otherwise anchor playhead/center according to explicit rule.
-
-Zoom changes view only, never project data.
-
----
-
-## 5. Horizontal pan
-
-Support:
-
-- wheel/shift-wheel convention;
-- middle drag where useful;
-- scrollbar only if visually unobtrusive.
-
-Panning never moves playhead.
-
----
-
-## 6. Ruler
-
-Ruler emphasizes musical structure.
-
-At appropriate zoom show:
-
-- bar number;
-- beat;
-- subdivisions.
-
-Minor labels disappear before lines become visually crowded.
-
----
-
-## 7. Grid hierarchy
-
-Visual strength:
+Visual priority:
 
 ~~~text
-Bar      strongest
-Beat     medium
-Subdiv   subtle
+bar       strongest
+beat      medium
+subdivision subtle
 ~~~
 
-Do not assign unrelated colors to every division.
+Labels disappear before lines become crowded.
 
-Current grid resolution is visually clear.
+Current authoring division remains logically active even if some minor lines are hidden at zoom-out.
 
----
+## 5. Waveform
 
-## 8. Grid density
+Waveform remains fixed near ruler and does not scroll vertically with object rows.
 
-At far zoom-out:
+It is visually behind playhead/keyframes/grid emphasis.
 
-- hide minor subdivision lines;
-- retain bars/beats as space permits.
+## 6. Zoom
 
-This is display density only.
+Ctrl+wheel zooms horizontally around mouse pointer.
 
-The current authoring GridResolution remains logically active.
+Zoom changes only view state.
 
----
+Clamp zoom to a practical range that permits:
 
-## 9. Existing fine-grid keyframes
+- fine 1/32-beat editing at high BPM;
+- whole-song overview.
 
-Important invariant:
+Exact numeric zoom limits are implementation constants and can be tuned without schema impact.
 
-A keyframe can remain at a fine MusicalTick position even after the user switches to a coarser authoring grid.
+## 7. Pan
+
+- Shift+wheel: horizontal pan;
+- middle-mouse drag: horizontal pan;
+- panning never moves playhead.
+
+## 8. Playhead
+
+Playhead is continuous ProjectTimeNs.
+
+Ruler click/drag seeks continuously.
+
+Musical keyboard navigation moves it exactly by grid/beat/bar commands.
+
+The playhead may sit between grid positions.
+
+## 9. Keyframe creation
+
+Authored keyframes always resolve to the current authoring grid.
+
+When K/keyframe button creates a key while playhead is between grid points:
+
+1. resolve nearest grid point using TIME_MODEL snap rule;
+2. move playhead to that exact point;
+3. create/update keyframe there.
+
+This removes ambiguity between visible playhead and authored key.
+
+## 10. Existing fine-grid keys
+
+Changing BeatDivision never moves/hides existing keys.
 
 Example:
 
 ~~~text
-created on 1/16 grid
-switch current grid to 1/8
-old keyframe remains exactly where it was
+key at tick 60 created on 1/16
+switch grid to 1/4
+key remains tick 60
 ~~~
 
-It must still render visibly.
+## 11. Object/property rows
 
-Do not quantize or hide it merely because it is not on the current coarse step.
+Object rows show primary object identity.
 
----
+Property rows are shown for:
 
-## 10. Playhead
+- animated properties;
+- currently focused/revealed property;
+- explicitly expanded compatible properties.
 
-Playhead is continuous.
+Do not display every static property by default.
 
-Interactions:
+## 12. Keyframe glyph/hit target
 
-- click ruler/time space to seek;
-- drag;
-- keyboard musical stepping;
-- keyboard keyframe stepping.
+Visible diamond may be compact.
 
-Playhead does not need to remain on grid.
-
-A separate snap-to-grid action may place it exactly on grid.
-
----
-
-## 11. Waveform row
-
-Waveform stays near ruler/transport context and spans composition/audio time.
-
-Requirements:
-
-- enough height to align transients;
-- does not dominate visual hierarchy;
-- clipped to visible range;
-- grid lines may overlay it with controlled contrast.
-
----
-
-## 12. Object rows
-
-Each composition object has a primary row.
-
-Primary row displays:
-
-- name;
-- visibility/lock state if part of row header;
-- compact keyframe summary markers if useful.
-
-Expandable child rows show animated properties.
-
----
-
-## 13. Property rows
-
-Default behavior should avoid showing dozens of static properties.
-
-Candidates:
-
-- show animated properties automatically;
-- show currently focused property;
-- allow explicit reveal of all animatable properties.
-
-Final UX should minimize vertical clutter.
-
----
-
-## 14. Keyframe glyph
-
-Use a simple recognizable glyph, e.g. diamond.
-
-Visual size can be compact, but hit target is larger.
+Interactive hit box is at least 18×18 logical px.
 
 States:
 
 - normal;
 - hover;
-- selected;
-- multiple-selected;
-- collision/invalid preview if needed.
+- selected.
 
----
+Do not encode too many semantics into glyph color.
 
-## 15. Keyframe creation
+## 13. Single drag
 
-Keyframe is created at current valid authoring grid position.
+1. begin transaction;
+2. pointer x maps to continuous time;
+3. convert to continuous musical position;
+4. snap to current BeatDivision;
+5. preview target tick;
+6. commit on release as one history entry;
+7. Esc restores original state.
 
-If playhead is between grid points:
+## 14. Multi-drag
 
-- creation resolves to nearest/current explicit snap policy;
-- UI should show where key will be created before/at action if ambiguity exists.
+Use one selected anchor keyframe.
 
-Potential alternative: keyframe command first snaps playhead. Decide in usability prototype.
+Snap anchor to target grid, derive integer delta ticks, apply identical delta to all selected keys.
 
----
+Internal pattern spacing is preserved even if some keys originated from a finer grid.
 
-## 16. Keyframe drag
+## 15. Collision
 
-Single keyframe:
+One keyframe per property/tick.
 
-1. pointer drag begins;
-2. continuous pointer x maps to time;
-3. time snaps to current authoring grid;
-4. preview keyframe at target MusicalTick;
-5. release commits one command.
+Accepted move/paste collision rule:
 
-Show musical destination.
+- incoming/moved keyframe wins;
+- occupied unselected key is replaced;
+- replaced key data is included in undo;
+- preview should indicate replacement before commit where practical.
 
----
+## 16. Box selection
 
-## 17. Multi-keyframe drag
+Drag from empty keyframe canvas.
 
-Preserve selected pattern spacing.
+Normal box replaces selection.
 
-Recommended model:
+Ctrl+box adds/toggles according to standard selection semantics.
 
-- choose drag anchor keyframe;
-- anchor resolves to target grid position;
-- compute integer delta ticks;
-- add same delta to every selected keyframe.
+Only visible-range candidate keys are hit-tested.
 
-This allows selected keys created on finer grids to retain internal rhythmic phase.
+## 17. Keyboard movement
 
----
+Per KEYBOARD_SHORTCUTS.md:
 
-## 18. Keyboard movement
+- Alt+Left/Right: selected keys ± current grid step;
+- Ctrl+Alt+Left/Right: ± one beat.
 
-Subdivision move:
+Movement is integer tick arithmetic, not pointer-style resnap.
 
-~~~text
-tick += current_grid_step
-~~~
+## 18. Copy/paste
 
-Beat move:
+Copied keyframe packet stores:
 
-~~~text
-tick += PPQ
-~~~
-
-Bar move uses time signature.
-
-Exact integer arithmetic; no snap round trip.
-
----
-
-## 19. Collision policy
-
-One keyframe per property per tick.
-
-Proposed MVP rule:
-
-- moving/pasting selection onto occupied unselected keyframe: moved/pasted keyframe wins;
-- overwritten keyframe is included in undo history;
-- preview should visibly indicate collision/replacement.
-
-This prioritizes fast editing but remains reversible.
-
-Must be usability-tested before Accepted status.
-
----
-
-## 20. Box selection
-
-Drag from empty keyframe area.
-
-Modifiers control replace/add/remove selection.
-
-Selection rectangle only processes visible candidate keyframes.
-
----
-
-## 21. Vertical virtualization
-
-Only lay out visible object/property rows.
-
-Need stable row-height model.
-
-Expanded/collapsed state lives in editor session.
-
----
-
-## 22. Horizontal virtualization
-
-Only inspect/render keyframes in visible tick/time range plus small margin.
-
-Because keyframes are sorted by tick, use binary-search range.
-
-No iteration through every keyframe every frame.
-
----
-
-## 23. Selection model
-
-Keyframe selection stores KeyframeId plus property/object context as needed.
-
-Do not use screen position or tick alone as identity.
-
-Selection survives timeline pan/zoom.
-
-If keyframe is deleted, remove from selection.
-
----
-
-## 24. Copy/paste
-
-Copy selected keyframes stores:
-
-- relative tick offsets from an anchor;
+- compatible property identity/type;
 - values;
 - interpolation;
-- compatible property identity/type.
+- relative MusicalTick offsets from anchor.
 
 Paste:
 
-- uses playhead/current target as anchor;
-- resolves anchor to current grid;
-- allocates fresh KeyframeIds;
-- preserves relative offsets.
+1. resolve current playhead to grid anchor;
+2. allocate new KeyframeIds;
+3. preserve relative tick offsets;
+4. apply collision policy;
+5. one compound history entry.
 
-Cross-property paste only if types/semantics are compatible.
+Cross-property paste requires semantic/type compatibility.
 
----
+## 19. Duplicate
 
-## 25. Duplicate pattern
+Ctrl+D duplicates active keyframe selection and leaves the duplicate selected for immediate Alt+Arrow repositioning.
 
-Fast duplicate should be equivalent to copy + immediately movable selection.
+Relative pattern timing remains unchanged.
 
-Future "repeat N times" can be added post-MVP.
+## 20. Easing
 
----
+Fast preset access through context/command/curve UI.
 
-## 26. Easing indication
+Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
-Do not overload keyframe glyph with too much visual encoding.
+## 21. Playback follow
 
-A subtle marker or inspector/context state is enough.
+Follow Playhead is available but OFF by default.
 
-Detailed curve belongs in Curve Editor.
+When enabled:
 
----
+- during playback, scroll only when playhead approaches a viewport edge;
+- user manual pan disables follow until explicitly re-enabled.
 
-## 27. Playback follow
+Avoid constant recentring.
 
-Optional mode:
+## 22. Focus
 
-- timeline scrolls when playhead approaches edge.
+Timeline focus is visible.
 
-Default behavior must not constantly fight user's manual navigation.
+Text field focus elsewhere prevents timeline arrows/letters stealing input.
 
-Potential simple MVP policy:
+## 23. Virtualization
 
-- follow only during playback if explicitly enabled;
-- user pan disables follow until re-enabled.
+Vertical:
 
----
+- lay out visible object/property rows only.
 
-## 28. Row height
+Horizontal:
 
-Keep readable but compact.
+- query sorted keyframes by visible MusicalTick range plus margin.
 
-Object rows slightly stronger than property rows.
+Frame cost should depend primarily on visible rows/keys, not project total.
 
-Do not solve density by tiny typography.
+## 24. Overlapping visual keys
 
----
+At extreme zoom-out, multiple distinct MusicalTicks may occupy the same few pixels.
 
-## 29. Timeline focus
+MVP:
 
-Focused timeline should be visually subtle but clear.
+- preserve all semantic keys;
+- hit-test nearest time/key;
+- selected keys remain emphasized.
 
-When text field is active elsewhere, timeline letter/navigation shortcuts must not steal typing.
+Aggregated/stacked visualization can be post-MVP.
 
-Arrow rhythm navigation policy must coordinate with numeric fields.
+## 25. BPM/offset editing
 
----
+Waveform remains stationary in project/audio time.
 
-## 30. Performance budget
+Changing BPM/offset moves musical grid and therefore the absolute derived positions of keyframes.
 
-Timeline frame cost should depend primarily on:
+Keyframe MusicalTicks remain unchanged.
 
-- visible rows;
-- visible keyframes;
-- viewport pixels;
-
-not total project duration/keyframe count.
-
-Stress fixture:
-
-- 500 objects;
-- 10,000 keyframes.
-
-Even if full stress target is not silky in MVP, architecture must avoid obvious O(total_keyframes_per_frame) work.
-
----
-
-## 31. Hit testing
-
-Use spatially simple visible-range lists.
-
-Hit area larger than glyph.
-
-When multiple keys overlap visually due zoom:
-
-- prefer nearest exact time;
-- potentially show stacked/combined representation later.
-
-MVP can cycle/select topmost with clear behavior.
-
----
-
-## 32. BPM editing interaction
-
-BPM/offset controls remain near timeline.
-
-When adjusting offset:
-
-- grid moves over stationary waveform;
-- existing keyframe MusicalTicks move in absolute time because their musical meaning follows grid;
-- this is intentional.
-
-This is one of the core semantic benefits of storing keyframes in musical time.
-
----
-
-## 33. Tempo change implication
-
-MVP supports one BPM.
-
-Timeline APIs should call TempoMap rather than hardcode BPM formulas so future tempo changes do not require replacing coordinate infrastructure.
-
----
-
-## 34. Empty states
+## 26. Empty states
 
 No audio:
-- grid can still exist if BPM set, but import CTA should be prominent.
+- ruler/grid may exist if BPM is set;
+- Import Audio remains prominent.
 
 No BPM:
-- waveform visible;
-- rhythm grid unavailable/disabled with clear setup action.
+- waveform/playhead work;
+- rhythm grid/keyframe creation disabled with clear Set BPM action.
 
 No objects:
-- timeline still shows waveform/ruler and Add Object path.
+- ruler/waveform visible;
+- Add Object path visible.
 
----
+## 27. Stress target
 
-## 35. Required prototype scenarios
+Architecture test fixture:
 
-1. align BPM to waveform;
-2. create 1/16 keys;
-3. switch grid to 1/8;
-4. old keys stay;
-5. drag group by one beat;
-6. box select 20 keys;
-7. copy/paste four-beat pattern;
-8. rapid zoom/pan;
-9. play while timeline follows;
-10. 10k-key stress data.
+- 500 objects;
+- 10,000+ keyframes.
 
----
+MVP release smoothness is required primarily for realistic medium projects, but stress case must not reveal obvious O(total keys every frame) design.
 
-## 36. Definition of Done
+## 28. Required usability scenarios
 
-- waveform/grid/playhead share coordinate transform;
-- keyframes are grid-native;
-- fine-grid keys survive grid changes;
-- multi-drag preserves tick spacing;
-- visible-range virtualization works;
-- common rhythm navigation has keyboard path;
-- timeline remains comfortable at realistic density.
+- align BPM to waveform;
+- create 1/16 pattern;
+- switch to 1/4 without moving old keys;
+- multi-drag one beat;
+- collision replacement + undo;
+- box-select 20 keys;
+- duplicate/paste four-beat pattern;
+- rapid zoom/pan;
+- playback follow toggle;
+- 10k-key stress fixture.
+
+## 29. Definition of Done
+
+Timeline is MVP-ready when shared transforms, grid-native key creation, fine-grid preservation, collision/undo, multi-drag, virtualization, keyboard rhythm flow, and realistic density comfort all pass.

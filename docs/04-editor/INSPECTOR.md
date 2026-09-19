@@ -1,47 +1,32 @@
 # Inspector
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> Inspector exposes context-sensitive properties without turning the editor into a wall of controls.
+> Inspector exposes context without becoming a dense control wall.
 
-## 1. Primary rule
+## 1. Section order
 
-Show what matters for the current selection.
+For one selected object:
 
-Do not make the user navigate a deep property hierarchy.
+1. Transform
+2. Appearance / object-specific content
+3. Effects
 
----
+No nested tab hierarchy.
 
-## 2. Section order
+## 2. Property row
 
-For a selected object, recommended order:
-
-1. identity/basic;
-2. Transform;
-3. Appearance/object-specific;
-4. Effects.
-
-Advanced details remain collapsed/contextual.
-
----
-
-## 3. Property row
-
-Canonical pattern:
+Standard animatable row:
 
 ~~~text
-Label        Value / control        Animation control
+Label | value/control | keyframe state/button
 ~~~
 
-Keep alignment consistent.
+Animation affordance stays in the same horizontal location across property types.
 
-Do not place animation controls differently for every property type.
+## 3. Transform
 
----
-
-## 4. Transform section
-
-Always available for visual objects:
+Always available for editable object:
 
 - Position X/Y;
 - Scale X/Y;
@@ -49,220 +34,162 @@ Always available for visual objects:
 - Anchor X/Y;
 - Opacity.
 
-Frequently used values should not require expanding submenus.
+Friendly display:
 
----
+- Scale as percent;
+- Rotation degrees;
+- Opacity percent;
+- Position/size composition pixels;
+- Anchor normalized or percent representation, consistently labelled.
 
-## 5. Numeric editing
-
-Support:
+## 4. Numeric editing
 
 - click/type;
-- Enter commit;
-- Escape cancel;
-- optional drag scrub.
+- Enter commits;
+- focus loss commits valid value;
+- Escape restores pre-edit;
+- invalid intermediate string stays only in UI buffer;
+- one edit transaction creates one history step.
 
-During incomplete typing, invalid text stays local UI state until valid/commit.
+Optional drag-scrub may be added if it does not reduce target/readability.
 
-Never insert NaN/Infinity into Project.
+## 5. Property animation
 
----
+Static property:
 
-## 6. Friendly display units
+- value edits base_value;
+- keyframe button/K creates first key at nearest current grid point and moves playhead there.
 
-Internal vs UI:
+Animated property:
 
-- scale 1.0 ↔ 100%;
-- opacity 0..1 ↔ 0..100%;
-- rotation stored/documented, displayed degrees;
-- position in composition units/pixels.
+- at an existing key: edits that key;
+- off-key: committing a value creates/updates key at nearest grid point and moves playhead there.
 
-Conversion belongs in control layer.
+This is property-scoped animation behavior, not global Auto-Key.
 
----
+## 6. Keyframe indicator
 
-## 7. Animation affordance
-
-Each animatable property communicates:
+The property control distinguishes:
 
 - static;
-- animated;
-- keyframe exists at current musical position;
-- keyframe can be added/removed.
+- animated but no key at current resolved position;
+- key exists at current position.
 
-Use one coherent icon/control language.
+Do not rely on color alone; glyph/shape/state also changes.
 
----
+## 7. Removing the last keyframe
 
-## 8. Keyframe at continuous playhead
+When the final key is removed, property becomes static.
 
-Because keyframes live on musical grid, inspector add-key action resolves to the current authoring grid position.
+Its base_value becomes the value of that removed key so the visible result does not unexpectedly jump at that moment.
 
-UI should avoid implying arbitrary-time key creation.
+The action is undoable.
 
-If playhead is between divisions, target grid position should be predictable/visible.
+## 8. Multi-object selection
 
----
+Inspector shows common transform properties.
 
-## 9. Animated property editing
+Mixed values render a clear mixed state.
 
-Policy proposal:
+Editing a common property applies one compound command to all selected objects.
 
-- at existing keyframe: edit that key value;
-- static property: edit base value;
-- animated property with no keyframe at target: do not silently alter an interpolated temporary value;
-- user explicitly adds keyframe or enables future auto-key.
+For each selected property:
 
-This keeps state predictable.
+- static property changes base_value;
+- already animated property creates/updates current grid key.
 
----
+Type-specific sections appear only if selection types are compatible.
 
-## 10. Multi-object selection
+## 9. Rectangle
 
-MVP may support limited common-property editing.
+MVP:
 
-At minimum:
+- Size X/Y;
+- Fill color;
+- Corner Radius only if implemented from schema field.
 
-- inspector can indicate multiple objects selected;
-- common transform fields may show mixed values;
-- bulk edit can be deferred if implementation becomes costly.
+Size and Fill are animatable.
 
-Do not show misleading single values.
+## 10. Ellipse
 
----
+- Size X/Y;
+- Fill color.
 
-## 11. Rectangle
+Animatable.
 
-Expose:
+## 11. Image
 
-- size;
-- fill;
-- corner radius only if included.
+MVP:
 
----
+- source asset/path summary;
+- intrinsic dimensions readout;
+- Relink action.
 
-## 12. Ellipse
+Sizing is via Transform Scale.
 
-Expose:
+No crop/fit controls.
 
-- size;
-- fill.
-
----
-
-## 13. Image
-
-Expose:
-
-- asset/source;
-- intrinsic dimensions info;
-- fit behavior if supported.
-
-Missing source shows relink action.
-
----
-
-## 14. Text
-
-Expose:
+## 12. Text
 
 - content;
-- font family;
+- system font;
+- weight;
+- style;
 - font size;
 - alignment;
 - color.
 
-Avoid advanced typography controls in MVP.
+Text/color semantics follow TEXT_RENDERING.md.
 
----
+Font size/content are static in MVP; Color is animatable.
 
-## 15. Effects
+## 13. Effects
 
-Effects displayed as shallow stacked sections/cards.
-
-Each:
+Effect group shows:
 
 - enabled;
-- name;
-- parameters;
-- animation controls;
-- reorder handle/action;
-- remove.
+- reorder;
+- remove;
+- typed parameters with keyframe affordance.
 
-No effect editor popup for normal parameters.
+Add Effect opens one shallow searchable list of the five MVP effects.
 
----
+## 14. Collapsing
 
-## 16. Add Effect
+Sections may collapse one level.
 
-One searchable/list popover.
+No collapsible section inside repeated nested collapsible sections unless unavoidable.
 
-Small MVP list.
+Transform starts expanded.
 
-Do not create a separate Effects Browser panel.
+## 15. Search
 
----
+Dedicated Inspector property search is not required for MVP.
 
-## 17. Collapsing
+Command Search handles infrequent global actions.
 
-Transform may default expanded.
+## 16. Focus
 
-Object-specific section expanded.
+Active text/numeric editor owns keyboard typing/arrows according to control behavior.
 
-Effects individually collapsible if stack grows.
+Global Save/Undo may remain available where safe.
 
-Avoid nested collapsibles inside effects unless essential.
+## 17. Validation
 
----
+Core validates semantic ranges.
 
-## 18. Property search
+UI shows friendly range errors/clamping where appropriate.
 
-Not required for MVP.
+Invalid text is never written into Project.
 
-If future property count grows, search is preferable to more nested tabs.
+## 18. Performance
 
----
+Inspector only lays out current selection context.
 
-## 19. Focus
+Font list enumeration/cache is not repeated every frame.
 
-Focused numeric/text control captures typing.
+No project-wide property scan for one selected object.
 
-Global safe shortcuts remain where appropriate.
+## 19. Definition of Done
 
-Rhythm arrow navigation must not steal arrow keys from active text field.
-
----
-
-## 20. Validation
-
-Inline errors for user-fixable values.
-
-Examples:
-
-- invalid font;
-- invalid asset;
-- out-of-range BPM elsewhere;
-- impossible size.
-
-Prefer clamp only when expected; otherwise explain.
-
----
-
-## 21. Performance
-
-Inspector only renders selected context.
-
-No asset decode/font scan/file IO directly in UI draw.
-
-Large dropdown lists use lazy/searchable presentation.
-
----
-
-## 22. Definition of Done
-
-- all MVP object properties accessible;
-- animation state obvious;
-- no deep navigation;
-- invalid input cannot corrupt project;
-- effect controls stay compact;
-- missing assets/fonts recoverable.
+Inspector is MVP-ready when static/animated edit semantics, last-key removal, mixed selection, object-specific controls, effect controls, focus/cancel/undo, and comfortable design-system sizing all pass.
