@@ -192,6 +192,44 @@ impl TempoMap {
     }
 }
 
+pub fn floor_tick_position_to_grid(
+    tick_position: f64,
+    division: BeatDivision,
+) -> Result<MusicalTick, TimeConversionError> {
+    grid_bound_tick_position(tick_position, division, false)
+}
+
+pub fn ceil_tick_position_to_grid(
+    tick_position: f64,
+    division: BeatDivision,
+) -> Result<MusicalTick, TimeConversionError> {
+    grid_bound_tick_position(tick_position, division, true)
+}
+
+fn grid_bound_tick_position(
+    tick_position: f64,
+    division: BeatDivision,
+    ceil: bool,
+) -> Result<MusicalTick, TimeConversionError> {
+    if !tick_position.is_finite() {
+        return Err(TimeConversionError::NonFiniteTickPosition);
+    }
+
+    let step = division.ticks_per_step() as f64;
+    let scaled = tick_position / step;
+    let snapped = if ceil {
+        scaled.ceil() * step
+    } else {
+        scaled.floor() * step
+    };
+
+    if snapped < i64::MIN as f64 || snapped > i64::MAX as f64 {
+        return Err(TimeConversionError::Overflow);
+    }
+
+    Ok(MusicalTick::new(snapped as i64))
+}
+
 pub fn snap_tick_position_to_grid(
     tick_position: f64,
     division: BeatDivision,
@@ -408,6 +446,48 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn grid_floor_and_ceil_handle_negative_positions() {
+        let division = super::BeatDivision::new(4).expect("1/4 grid");
+
+        assert_eq!(
+            super::floor_tick_position_to_grid(-1.0, division)
+                .expect("finite floor")
+                .get(),
+            -240
+        );
+        assert_eq!(
+            super::ceil_tick_position_to_grid(-1.0, division)
+                .expect("finite ceil")
+                .get(),
+            0
+        );
+        assert_eq!(
+            super::floor_tick_position_to_grid(-240.0, division)
+                .expect("exact floor")
+                .get(),
+            -240
+        );
+        assert_eq!(
+            super::ceil_tick_position_to_grid(-240.0, division)
+                .expect("exact ceil")
+                .get(),
+            -240
+        );
+        assert_eq!(
+            super::floor_tick_position_to_grid(241.0, division)
+                .expect("finite floor")
+                .get(),
+            240
+        );
+        assert_eq!(
+            super::ceil_tick_position_to_grid(241.0, division)
+                .expect("finite ceil")
+                .get(),
+            480
+        );
+    }
 
     #[test]
     fn grid_snap_half_ties_choose_later_tick() {
