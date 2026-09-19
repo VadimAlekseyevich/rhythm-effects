@@ -89,7 +89,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-066** — Implement AssetRecord/AssetKind/AssetSource and AudioTrack semantic structures.
 - [x] **AI-067** — Implement Project validation for IDs, dimensions, duration, numeric finiteness and references.
 - [x] **AI-068** — Implement Animated<T> and Keyframe<T> with sorted unique MusicalTick invariant.
-- [ ] **AI-069** — Implement Hold interpolation.
+- [x] **AI-069** — Implement Hold interpolation.
 - [ ] **AI-070** — Implement Linear interpolation for f32 and Vec2.
 - [ ] **AI-071** — Implement LinearRgba interpolation in linear-light values.
 - [ ] **AI-072** — Implement scalar degree rotation interpolation without shortest-path normalization.

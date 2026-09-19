@@ -121,6 +121,15 @@ impl<T> Animated<T> {
     }
 }
 
+#[must_use]
+pub fn interpolate_hold<T: Clone>(from: &T, to: &T, progress: f64) -> T {
+    if progress >= 1.0 {
+        to.clone()
+    } else {
+        from.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Animated, AnimationInvariantError, Interpolation, Keyframe};
@@ -133,6 +142,15 @@ mod tests {
             value,
             Interpolation::Linear,
         )
+    }
+
+    #[test]
+    fn hold_interpolation_switches_only_at_segment_end() {
+        assert_eq!(super::interpolate_hold(&10, &20, -1.0), 10);
+        assert_eq!(super::interpolate_hold(&10, &20, 0.0), 10);
+        assert_eq!(super::interpolate_hold(&10, &20, 0.999_999), 10);
+        assert_eq!(super::interpolate_hold(&10, &20, 1.0), 20);
+        assert_eq!(super::interpolate_hold(&10, &20, 2.0), 20);
     }
 
     #[test]
