@@ -1,6 +1,6 @@
 # Product Specification
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document defines the MVP as a user-facing product. Architecture documents may choose how to implement these behaviors, but must not silently change them.
 
@@ -89,11 +89,11 @@ The user can create a project without going through a long setup wizard.
 
 A new project has sensible defaults:
 
-- composition resolution: sensible default, final value TBD;
-- frame rate: sensible default, final value TBD;
-- duration: may be derived from imported audio once audio is present;
-- background: predictable default;
-- BPM: unset or clearly marked as requiring configuration;
+- composition resolution: 1920×1080;
+- frame rate: 60 FPS;
+- duration: 10 seconds before audio import; after first primary-audio import, extend to at least the audio duration;
+- background: opaque black;
+- BPM: unset; default meter is 4/4; default authoring division is 1/4 beat once BPM is set;
 - grid: visible only when BPM can be resolved.
 
 The project should become useful as soon as audio is imported.
@@ -623,3 +623,32 @@ These require later explicit decisions rather than accidental implementation:
 - recent-project screen.
 
 These decisions should be resolved before their implementation becomes expensive.
+
+
+---
+
+## 29. Accepted MVP product decisions
+
+The following choices are frozen for MVP implementation:
+
+- default composition: 1920×1080 at 60 FPS;
+- default pre-audio duration: 10 seconds;
+- default composition background: opaque black;
+- BPM starts unset;
+- default meter: 4/4;
+- default authoring grid after BPM setup: 1/4 beat;
+- SVG is post-MVP;
+- object parenting is post-MVP;
+- global Auto-Key mode is not part of MVP;
+- keyframing is enabled per property;
+- once a property has at least one keyframe, editing that property at a time without a keyframe creates a new keyframe at the nearest current authoring-grid position and moves the playhead to that resolved grid position;
+- if the property is not animated, normal editing changes base_value;
+- clicking the keyframe control on an unanimated property creates its first keyframe using the current base value at the resolved grid position;
+- removing the final keyframe returns the property to a static base-value state using the removed keyframe value at that moment;
+- ImageObject uses intrinsic image bounds plus Transform for MVP; crop/fit modes are post-MVP;
+- composition text uses installed/system fonts plus one bundled fallback family; imported font assets are post-MVP;
+- MVP effect set is Blur, Glow, Tint, Noise, and RGB Split;
+- one composition and one primary audio track remain hard MVP boundaries;
+- the default workspace is fixed/resizable rather than a fully dockable IDE workspace.
+
+Changes to these decisions require an explicit scope/ADR update rather than incidental implementation.
