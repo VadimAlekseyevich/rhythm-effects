@@ -207,12 +207,15 @@ mod tests {
         path::{Path, PathBuf},
     };
 
-    use super::{AudioChannelLayout, DecodedAudio, decode_audio_file};
+    use super::{
+        AudioChannelLayout, AudioDecodeError, DecodedAudio, decode_audio_file, probe_audio_file,
+    };
 
-    fn write_pcm16_mono_wav(path: &Path, sample_rate: u32, samples: &[i16]) {
+    fn write_pcm16_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[i16]) {
         let data_len = u32::try_from(samples.len() * 2).expect("small fixture");
         let riff_size = 36_u32 + data_len;
-        let byte_rate = sample_rate * 2;
+        let block_align = channels * 2;
+        let byte_rate = sample_rate * u32::from(block_align);
 
         let mut bytes = Vec::with_capacity(44 + data_len as usize);
         bytes.extend_from_slice(b"RIFF");
@@ -221,10 +224,10 @@ mod tests {
         bytes.extend_from_slice(b"fmt ");
         bytes.extend_from_slice(&16_u32.to_le_bytes());
         bytes.extend_from_slice(&1_u16.to_le_bytes());
-        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
         bytes.extend_from_slice(&sample_rate.to_le_bytes());
         bytes.extend_from_slice(&byte_rate.to_le_bytes());
-        bytes.extend_from_slice(&2_u16.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
         bytes.extend_from_slice(&16_u16.to_le_bytes());
         bytes.extend_from_slice(b"data");
         bytes.extend_from_slice(&data_len.to_le_bytes());
@@ -243,9 +246,28 @@ mod tests {
     }
 
     #[test]
+    fn multichannel_source_is_rejected_without_downmix() {
+        let path = temp_fixture_path("three-channel.wav");
+        write_pcm16_wav(&path, 8_000, 3, &[0, 0, 0, 1_000, 2_000, 3_000]);
+
+        let probe_error = probe_audio_file(&path).expect_err("3-channel probe must fail");
+        assert!(matches!(
+            probe_error,
+            AudioDecodeError::UnsupportedChannelCount(3)
+        ));
+
+        let decode_error = decode_audio_file(&path).expect_err("3-channel decode must fail");
+        let _ = fs::remove_file(&path);
+        assert!(matches!(
+            decode_error,
+            AudioDecodeError::UnsupportedChannelCount(3)
+        ));
+    }
+
+    #[test]
     fn wav_fixture_decodes_to_mono_interleaved_f32() {
         let path = temp_fixture_path("decode-fixture.wav");
-        write_pcm16_mono_wav(&path, 8_000, &[0, 16_384, -16_384, 32_767]);
+        write_pcm16_wav(&path, 8_000, 1, &[0, 16_384, -16_384, 32_767]);
 
         let decoded = decode_audio_file(&path).expect("decode generated WAV");
         let _ = fs::remove_file(&path);
