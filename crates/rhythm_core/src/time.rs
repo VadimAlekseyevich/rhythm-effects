@@ -108,13 +108,12 @@ impl BpmMicros {
         let mut parts = input.split('.');
         let whole = parts.next().ok_or(BpmError::InvalidFormat)?;
         let fraction = parts.next();
-        if parts.next().is_some() || whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) {
+        if parts.next().is_some() || whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit())
+        {
             return Err(BpmError::InvalidFormat);
         }
 
-        let whole_value = whole
-            .parse::<u64>()
-            .map_err(|_| BpmError::InvalidFormat)?;
+        let whole_value = whole.parse::<u64>().map_err(|_| BpmError::InvalidFormat)?;
         let mut micros = whole_value
             .checked_mul(1_000_000)
             .ok_or(BpmError::OutOfRange)?;
@@ -203,18 +202,12 @@ mod tests {
 
     #[test]
     fn bpm_range_is_inclusive_and_validated() {
-        assert_eq!(
-            BpmMicros::new(1_000_000).map(BpmMicros::get),
-            Ok(1_000_000)
-        );
+        assert_eq!(BpmMicros::new(1_000_000).map(BpmMicros::get), Ok(1_000_000));
         assert_eq!(
             BpmMicros::new(1_000_000_000).map(BpmMicros::get),
             Ok(1_000_000_000)
         );
-        assert_eq!(
-            BpmMicros::new(999_999),
-            Err(super::BpmError::OutOfRange)
-        );
+        assert_eq!(BpmMicros::new(999_999), Err(super::BpmError::OutOfRange));
         assert_eq!(
             BpmMicros::new(1_000_000_001),
             Err(super::BpmError::OutOfRange)
