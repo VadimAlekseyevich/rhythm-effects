@@ -99,11 +99,7 @@ impl Project {
 
             for effect in &object.effects {
                 register_entity_id(effect.id.get(), &mut seen_ids, &mut max_entity_id)?;
-                validate_effect(
-                    &effect.kind,
-                    &mut seen_ids,
-                    &mut max_entity_id,
-                )?;
+                validate_effect(&effect.kind, &mut seen_ids, &mut max_entity_id)?;
             }
         }
 
@@ -258,12 +254,7 @@ fn validate_effect(
         EffectKind::RgbSplit(split) => {
             register_animated_ids(&split.amount_px, seen_ids, max_entity_id)?;
             register_animated_ids(&split.angle_degrees, seen_ids, max_entity_id)?;
-            validate_animated_range(
-                &split.amount_px,
-                0.0,
-                64.0,
-                "rgb_split.amount_px",
-            )?;
+            validate_animated_range(&split.amount_px, 0.0, 64.0, "rgb_split.amount_px")?;
             validate_animated_finite(&split.angle_degrees, "rgb_split.angle_degrees")
         }
     }

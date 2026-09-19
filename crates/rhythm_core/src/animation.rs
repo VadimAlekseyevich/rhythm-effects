@@ -144,7 +144,6 @@ pub fn interpolate_linear_vec2(from: Vec2, to: Vec2, progress: f64) -> Vec2 {
     .expect("linear interpolation of finite Vec2 endpoints stays finite")
 }
 
-
 #[must_use]
 pub fn interpolate_linear_rgba(
     from: LinearRgba,
@@ -261,7 +260,9 @@ mod tests {
         assert_eq!(animated.insert_keyframe(keyframe(3, 240, 3.0)), Ok(1));
         assert_eq!(
             animated.insert_keyframe(keyframe(4, 240, 4.0)),
-            Err(AnimationInvariantError::DuplicateTick(MusicalTick::new(240)))
+            Err(AnimationInvariantError::DuplicateTick(MusicalTick::new(
+                240
+            )))
         );
 
         let ticks: Vec<_> = animated
