@@ -1,3 +1,11 @@
+#[derive(Debug, Clone)]
+pub struct DiagnosticsView {
+    pub adapter_name: String,
+    pub backend: String,
+    pub window_size: [u32; 2],
+    pub frame_time_ms: f32,
+}
+
 pub fn configure_theme(context: &egui::Context) {
     context.set_theme(egui::Theme::Dark);
     context.set_visuals(egui::Visuals::dark());
@@ -25,7 +33,7 @@ pub fn configure_theme(context: &egui::Context) {
     });
 }
 
-pub fn draw_editor_shell(ui: &mut egui::Ui) {
+pub fn draw_editor_shell(ui: &mut egui::Ui, diagnostics: &DiagnosticsView) {
     egui::Panel::top("transport_rhythm")
         .exact_size(54.0)
         .show(ui, |ui| {
@@ -67,6 +75,16 @@ pub fn draw_editor_shell(ui: &mut egui::Ui) {
             ui.heading("Inspector");
             ui.separator();
             ui.label("Selected object properties will appear here.");
+            ui.add_space(16.0);
+            ui.separator();
+            ui.heading("Diagnostics");
+            ui.label(format!("GPU: {}", diagnostics.adapter_name));
+            ui.label(format!("Backend: {}", diagnostics.backend));
+            ui.label(format!(
+                "Window: {} × {}",
+                diagnostics.window_size[0], diagnostics.window_size[1]
+            ));
+            ui.label(format!("Frame: {:.2} ms", diagnostics.frame_time_ms));
             ui.take_available_space();
         });
 

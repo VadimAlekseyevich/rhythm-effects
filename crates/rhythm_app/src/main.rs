@@ -4,7 +4,9 @@ mod editor_ui;
 mod gpu;
 
 use std::sync::Arc;
+use std::time::Instant;
 
+use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use rhythm_core::APP_NAME;
 use rhythm_engine::renderer::Renderer;
@@ -26,6 +28,8 @@ struct RhythmApp {
     egui_context: Option<egui::Context>,
     egui_state: Option<egui_winit::State>,
     egui_renderer: Option<egui_wgpu::Renderer>,
+    diagnostics: Option<DiagnosticsView>,
+    last_frame_instant: Option<Instant>,
 }
 
 impl ApplicationHandler for RhythmApp {
@@ -69,6 +73,13 @@ impl ApplicationHandler for RhythmApp {
 
                         let adapter = gpu.adapter_summary();
                         let surface_size = gpu.surface_size();
+                        let window_size = window.inner_size();
+                        let diagnostics = DiagnosticsView {
+                            adapter_name: adapter.name.clone(),
+                            backend: adapter.backend.clone(),
+                            window_size: [window_size.width, window_size.height],
+                            frame_time_ms: 0.0,
+                        };
                         let composition_size = renderer.composition_size();
                         let composition_format = renderer.composition_format();
                         info!(
@@ -82,6 +93,8 @@ impl ApplicationHandler for RhythmApp {
                             composition_format = ?composition_format,
                             "application window, GPU context, surface, and composition target created"
                         );
+                        self.diagnostics = Some(diagnostics);
+                        self.last_frame_instant = Some(Instant::now());
                         self.egui_context = Some(egui_context);
                         self.egui_state = Some(egui_state);
                         self.egui_renderer = egui_renderer;
@@ -136,9 +149,23 @@ impl ApplicationHandler for RhythmApp {
                     self.egui_state.as_mut(),
                     self.egui_renderer.as_mut(),
                 ) {
+                    let now = Instant::now();
+                    let frame_time_ms = self
+                        .last_frame_instant
+                        .replace(now)
+                        .map_or(0.0, |previous| now.duration_since(previous).as_secs_f32() * 1000.0);
+
+                    if let Some(diagnostics) = self.diagnostics.as_mut() {
+                        let size = window.inner_size();
+                        diagnostics.window_size = [size.width, size.height];
+                        diagnostics.frame_time_ms = frame_time_ms;
+                    }
+
                     let raw_input = egui_state.take_egui_input(window);
                     let full_output = egui_context.run_ui(raw_input, |root_ui| {
-                        editor_ui::draw_editor_shell(root_ui);
+                        if let Some(diagnostics) = self.diagnostics.as_ref() {
+                            editor_ui::draw_editor_shell(root_ui, diagnostics);
+                        }
                     });
                     let paint_jobs =
                         egui_context.tessellate(full_output.shapes, full_output.pixels_per_point);
