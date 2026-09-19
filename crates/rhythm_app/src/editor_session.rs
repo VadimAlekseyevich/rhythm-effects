@@ -1,3 +1,5 @@
+use rhythm_core::time::ProjectTimeNs;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreviewQuality {
     #[default]
@@ -24,11 +26,34 @@ impl PreviewQuality {
 #[derive(Debug, Default)]
 pub struct EditorSession {
     pub preview_quality: PreviewQuality,
+    playhead: ProjectTimeNs,
+}
+
+impl EditorSession {
+    #[must_use]
+    pub const fn playhead(&self) -> ProjectTimeNs {
+        self.playhead
+    }
+
+    pub const fn seek_paused(&mut self, project_time: ProjectTimeNs) {
+        self.playhead = project_time;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{EditorSession, PreviewQuality};
+    use rhythm_core::time::ProjectTimeNs;
+
+    #[test]
+    fn paused_seek_updates_only_session_playhead() {
+        let mut session = EditorSession::default();
+        assert_eq!(session.playhead().get(), 0);
+
+        session.seek_paused(ProjectTimeNs::new(1_250_000_000));
+
+        assert_eq!(session.playhead().get(), 1_250_000_000);
+    }
 
     #[test]
     fn preview_quality_defaults_to_auto() {

@@ -124,7 +124,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-098** — Initialize the system-default CPAL output device and stream config.
 - [x] **AI-099** — Implement realtime callback copying prepared PCM without allocation, decode, resample or file I/O.
 - [x] **AI-100** — Implement play/pause/end state transitions.
-- [ ] **AI-101** — Implement paused seek by updating EditorSession playhead only.
+- [x] **AI-101** — Implement paused seek by updating EditorSession playhead only.
 - [ ] **AI-102** — Implement playing seek using a new playback generation and callback cursor switch.
 - [ ] **AI-103** — Implement playback-generation atomics and stale-anchor rejection.
 - [ ] **AI-104** — Publish CPAL playback timestamp plus ProjectTimeNs clock anchors from the callback.
