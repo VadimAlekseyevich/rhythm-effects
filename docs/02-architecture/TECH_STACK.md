@@ -231,7 +231,7 @@ Required:
 
 - PNG;
 - JPEG;
-- WebP desirable.
+- WebP;
 
 Evaluate compile cost and disable unnecessary format features.
 
