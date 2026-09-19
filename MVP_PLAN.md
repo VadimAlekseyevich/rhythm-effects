@@ -1,3 +1,7 @@
+> **Важно:** этот файл — первоначальный общий master-plan и сохранён как исторический/обзорный документ.
+>
+> Актуальные принятые решения находятся в docs/README.md и docs/ru/FINAL_MVP_ARCHITECTURE_RU.md. Старые формулировки ниже вроде «кандидат», «предварительный стек», SVG/FFT-вариантов не являются текущим implementation contract.
+
 # Rhythm Effects — MVP Master Plan
 
 > Статус: общий master-plan.
