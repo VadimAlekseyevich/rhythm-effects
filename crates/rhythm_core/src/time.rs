@@ -1,5 +1,27 @@
 pub const PPQ: i64 = 960;
 
+pub const MVP_BEAT_DIVISIONS: [u16; 10] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BeatDivision {
+    parts_per_beat: u16,
+}
+
+impl BeatDivision {
+    #[must_use]
+    pub const fn new(parts_per_beat: u16) -> Option<Self> {
+        match parts_per_beat {
+            1 | 2 | 3 | 4 | 6 | 8 | 12 | 16 | 24 | 32 => Some(Self { parts_per_beat }),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn parts_per_beat(self) -> u16 {
+        self.parts_per_beat
+    }
+}
+
 macro_rules! signed_time_type {
     ($name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -135,6 +157,18 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn beat_division_accepts_exactly_the_mvp_set() {
+        for parts in super::MVP_BEAT_DIVISIONS {
+            let division = super::BeatDivision::new(parts).expect("MVP beat division");
+            assert_eq!(division.parts_per_beat(), parts);
+        }
+
+        for invalid in [0, 5, 7, 10, 48, u16::MAX] {
+            assert!(super::BeatDivision::new(invalid).is_none());
+        }
+    }
 
     #[test]
     fn ppq_is_schema_constant() {

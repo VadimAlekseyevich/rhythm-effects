@@ -65,7 +65,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-042** — Implement validated BpmMicros construction for the accepted 1..1000 BPM range.
 - [x] **AI-043** — Implement exact BPM string parse/format helpers including decimal micro-BPM precision tests.
 - [x] **AI-044** — Define PPQ=960 in one canonical rhythm_core location.
-- [ ] **AI-045** — Implement BeatDivision with exactly the accepted MVP parts-per-beat set.
+- [x] **AI-045** — Implement BeatDivision with exactly the accepted MVP parts-per-beat set.
 - [ ] **AI-046** — Implement ticks_per_step for every accepted BeatDivision and tests.
 - [ ] **AI-047** — Implement rational FrameRate with normalized positive numerator/denominator.
 - [ ] **AI-048** — Implement TimeSignature and the default 4/4 value.
