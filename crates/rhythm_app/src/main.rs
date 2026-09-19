@@ -86,7 +86,25 @@ impl ApplicationHandler for RhythmApp {
                 event_loop.exit();
             }
             WindowEvent::Resized(size) => {
-                info!(width = size.width, height = size.height, "window resized");
+                match self.gpu.as_mut() {
+                    Some(gpu) => match gpu.resize_surface(size.width, size.height) {
+                        Ok(reconfigured) => {
+                            info!(
+                                width = size.width,
+                                height = size.height,
+                                surface_reconfigured = reconfigured,
+                                "window resized"
+                            );
+                        }
+                        Err(error) => {
+                            warn!(%error, "failed to reconfigure GPU surface");
+                            event_loop.exit();
+                        }
+                    },
+                    None => {
+                        info!(width = size.width, height = size.height, "window resized before GPU initialization");
+                    }
+                }
             }
             _ => {}
         }

@@ -29,10 +29,8 @@ pub struct GpuAdapterSummary {
 pub struct GpuContext {
     #[allow(dead_code)]
     pub(crate) instance: wgpu::Instance,
-    #[allow(dead_code)]
     pub(crate) surface: wgpu::Surface<'static>,
     pub(crate) adapter: wgpu::Adapter,
-    #[allow(dead_code)]
     pub(crate) device: wgpu::Device,
     #[allow(dead_code)]
     pub(crate) queue: wgpu::Queue,
@@ -80,6 +78,27 @@ impl GpuContext {
             queue,
             surface_config,
         })
+    }
+
+    pub fn resize_surface(&mut self, width: u32, height: u32) -> Result<bool, GpuInitError> {
+        if width == 0 || height == 0 {
+            return Ok(false);
+        }
+
+        let mut config = match self.surface_config.take() {
+            Some(config) => config,
+            None => self
+                .surface
+                .get_default_config(&self.adapter, width, height)
+                .ok_or(GpuInitError::UnsupportedSurfaceConfiguration)?,
+        };
+
+        config.width = width;
+        config.height = height;
+        self.surface.configure(&self.device, &config);
+        self.surface_config = Some(config);
+
+        Ok(true)
     }
 
     #[must_use]
