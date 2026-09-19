@@ -95,7 +95,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-072** — Implement scalar degree rotation interpolation without shortest-path normalization.
 - [x] **AI-073** — Implement CubicBezier easing representation with x/y handles constrained to 0..1 for MVP.
 - [x] **AI-074** — Implement deterministic cubic-Bezier timing evaluation and endpoint tests.
-- [ ] **AI-075** — Implement before-first/exact-key/after-last animation behavior.
+- [x] **AI-075** — Implement before-first/exact-key/after-last animation behavior.
 - [ ] **AI-076** — Implement binary-search segment lookup for arbitrary evaluation order.
 - [ ] **AI-077** — Implement EvaluatedScene containing renderer-ready evaluated object state only.
 - [ ] **AI-078** — Implement ProjectEditor as the only normal creative mutation boundary.

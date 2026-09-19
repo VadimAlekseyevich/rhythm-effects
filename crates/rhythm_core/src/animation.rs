@@ -159,6 +159,29 @@ impl<T> Animated<T> {
             }
         }
     }
+
+    #[must_use]
+    pub fn range_value(&self, continuous_tick: f64) -> Option<&T> {
+        let first = match self.keyframes.first() {
+            Some(first) => first,
+            None => return Some(&self.base_value),
+        };
+        let last = self.keyframes.last().expect("first keyframe exists");
+
+        if continuous_tick <= first.tick.get() as f64 {
+            return Some(&first.value);
+        }
+        if continuous_tick >= last.tick.get() as f64 {
+            return Some(&last.value);
+        }
+
+        self.keyframes
+            .binary_search_by(|keyframe| {
+                (keyframe.tick.get() as f64).total_cmp(&continuous_tick)
+            })
+            .ok()
+            .map(|index| &self.keyframes[index].value)
+    }
 }
 
 fn clamp_progress(progress: f64) -> f64 {
@@ -252,6 +275,30 @@ mod tests {
             value,
             Interpolation::Linear,
         )
+    }
+
+    #[test]
+    fn range_behavior_uses_base_and_endpoint_key_values() {
+        let static_value = Animated::new_static(7.0);
+        assert_eq!(static_value.range_value(-100.0), Some(&7.0));
+        assert_eq!(static_value.range_value(100.0), Some(&7.0));
+
+        let animated = Animated::with_keyframes(
+            0.0,
+            vec![
+                keyframe(1, 0, 10.0),
+                keyframe(2, 240, 20.0),
+                keyframe(3, 480, 30.0),
+            ],
+        )
+        .expect("unique ticks");
+
+        assert_eq!(animated.range_value(-1.0), Some(&10.0));
+        assert_eq!(animated.range_value(0.0), Some(&10.0));
+        assert_eq!(animated.range_value(240.0), Some(&20.0));
+        assert_eq!(animated.range_value(480.0), Some(&30.0));
+        assert_eq!(animated.range_value(999.0), Some(&30.0));
+        assert_eq!(animated.range_value(120.0), None);
     }
 
     #[test]
