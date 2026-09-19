@@ -1,4 +1,8 @@
-use crate::{ids::KeyframeId, time::MusicalTick};
+use crate::{
+    domain::Vec2,
+    ids::KeyframeId,
+    time::MusicalTick,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BezierEasing {
@@ -121,6 +125,25 @@ impl<T> Animated<T> {
     }
 }
 
+fn clamp_progress(progress: f64) -> f64 {
+    progress.clamp(0.0, 1.0)
+}
+
+#[must_use]
+pub fn interpolate_linear_f32(from: f32, to: f32, progress: f64) -> f32 {
+    let progress = clamp_progress(progress);
+    (f64::from(from) + (f64::from(to) - f64::from(from)) * progress) as f32
+}
+
+#[must_use]
+pub fn interpolate_linear_vec2(from: Vec2, to: Vec2, progress: f64) -> Vec2 {
+    Vec2::new(
+        interpolate_linear_f32(from.x(), to.x(), progress),
+        interpolate_linear_f32(from.y(), to.y(), progress),
+    )
+    .expect("linear interpolation of finite Vec2 endpoints stays finite")
+}
+
 #[must_use]
 pub fn interpolate_hold<T: Clone>(from: &T, to: &T, progress: f64) -> T {
     if progress >= 1.0 {
@@ -142,6 +165,20 @@ mod tests {
             value,
             Interpolation::Linear,
         )
+    }
+
+    #[test]
+    fn linear_interpolation_supports_scalar_and_vec2() {
+        assert_eq!(super::interpolate_linear_f32(0.0, 10.0, 0.5), 5.0);
+        assert_eq!(super::interpolate_linear_f32(0.0, 10.0, -1.0), 0.0);
+        assert_eq!(super::interpolate_linear_f32(0.0, 10.0, 2.0), 10.0);
+
+        let from = crate::domain::Vec2::new(-10.0, 20.0).expect("finite vector");
+        let to = crate::domain::Vec2::new(10.0, -20.0).expect("finite vector");
+        let midpoint = super::interpolate_linear_vec2(from, to, 0.5);
+
+        assert_eq!(midpoint.x(), 0.0);
+        assert_eq!(midpoint.y(), 0.0);
     }
 
     #[test]
