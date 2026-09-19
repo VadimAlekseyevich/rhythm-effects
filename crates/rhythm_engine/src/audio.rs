@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering},
     },
 };
 
@@ -11,7 +11,7 @@ use cpal::{
     FromSample, I24, SizedSample, U24,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use rhythm_core::time::{DurationNs, SampleRate};
+use rhythm_core::time::{DurationNs, ProjectTimeNs, SampleRate};
 use rubato::{Fft, FixedSync, Resampler, audioadapter_buffers::owned::InterleavedOwned};
 use symphonia::core::{
     codecs::{CodecParameters, audio::AudioDecoderOptions},
@@ -105,6 +105,82 @@ impl PlaybackGeneration {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlaybackClockAnchor {
+    pub playback_stream_instant: cpal::StreamInstant,
+    pub project_time_of_first_frame: ProjectTimeNs,
+    pub generation: PlaybackGeneration,
+}
+
+struct AtomicClockAnchor {
+    sequence: AtomicU64,
+    playback_stream_nanos: AtomicU64,
+    project_time_ns: AtomicI64,
+    generation: AtomicU64,
+}
+
+impl Default for AtomicClockAnchor {
+    fn default() -> Self {
+        Self {
+            sequence: AtomicU64::new(0),
+            playback_stream_nanos: AtomicU64::new(0),
+            project_time_ns: AtomicI64::new(0),
+            generation: AtomicU64::new(PlaybackGeneration::INITIAL.get()),
+        }
+    }
+}
+
+impl AtomicClockAnchor {
+    fn publish(&self, anchor: PlaybackClockAnchor) -> bool {
+        let Ok(playback_stream_nanos) =
+            u64::try_from(anchor.playback_stream_instant.as_nanos())
+        else {
+            return false;
+        };
+
+        self.sequence.fetch_add(1, Ordering::AcqRel);
+        self.playback_stream_nanos
+            .store(playback_stream_nanos, Ordering::Relaxed);
+        self.project_time_ns
+            .store(anchor.project_time_of_first_frame.get(), Ordering::Relaxed);
+        self.generation
+            .store(anchor.generation.get(), Ordering::Relaxed);
+        self.sequence.fetch_add(1, Ordering::Release);
+        true
+    }
+
+    fn read(&self) -> Option<PlaybackClockAnchor> {
+        for _ in 0..8 {
+            let before = self.sequence.load(Ordering::Acquire);
+            if before & 1 != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
+
+            let playback_stream_nanos = self.playback_stream_nanos.load(Ordering::Relaxed);
+            let project_time_ns = self.project_time_ns.load(Ordering::Relaxed);
+            let generation = PlaybackGeneration(self.generation.load(Ordering::Relaxed));
+
+            let after = self.sequence.load(Ordering::Acquire);
+            if before == after && after & 1 == 0 {
+                if generation == PlaybackGeneration::INITIAL {
+                    return None;
+                }
+
+                return Some(PlaybackClockAnchor {
+                    playback_stream_instant: cpal::StreamInstant::from_nanos(
+                        playback_stream_nanos,
+                    ),
+                    project_time_of_first_frame: ProjectTimeNs::new(project_time_ns),
+                    generation,
+                });
+            }
+        }
+
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PlaybackState {
     Unavailable = 0,
@@ -152,6 +228,7 @@ struct PlaybackControl {
     active_generation: AtomicU64,
     pending_generation: AtomicU64,
     pending_seek_frame: AtomicU64,
+    clock_anchor: AtomicClockAnchor,
 }
 
 impl Default for PlaybackControl {
@@ -165,6 +242,7 @@ impl Default for PlaybackControl {
             active_generation: AtomicU64::new(PlaybackGeneration::INITIAL.get()),
             pending_generation: AtomicU64::new(PlaybackGeneration::INITIAL.get()),
             pending_seek_frame: AtomicU64::new(0),
+            clock_anchor: AtomicClockAnchor::default(),
         }
     }
 }
@@ -231,6 +309,7 @@ pub struct CpalPlaybackStream {
     stream: cpal::Stream,
     control: Arc<PlaybackControl>,
     frame_count: u64,
+    duration: DurationNs,
 }
 
 impl CpalPlaybackStream {
@@ -242,6 +321,21 @@ impl CpalPlaybackStream {
     #[must_use]
     pub fn active_generation(&self) -> PlaybackGeneration {
         self.control.active_generation()
+    }
+
+    #[must_use]
+    pub fn clock_anchor(&self) -> Option<PlaybackClockAnchor> {
+        let anchor = self.control.clock_anchor.read()?;
+        self.control
+            .accepts_generation(anchor.generation)
+            .then_some(anchor)
+    }
+
+    #[must_use]
+    pub fn estimated_audible_project_time(&self) -> Option<ProjectTimeNs> {
+        let anchor = self.clock_anchor()?;
+        let now = self.stream.now();
+        estimate_project_time_from_anchor(anchor, now, self.duration)
     }
 
     #[must_use]
@@ -350,6 +444,7 @@ pub fn build_playback_stream(
     let output_channels = usize::from(endpoint.channels());
     let config = endpoint.stream_config();
     let frame_count = u64::try_from(buffer.frame_count()).unwrap_or(u64::MAX);
+    let duration = buffer.duration();
     let control = Arc::new(PlaybackControl::default());
 
     let stream = match endpoint.sample_format() {
@@ -396,6 +491,7 @@ pub fn build_playback_stream(
         stream,
         control,
         frame_count,
+        duration,
     })
 }
 
@@ -416,11 +512,25 @@ where
         .device
         .build_output_stream(
             config,
-            move |output: &mut [T], _| {
+            move |output: &mut [T], info| {
                 callback_control.apply_pending_seek_at_callback_boundary();
                 let mut cursor =
                     usize::try_from(callback_control.frame_cursor.load(Ordering::Acquire))
                         .unwrap_or(usize::MAX);
+                let generation = callback_control.active_generation();
+
+                if generation != PlaybackGeneration::INITIAL {
+                    let first_frame = u64::try_from(cursor).unwrap_or(u64::MAX);
+                    if let Some(project_time) =
+                        project_time_for_frame(first_frame, buffer.sample_rate())
+                    {
+                        callback_control.clock_anchor.publish(PlaybackClockAnchor {
+                            playback_stream_instant: info.timestamp().playback,
+                            project_time_of_first_frame: project_time,
+                            generation,
+                        });
+                    }
+                }
 
                 write_playback_samples(&buffer, &mut cursor, output_channels, output);
 
@@ -442,6 +552,35 @@ where
             None,
         )
         .map_err(|error| AudioStreamBuildError::Build(error.to_string()))
+}
+
+fn project_time_for_frame(
+    frame: u64,
+    sample_rate: SampleRate,
+) -> Option<ProjectTimeNs> {
+    if sample_rate.get() == 0 {
+        return None;
+    }
+
+    let nanos = (u128::from(frame))
+        .checked_mul(1_000_000_000)?
+        .checked_div(u128::from(sample_rate.get()))?;
+    let nanos = i64::try_from(nanos).ok()?;
+    Some(ProjectTimeNs::new(nanos))
+}
+
+fn estimate_project_time_from_anchor(
+    anchor: PlaybackClockAnchor,
+    now: cpal::StreamInstant,
+    duration: DurationNs,
+) -> Option<ProjectTimeNs> {
+    let delta = now.saturating_duration_since(anchor.playback_stream_instant);
+    let delta_ns = i128::try_from(delta.as_nanos()).ok()?;
+    let base_ns = i128::from(anchor.project_time_of_first_frame.get());
+    let estimated_ns = base_ns.checked_add(delta_ns)?;
+    let duration_ns = i128::from(duration.get());
+    let clamped_ns = estimated_ns.clamp(0, duration_ns);
+    Some(ProjectTimeNs::new(i64::try_from(clamped_ns).ok()?))
 }
 
 fn write_playback_samples<T>(
@@ -833,6 +972,74 @@ mod tests {
 
     fn temp_fixture_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn clock_anchor_seqlock_round_trips_coherent_generation() {
+        let clock = super::AtomicClockAnchor::default();
+        let anchor = super::PlaybackClockAnchor {
+            playback_stream_instant: cpal::StreamInstant::from_nanos(5_000_000),
+            project_time_of_first_frame: ProjectTimeNs::new(1_000_000_000),
+            generation: super::PlaybackGeneration(7),
+        };
+
+        assert!(clock.publish(anchor));
+        assert_eq!(clock.read(), Some(anchor));
+    }
+
+    #[test]
+    fn audible_time_uses_stream_clock_and_clamps_to_duration() {
+        let anchor = super::PlaybackClockAnchor {
+            playback_stream_instant: cpal::StreamInstant::from_nanos(2_000_000_000),
+            project_time_of_first_frame: ProjectTimeNs::new(500_000_000),
+            generation: super::PlaybackGeneration(1),
+        };
+
+        let before_playback = super::estimate_project_time_from_anchor(
+            anchor,
+            cpal::StreamInstant::from_nanos(1_900_000_000),
+            rhythm_core::time::DurationNs::new(2_000_000_000),
+        )
+        .expect("time");
+        assert_eq!(before_playback.get(), 500_000_000);
+
+        let advanced = super::estimate_project_time_from_anchor(
+            anchor,
+            cpal::StreamInstant::from_nanos(2_250_000_000),
+            rhythm_core::time::DurationNs::new(2_000_000_000),
+        )
+        .expect("time");
+        assert_eq!(advanced.get(), 750_000_000);
+
+        let clamped = super::estimate_project_time_from_anchor(
+            anchor,
+            cpal::StreamInstant::from_nanos(5_000_000_000),
+            rhythm_core::time::DurationNs::new(2_000_000_000),
+        )
+        .expect("time");
+        assert_eq!(clamped.get(), 2_000_000_000);
+    }
+
+    #[test]
+    fn frame_to_project_time_is_direct_and_non_accumulating() {
+        assert_eq!(
+            super::project_time_for_frame(
+                48_000,
+                rhythm_core::time::SampleRate::new(48_000),
+            )
+            .expect("time")
+            .get(),
+            1_000_000_000
+        );
+        assert_eq!(
+            super::project_time_for_frame(
+                44_100,
+                rhythm_core::time::SampleRate::new(44_100),
+            )
+            .expect("time")
+            .get(),
+            1_000_000_000
+        );
     }
 
     #[test]
