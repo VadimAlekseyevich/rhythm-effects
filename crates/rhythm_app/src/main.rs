@@ -129,12 +129,7 @@ impl ApplicationHandler for RhythmApp {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                if let (
-                    Some(gpu),
-                    Some(egui_context),
-                    Some(egui_state),
-                    Some(egui_renderer),
-                ) = (
+                if let (Some(gpu), Some(egui_context), Some(egui_state), Some(egui_renderer)) = (
                     self.gpu.as_mut(),
                     self.egui_context.as_ref(),
                     self.egui_state.as_mut(),
