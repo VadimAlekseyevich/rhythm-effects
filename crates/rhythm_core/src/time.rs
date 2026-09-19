@@ -82,6 +82,77 @@ pub enum BpmError {
     TooManyFractionDigits,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TempoSegment {
+    start_tick: MusicalTick,
+    bpm: BpmMicros,
+    meter: TimeSignature,
+}
+
+impl TempoSegment {
+    #[must_use]
+    pub const fn start_tick(self) -> MusicalTick {
+        self.start_tick
+    }
+
+    #[must_use]
+    pub const fn bpm(self) -> BpmMicros {
+        self.bpm
+    }
+
+    #[must_use]
+    pub const fn meter(self) -> TimeSignature {
+        self.meter
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TempoMap {
+    grid_offset: GridOffsetNs,
+    segments: Vec<TempoSegment>,
+}
+
+impl TempoMap {
+    #[must_use]
+    pub fn unset(grid_offset: GridOffsetNs) -> Self {
+        Self {
+            grid_offset,
+            segments: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_initial_tempo(
+        grid_offset: GridOffsetNs,
+        bpm: BpmMicros,
+        meter: TimeSignature,
+    ) -> Self {
+        Self {
+            grid_offset,
+            segments: vec![TempoSegment {
+                start_tick: MusicalTick::new(0),
+                bpm,
+                meter,
+            }],
+        }
+    }
+
+    #[must_use]
+    pub const fn grid_offset(&self) -> GridOffsetNs {
+        self.grid_offset
+    }
+
+    #[must_use]
+    pub fn segments(&self) -> &[TempoSegment] {
+        &self.segments
+    }
+
+    #[must_use]
+    pub fn initial_segment(&self) -> Option<TempoSegment> {
+        self.segments.first().copied()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimeSignatureError {
     ZeroNumerator,
@@ -256,6 +327,25 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn tempo_map_initial_segment_starts_at_tick_zero() {
+        let bpm = BpmMicros::new(120_000_000).expect("valid BPM");
+        let map = super::TempoMap::with_initial_tempo(
+            GridOffsetNs::new(350_000_000),
+            bpm,
+            super::TimeSignature::default(),
+        );
+
+        let segment = map.initial_segment().expect("initial tempo");
+        assert_eq!(map.grid_offset().get(), 350_000_000);
+        assert_eq!(segment.start_tick().get(), 0);
+        assert_eq!(segment.bpm(), bpm);
+        assert_eq!(segment.meter(), super::TimeSignature::default());
+
+        let unset = super::TempoMap::unset(GridOffsetNs::new(0));
+        assert!(unset.initial_segment().is_none());
+    }
 
     #[test]
     fn time_signature_defaults_to_four_four() {

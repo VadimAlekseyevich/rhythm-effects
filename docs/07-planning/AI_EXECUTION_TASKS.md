@@ -69,7 +69,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-046** — Implement ticks_per_step for every accepted BeatDivision and tests.
 - [x] **AI-047** — Implement rational FrameRate with normalized positive numerator/denominator.
 - [x] **AI-048** — Implement TimeSignature and the default 4/4 value.
-- [ ] **AI-049** — Implement TempoMap V1 with one initial tempo segment and GridOffsetNs.
+- [x] **AI-049** — Implement TempoMap V1 with one initial tempo segment and GridOffsetNs.
 - [ ] **AI-050** — Implement MusicalTick to ProjectTimeNs conversion using i128 intermediates.
 - [ ] **AI-051** — Implement ProjectTimeNs to continuous musical position conversion without hidden rounding.
 - [ ] **AI-052** — Implement nearest-grid snapping with exact half ties resolving later/right.
