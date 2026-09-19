@@ -62,7 +62,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-039** — Implement typed project-local ObjectId, AssetId, EffectId and KeyframeId u64 newtypes with zero reserved.
 - [x] **AI-040** — Implement a monotonic project ID allocator and unit tests for non-reuse.
 - [x] **AI-041** — Implement MusicalTick(i64), ProjectTimeNs(i64), DurationNs(u64), GridOffsetNs(i64), BpmMicros(u64), SampleRate(u32), AudioFramePosition(u64).
-- [ ] **AI-042** — Implement validated BpmMicros construction for the accepted 1..1000 BPM range.
+- [x] **AI-042** — Implement validated BpmMicros construction for the accepted 1..1000 BPM range.
 - [ ] **AI-043** — Implement exact BPM string parse/format helpers including decimal micro-BPM precision tests.
 - [ ] **AI-044** — Define PPQ=960 in one canonical rhythm_core location.
 - [ ] **AI-045** — Implement BeatDivision with exactly the accepted MVP parts-per-beat set.
