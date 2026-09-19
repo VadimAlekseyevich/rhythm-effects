@@ -155,10 +155,10 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-126** — Render subdivision lines for the current BeatDivision.
 - [x] **AI-127** — Hide labels before grid lines become visually overcrowded.
 - [x] **AI-128** — Implement continuous playhead ruler click/drag seek.
-- [ ] **AI-129** — Implement Left/Right current-grid playhead stepping.
-- [ ] **AI-130** — Implement Ctrl+Left/Right one-beat stepping.
-- [ ] **AI-131** — Implement Ctrl+Shift+Left/Right one-bar stepping.
-- [ ] **AI-132** — Implement [ and ] current authoring-grid changes.
+- [x] **AI-129** — Implement Left/Right current-grid playhead stepping.
+- [x] **AI-130** — Implement Ctrl+Left/Right one-beat stepping.
+- [x] **AI-131** — Implement Ctrl+Shift+Left/Right one-bar stepping.
+- [x] **AI-132** — Implement [ and ] current authoring-grid changes.
 - [ ] **AI-133** — Implement Ctrl+wheel timeline zoom around mouse position.
 - [ ] **AI-134** — Implement Shift+wheel horizontal timeline pan.
 - [ ] **AI-135** — Implement middle-mouse horizontal timeline pan.

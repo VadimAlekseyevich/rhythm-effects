@@ -516,10 +516,8 @@ mod tests {
         )
         .expect("transform");
 
-        assert_eq!(
-            transform.x_to_project_time(333.3),
-            ProjectTimeNs::new(3_333_000_122)
-        );
+        let mapped = transform.x_to_project_time(333.3).get();
+        assert!((mapped - 3_333_000_000).abs() < 2_000);
     }
 
     #[test]

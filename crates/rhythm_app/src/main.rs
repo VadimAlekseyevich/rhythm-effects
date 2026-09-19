@@ -18,8 +18,9 @@ use tracing_subscriber::EnvFilter;
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::WindowEvent,
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::{KeyCode, ModifiersState, PhysicalKey},
     window::{Window, WindowId},
 };
 
@@ -44,6 +45,7 @@ struct RhythmApp {
     composition_texture_id: Option<egui::TextureId>,
     diagnostics: Option<DiagnosticsView>,
     waveform: Option<rhythm_engine::waveform::WaveformData>,
+    modifiers: ModifiersState,
     last_frame_instant: Option<Instant>,
 }
 
@@ -69,6 +71,7 @@ impl Default for RhythmApp {
             composition_texture_id: None,
             diagnostics: None,
             waveform: None,
+            modifiers: ModifiersState::default(),
             last_frame_instant: None,
         }
     }
@@ -187,6 +190,74 @@ impl ApplicationHandler for RhythmApp {
         }
 
         match event {
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
+            }
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic,
+                ..
+            } => {
+                if !is_synthetic
+                    && event.state == ElementState::Pressed
+                    && !self
+                        .egui_context
+                        .as_ref()
+                        .is_some_and(egui::Context::wants_keyboard_input)
+                    && let PhysicalKey::Code(code) = event.physical_key
+                {
+                    let project = self.project_editor.project();
+                    let control = self.modifiers.control_key();
+                    let shift = self.modifiers.shift_key();
+                    let alt = self.modifiers.alt_key();
+                    let super_key = self.modifiers.super_key();
+                    let direction = match code {
+                        KeyCode::ArrowLeft => -1,
+                        KeyCode::ArrowRight => 1,
+                        _ => 0,
+                    };
+
+                    let handled = if direction != 0 && !alt && !super_key {
+                        if control && shift {
+                            self.session.step_playhead_bar(
+                                &project.tempo_map,
+                                project.settings.duration,
+                                direction,
+                            )
+                        } else if control && !shift {
+                            self.session.step_playhead_beat(
+                                &project.tempo_map,
+                                project.settings.duration,
+                                direction,
+                            )
+                        } else if !control && !shift {
+                            self.session.step_playhead_grid(
+                                &project.tempo_map,
+                                project.settings.duration,
+                                direction,
+                            )
+                        } else {
+                            false
+                        }
+                    } else if !control && !shift && !alt && !super_key {
+                        match code {
+                            KeyCode::BracketLeft => {
+                                self.session.change_authoring_division(false)
+                            }
+                            KeyCode::BracketRight => {
+                                self.session.change_authoring_division(true)
+                            }
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
+
+                    if handled {
+                        window.request_redraw();
+                    }
+                }
+            }
             WindowEvent::CloseRequested => {
                 info!("close requested");
                 event_loop.exit();
