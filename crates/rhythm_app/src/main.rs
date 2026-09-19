@@ -42,6 +42,7 @@ impl ApplicationHandler for RhythmApp {
                 match GpuContext::initialize(Arc::clone(&window)) {
                     Ok(gpu) => {
                         let renderer = Renderer::new(&gpu.device);
+                        renderer.clear_composition(&gpu.device, &gpu.queue);
                         let adapter = gpu.adapter_summary();
                         let surface_size = gpu.surface_size();
                         let composition_size = renderer.composition_size();

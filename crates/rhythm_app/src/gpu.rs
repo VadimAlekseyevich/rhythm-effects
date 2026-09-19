@@ -32,7 +32,6 @@ pub struct GpuContext {
     pub(crate) surface: wgpu::Surface<'static>,
     pub(crate) adapter: wgpu::Adapter,
     pub(crate) device: wgpu::Device,
-    #[allow(dead_code)]
     pub(crate) queue: wgpu::Queue,
     pub(crate) surface_config: Option<wgpu::SurfaceConfiguration>,
 }

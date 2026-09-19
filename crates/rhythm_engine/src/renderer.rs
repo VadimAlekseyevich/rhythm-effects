@@ -9,7 +9,7 @@ pub const COMPOSITION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16F
 
 #[derive(Debug)]
 pub struct Renderer {
-    composition_texture: wgpu::Texture,
+    _composition_texture: wgpu::Texture,
     composition_view: wgpu::TextureView,
     composition_size: [u32; 2],
 }
@@ -37,7 +37,7 @@ impl Renderer {
             composition_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
-            composition_texture,
+            _composition_texture: composition_texture,
             composition_view,
             composition_size: [INITIAL_COMPOSITION_WIDTH, INITIAL_COMPOSITION_HEIGHT],
         }
@@ -53,12 +53,36 @@ impl Renderer {
         COMPOSITION_FORMAT
     }
 
-    pub(crate) fn composition_view(&self) -> &wgpu::TextureView {
-        &self.composition_view
-    }
+    pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Rhythm Effects composition clear encoder"),
+        });
 
-    pub(crate) fn composition_texture(&self) -> &wgpu::Texture {
-        &self.composition_texture
+        {
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Rhythm Effects composition clear pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.composition_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+        }
+
+        queue.submit([encoder.finish()]);
     }
 }
 
