@@ -147,7 +147,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-118** — Implement background waveform worker request/result messages.
 - [x] **AI-119** — Implement visible-range waveform slice query.
 - [x] **AI-120** — Implement mip-level choice from visible time range and pixel width.
-- [ ] **AI-121** — Render the waveform as a batched egui mesh/shape rather than one widget per bucket.
+- [x] **AI-121** — Render the waveform as a batched egui mesh/shape rather than one widget per bucket.
 - [ ] **AI-122** — Implement one shared TimelineTransform for project-time to x and inverse mapping.
 - [ ] **AI-123** — Implement timeline ruler row.
 - [ ] **AI-124** — Render bar lines using TimeSignature and TempoMap.

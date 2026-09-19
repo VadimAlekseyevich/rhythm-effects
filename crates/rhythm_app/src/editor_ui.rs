@@ -1,4 +1,7 @@
-use crate::editor_session::{EditorSession, PreviewQuality};
+use crate::{
+    editor_session::{EditorSession, PreviewQuality},
+    timeline::draw_timeline_waveform,
+};
 use rhythm_core::time::ProjectTimeNs;
 
 fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
@@ -56,6 +59,7 @@ pub fn draw_editor_shell(
     session: &mut EditorSession,
     diagnostics: &DiagnosticsView,
     composition_texture_id: Option<egui::TextureId>,
+    waveform: Option<&rhythm_engine::waveform::WaveformData>,
 ) {
     egui::Panel::top("transport_rhythm")
         .exact_size(54.0)
@@ -94,7 +98,7 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.heading("Timeline");
             ui.separator();
-            ui.label("Musical timeline placeholder");
+            draw_timeline_waveform(ui, waveform);
             ui.take_available_space();
         });
 

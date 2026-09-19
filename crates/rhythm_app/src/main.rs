@@ -3,6 +3,7 @@
 mod editor_session;
 mod editor_ui;
 mod gpu;
+mod timeline;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -42,6 +43,7 @@ struct RhythmApp {
     egui_renderer: Option<egui_wgpu::Renderer>,
     composition_texture_id: Option<egui::TextureId>,
     diagnostics: Option<DiagnosticsView>,
+    waveform: Option<rhythm_engine::waveform::WaveformData>,
     last_frame_instant: Option<Instant>,
 }
 
@@ -191,6 +193,7 @@ impl ApplicationHandler for RhythmApp {
                                 &mut self.session,
                                 diagnostics,
                                 self.composition_texture_id,
+                                self.waveform.as_ref(),
                             );
                         }
                     });
