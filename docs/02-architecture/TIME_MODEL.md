@@ -307,6 +307,8 @@ Use wide integer intermediates and explicit rounding.
 
 Every frame timestamp derives from N independently.
 
+Frame timestamps use the same nearest-integer-nanosecond rounding rule as fixed-point tick conversion; exact half-nanosecond ties round away from zero.
+
 Never accumulate frame duration.
 
 ## 18. Composition duration

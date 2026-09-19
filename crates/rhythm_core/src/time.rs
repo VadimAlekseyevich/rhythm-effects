@@ -358,6 +358,19 @@ impl FrameRate {
     }
 }
 
+pub fn project_time_for_frame(
+    frame_index: u64,
+    frame_rate: FrameRate,
+) -> Result<ProjectTimeNs, TimeConversionError> {
+    let numerator =
+        i128::from(frame_index) * i128::from(frame_rate.denominator()) * 1_000_000_000_i128;
+    let denominator = i128::from(frame_rate.numerator());
+    let time_ns = div_round_nearest_ties_away_from_zero(numerator, denominator);
+    let time_ns = i64::try_from(time_ns).map_err(|_| TimeConversionError::Overflow)?;
+
+    Ok(ProjectTimeNs::new(time_ns))
+}
+
 const fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
     while b != 0 {
         let remainder = a % b;
@@ -611,6 +624,31 @@ mod tests {
 
         let unset = super::TempoMap::unset(GridOffsetNs::new(0));
         assert!(unset.initial_segment().is_none());
+    }
+
+    #[test]
+    fn frame_timestamp_is_derived_directly_from_frame_index() {
+        let sixty = super::FrameRate::new(60, 1).expect("valid frame rate");
+        assert_eq!(
+            super::project_time_for_frame(0, sixty)
+                .expect("frame time")
+                .get(),
+            0
+        );
+        assert_eq!(
+            super::project_time_for_frame(60, sixty)
+                .expect("frame time")
+                .get(),
+            1_000_000_000
+        );
+
+        let ntsc = super::FrameRate::new(60_000, 1_001).expect("valid frame rate");
+        assert_eq!(
+            super::project_time_for_frame(60_000, ntsc)
+                .expect("frame time")
+                .get(),
+            1_001_000_000_000
+        );
     }
 
     #[test]
