@@ -74,7 +74,11 @@ pub fn build_waveform_pyramid(audio: &DecodedAudio) -> Result<WaveformPyramid, W
     if channels == 0 || !audio.interleaved_f32.len().is_multiple_of(channels) {
         return Err(WaveformError::InvalidPcmLength);
     }
-    if !audio.interleaved_f32.iter().all(|sample| sample.is_finite()) {
+    if !audio
+        .interleaved_f32
+        .iter()
+        .all(|sample| sample.is_finite())
+    {
         return Err(WaveformError::NonFiniteSample);
     }
 
@@ -85,10 +89,7 @@ pub fn build_waveform_pyramid(audio: &DecodedAudio) -> Result<WaveformPyramid, W
         peaks: Arc::from(base),
     }];
 
-    while levels
-        .last()
-        .is_some_and(|level| level.peaks.len() > 1)
-    {
+    while levels.last().is_some_and(|level| level.peaks.len() > 1) {
         let previous = levels.last().expect("level exists");
         let mut next = Vec::with_capacity(previous.peaks.len().div_ceil(2));
 
@@ -340,10 +341,7 @@ mod tests {
                 max: 0.9,
             }
         );
-        assert_eq!(
-            waveform.levels[0].peaks[1],
-            WavePeak { min: 0.0, max: 0.0 }
-        );
+        assert_eq!(waveform.levels[0].peaks[1], WavePeak { min: 0.0, max: 0.0 });
     }
 
     #[test]
@@ -351,11 +349,7 @@ mod tests {
         let audio = DecodedAudio {
             sample_rate: 48_000,
             channel_layout: AudioChannelLayout::Stereo,
-            interleaved_f32: vec![
-                -0.2, 0.8,
-                -0.9, 0.1,
-                0.3, 0.4,
-            ],
+            interleaved_f32: vec![-0.2, 0.8, -0.9, 0.1, 0.3, 0.4],
         };
 
         let waveform = build_waveform_pyramid(&audio).expect("waveform");
@@ -391,10 +385,7 @@ mod tests {
         assert_eq!(waveform.levels[1].peaks.len(), 3);
         assert_eq!(waveform.levels[2].peaks.len(), 2);
         assert_eq!(waveform.levels[3].peaks.len(), 1);
-        assert_eq!(
-            waveform.levels[1].peaks[2],
-            waveform.levels[0].peaks[4]
-        );
+        assert_eq!(waveform.levels[1].peaks[2], waveform.levels[0].peaks[4]);
     }
 
     #[test]
