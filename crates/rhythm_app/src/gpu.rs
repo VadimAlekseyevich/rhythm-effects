@@ -16,6 +16,9 @@ pub enum GpuInitError {
 
     #[error("the selected GPU adapter cannot provide a default surface configuration")]
     UnsupportedSurfaceConfiguration,
+
+    #[error("the selected GPU adapter cannot render to Rgba16Float composition targets")]
+    UnsupportedCompositionFormat,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +55,15 @@ impl GpuContext {
             force_fallback_adapter: false,
             ..Default::default()
         }))?;
+
+        let composition_features =
+            adapter.get_texture_format_features(wgpu::TextureFormat::Rgba16Float);
+        if !composition_features
+            .allowed_usages
+            .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        {
+            return Err(GpuInitError::UnsupportedCompositionFormat);
+        }
 
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {

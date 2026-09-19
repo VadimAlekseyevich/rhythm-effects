@@ -52,7 +52,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-032** — Display the offscreen composition texture inside the viewport panel.
 - [x] **AI-033** — Implement viewport panel resize without changing composition dimensions.
 - [x] **AI-034** — Implement Auto/Full/Half/Quarter preview-quality state in EditorSession placeholder state.
-- [ ] **AI-035** — Add a renderer capability check for Rgba16Float render-attachment support.
+- [x] **AI-035** — Add a renderer capability check for Rgba16Float render-attachment support.
 - [ ] **AI-036** — Add a startup error path when no compatible GPU adapter/device can be created.
 - [ ] **AI-037** — Add a manual reference check for top-left composition orientation.
 - [ ] **AI-038** — Verify the shell at 1280x720 and normal 1920x1080 desktop sizes.
