@@ -22,6 +22,8 @@ struct RhythmApp {
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
+    egui_context: Option<egui::Context>,
+    egui_state: Option<egui_winit::State>,
 }
 
 impl ApplicationHandler for RhythmApp {
@@ -43,6 +45,17 @@ impl ApplicationHandler for RhythmApp {
                     Ok(gpu) => {
                         let renderer = Renderer::new(&gpu.device);
                         renderer.clear_composition(&gpu.device, &gpu.queue);
+
+                        let egui_context = egui::Context::default();
+                        let egui_state = egui_winit::State::new(
+                            egui_context.clone(),
+                            egui::ViewportId::ROOT,
+                            event_loop,
+                            Some(window.scale_factor() as f32),
+                            event_loop.system_theme(),
+                            Some(gpu.device.limits().max_texture_dimension_2d as usize),
+                        );
+
                         let adapter = gpu.adapter_summary();
                         let surface_size = gpu.surface_size();
                         let composition_size = renderer.composition_size();
@@ -58,8 +71,11 @@ impl ApplicationHandler for RhythmApp {
                             composition_format = ?composition_format,
                             "application window, GPU context, surface, and composition target created"
                         );
+                        self.egui_context = Some(egui_context);
+                        self.egui_state = Some(egui_state);
                         self.renderer = Some(renderer);
                         self.gpu = Some(gpu);
+                        window.request_redraw();
                         self.window = Some(window);
                     }
                     Err(error) => {
@@ -89,10 +105,26 @@ impl ApplicationHandler for RhythmApp {
             return;
         }
 
+        if let Some(egui_state) = self.egui_state.as_mut() {
+            let response = egui_state.on_window_event(window, &event);
+            if response.repaint {
+                window.request_redraw();
+            }
+        }
+
         match event {
             WindowEvent::CloseRequested => {
                 info!("close requested");
                 event_loop.exit();
+            }
+            WindowEvent::RedrawRequested => {
+                if let (Some(egui_context), Some(egui_state)) =
+                    (self.egui_context.as_ref(), self.egui_state.as_mut())
+                {
+                    let raw_input = egui_state.take_egui_input(window);
+                    let full_output = egui_context.run(raw_input, |_context| {});
+                    egui_state.handle_platform_output(window, full_output.platform_output);
+                }
             }
             WindowEvent::Resized(size) => match self.gpu.as_mut() {
                 Some(gpu) => match gpu.resize_surface(size.width, size.height) {

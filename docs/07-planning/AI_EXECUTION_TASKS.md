@@ -44,7 +44,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-024** — Add resize handling that reconfigures the surface only for non-zero dimensions.
 - [x] **AI-025** — Create an offscreen Rgba16Float composition texture at a fixed 1920x1080 test size.
 - [x] **AI-026** — Add a render pass that clears the offscreen composition texture to opaque black.
-- [ ] **AI-027** — Integrate egui Context and egui-winit State with the winit event loop.
+- [x] **AI-027** — Integrate egui Context and egui-winit State with the winit event loop.
 - [ ] **AI-028** — Integrate egui-wgpu rendering using the same wgpu Device/Queue.
 - [ ] **AI-029** — Render the accepted five-region editor shell using placeholder panels only.
 - [ ] **AI-030** — Apply the accepted dark theme and initial Inter-like typography sizing using egui defaults until bundled Inter is added.
