@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
+mod editor_session;
 mod editor_ui;
 mod gpu;
 
 use std::sync::Arc;
 use std::time::Instant;
 
+use editor_session::EditorSession;
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use rhythm_core::APP_NAME;
@@ -22,6 +24,7 @@ use winit::{
 
 #[derive(Default)]
 struct RhythmApp {
+    session: EditorSession,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
