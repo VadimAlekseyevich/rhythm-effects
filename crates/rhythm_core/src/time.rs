@@ -82,7 +82,6 @@ pub enum BpmError {
     TooManyFractionDigits,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameRateError {
     ZeroNumerator,
@@ -131,6 +130,7 @@ const fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
     a
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BpmMicros(u64);
 
 impl BpmMicros {
