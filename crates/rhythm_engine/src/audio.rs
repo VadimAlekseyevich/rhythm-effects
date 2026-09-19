@@ -306,7 +306,9 @@ pub struct CpalPlaybackStream {
     stream: cpal::Stream,
     control: Arc<PlaybackControl>,
     frame_count: u64,
+    sample_rate: SampleRate,
     duration: DurationNs,
+    fallback_latency_frames: u64,
 }
 
 impl CpalPlaybackStream {
@@ -330,9 +332,26 @@ impl CpalPlaybackStream {
 
     #[must_use]
     pub fn estimated_audible_project_time(&self) -> Option<ProjectTimeNs> {
-        let anchor = self.clock_anchor()?;
-        let now = self.stream.now();
-        estimate_project_time_from_anchor(anchor, now, self.duration)
+        if let Some(anchor) = self.clock_anchor() {
+            let now = self.stream.now();
+            if let Some(project_time) =
+                estimate_project_time_from_anchor(anchor, now, self.duration)
+            {
+                return Some(project_time);
+            }
+        }
+
+        estimate_project_time_from_frame_cursor(
+            self.frame_cursor(),
+            self.fallback_latency_frames,
+            self.sample_rate,
+            self.duration,
+        )
+    }
+
+    #[must_use]
+    pub const fn fallback_latency_frames(&self) -> u64 {
+        self.fallback_latency_frames
     }
 
     #[must_use]
@@ -441,6 +460,7 @@ pub fn build_playback_stream(
     let output_channels = usize::from(endpoint.channels());
     let config = endpoint.stream_config();
     let frame_count = u64::try_from(buffer.frame_count()).unwrap_or(u64::MAX);
+    let sample_rate = buffer.sample_rate();
     let duration = buffer.duration();
     let control = Arc::new(PlaybackControl::default());
 
@@ -484,11 +504,15 @@ pub fn build_playback_stream(
         format => return Err(AudioStreamBuildError::UnsupportedSampleFormat(format)),
     }?;
 
+    let fallback_latency_frames = stream.buffer_size().map(u64::from).unwrap_or(0);
+
     Ok(CpalPlaybackStream {
         stream,
         control,
         frame_count,
+        sample_rate,
         duration,
+        fallback_latency_frames,
     })
 }
 
@@ -575,6 +599,20 @@ fn estimate_project_time_from_anchor(
     let duration_ns = i128::from(duration.get());
     let clamped_ns = estimated_ns.clamp(0, duration_ns);
     Some(ProjectTimeNs::new(i64::try_from(clamped_ns).ok()?))
+}
+
+fn estimate_project_time_from_frame_cursor(
+    frame_cursor: u64,
+    latency_frames: u64,
+    sample_rate: SampleRate,
+    duration: DurationNs,
+) -> Option<ProjectTimeNs> {
+    let audible_frame = frame_cursor.saturating_sub(latency_frames);
+    let project_time = project_time_for_frame(audible_frame, sample_rate)?;
+    let clamped = project_time
+        .get()
+        .clamp(0, i64::try_from(duration.get()).unwrap_or(i64::MAX));
+    Some(ProjectTimeNs::new(clamped))
 }
 
 fn write_playback_samples<T>(
@@ -1012,6 +1050,31 @@ mod tests {
         )
         .expect("time");
         assert_eq!(clamped.get(), 2_000_000_000);
+    }
+
+    #[test]
+    fn frame_cursor_fallback_subtracts_latency_without_drift() {
+        let sample_rate = rhythm_core::time::SampleRate::new(48_000);
+        let duration = rhythm_core::time::DurationNs::new(10_000_000_000);
+
+        assert_eq!(
+            super::estimate_project_time_from_frame_cursor(
+                48_480,
+                480,
+                sample_rate,
+                duration,
+            ),
+            Some(ProjectTimeNs::new(1_000_000_000))
+        );
+        assert_eq!(
+            super::estimate_project_time_from_frame_cursor(
+                240,
+                480,
+                sample_rate,
+                duration,
+            ),
+            Some(ProjectTimeNs::new(0))
+        );
     }
 
     #[test]
