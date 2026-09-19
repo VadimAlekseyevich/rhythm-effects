@@ -92,6 +92,18 @@ impl PlaybackBuffer {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct PlaybackGeneration(u64);
+
+impl PlaybackGeneration {
+    pub const INITIAL: Self = Self(0);
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PlaybackState {
@@ -119,6 +131,10 @@ impl PlaybackState {
 #[derive(Debug)]
 pub enum AudioStreamControlError {
     Cpal(String),
+    InvalidState {
+        expected: PlaybackState,
+        actual: PlaybackState,
+    },
 }
 
 #[derive(Debug)]
@@ -132,6 +148,10 @@ struct PlaybackControl {
     ended: AtomicBool,
     state: AtomicU8,
     stream_error_count: AtomicU64,
+    next_generation: AtomicU64,
+    active_generation: AtomicU64,
+    pending_generation: AtomicU64,
+    pending_seek_frame: AtomicU64,
 }
 
 impl Default for PlaybackControl {
@@ -141,6 +161,10 @@ impl Default for PlaybackControl {
             ended: AtomicBool::new(false),
             state: AtomicU8::new(PlaybackState::Ready as u8),
             stream_error_count: AtomicU64::new(0),
+            next_generation: AtomicU64::new(1),
+            active_generation: AtomicU64::new(PlaybackGeneration::INITIAL.get()),
+            pending_generation: AtomicU64::new(PlaybackGeneration::INITIAL.get()),
+            pending_seek_frame: AtomicU64::new(0),
         }
     }
 }
@@ -153,11 +177,60 @@ impl PlaybackControl {
     fn set_state(&self, state: PlaybackState) {
         self.state.store(state as u8, Ordering::Release);
     }
+
+    fn request_seek(&self, frame: u64) -> PlaybackGeneration {
+        let generation = PlaybackGeneration(self.next_generation.fetch_add(1, Ordering::AcqRel));
+        self.pending_seek_frame.store(frame, Ordering::Relaxed);
+        self.pending_generation
+            .store(generation.get(), Ordering::Release);
+        generation
+    }
+
+    fn ensure_initial_generation(&self) -> PlaybackGeneration {
+        let active = self.active_generation();
+        let pending = self.pending_generation();
+
+        if active != PlaybackGeneration::INITIAL {
+            return active;
+        }
+        if pending != PlaybackGeneration::INITIAL {
+            return pending;
+        }
+
+        self.request_seek(self.frame_cursor.load(Ordering::Acquire))
+    }
+
+    fn apply_pending_seek_at_callback_boundary(&self) -> Option<PlaybackGeneration> {
+        let pending = self.pending_generation();
+        if pending == PlaybackGeneration::INITIAL || pending == self.active_generation() {
+            return None;
+        }
+
+        let frame = self.pending_seek_frame.load(Ordering::Relaxed);
+        self.frame_cursor.store(frame, Ordering::Release);
+        self.active_generation
+            .store(pending.get(), Ordering::Release);
+        self.ended.store(false, Ordering::Release);
+        Some(pending)
+    }
+
+    fn pending_generation(&self) -> PlaybackGeneration {
+        PlaybackGeneration(self.pending_generation.load(Ordering::Acquire))
+    }
+
+    fn active_generation(&self) -> PlaybackGeneration {
+        PlaybackGeneration(self.active_generation.load(Ordering::Acquire))
+    }
+
+    fn accepts_generation(&self, generation: PlaybackGeneration) -> bool {
+        generation != PlaybackGeneration::INITIAL && generation == self.active_generation()
+    }
 }
 
 pub struct CpalPlaybackStream {
     stream: cpal::Stream,
     control: Arc<PlaybackControl>,
+    frame_count: u64,
 }
 
 impl CpalPlaybackStream {
@@ -166,7 +239,34 @@ impl CpalPlaybackStream {
         self.control.state()
     }
 
+    #[must_use]
+    pub fn active_generation(&self) -> PlaybackGeneration {
+        self.control.active_generation()
+    }
+
+    #[must_use]
+    pub fn accepts_clock_anchor_generation(&self, generation: PlaybackGeneration) -> bool {
+        self.control.accepts_generation(generation)
+    }
+
+    pub fn request_playing_seek_frame(
+        &self,
+        frame: u64,
+    ) -> Result<PlaybackGeneration, AudioStreamControlError> {
+        let actual = self.playback_state();
+        if actual != PlaybackState::Playing {
+            return Err(AudioStreamControlError::InvalidState {
+                expected: PlaybackState::Playing,
+                actual,
+            });
+        }
+
+        let frame = frame.min(self.frame_count);
+        Ok(self.control.request_seek(frame))
+    }
+
     pub fn play(&self) -> Result<(), AudioStreamControlError> {
+        self.control.ensure_initial_generation();
         self.stream
             .play()
             .map_err(|error| AudioStreamControlError::Cpal(error.to_string()))?;
@@ -249,6 +349,7 @@ pub fn build_playback_stream(
 ) -> Result<CpalPlaybackStream, AudioStreamBuildError> {
     let output_channels = usize::from(endpoint.channels());
     let config = endpoint.stream_config();
+    let frame_count = u64::try_from(buffer.frame_count()).unwrap_or(u64::MAX);
     let control = Arc::new(PlaybackControl::default());
 
     let stream = match endpoint.sample_format() {
@@ -291,7 +392,11 @@ pub fn build_playback_stream(
         format => return Err(AudioStreamBuildError::UnsupportedSampleFormat(format)),
     }?;
 
-    Ok(CpalPlaybackStream { stream, control })
+    Ok(CpalPlaybackStream {
+        stream,
+        control,
+        frame_count,
+    })
 }
 
 fn build_typed_playback_stream<T>(
@@ -312,6 +417,7 @@ where
         .build_output_stream(
             config,
             move |output: &mut [T], _| {
+                callback_control.apply_pending_seek_at_callback_boundary();
                 let mut cursor =
                     usize::try_from(callback_control.frame_cursor.load(Ordering::Acquire))
                         .unwrap_or(usize::MAX);
@@ -727,6 +833,49 @@ mod tests {
 
     fn temp_fixture_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn playing_seek_switches_generation_only_at_callback_boundary() {
+        let control = super::PlaybackControl::default();
+
+        let first = control.request_seek(120);
+        assert_eq!(first.get(), 1);
+        assert_eq!(control.active_generation(), super::PlaybackGeneration::INITIAL);
+        assert!(!control.accepts_generation(first));
+
+        assert_eq!(
+            control.apply_pending_seek_at_callback_boundary(),
+            Some(first)
+        );
+        assert_eq!(control.frame_cursor.load(std::sync::atomic::Ordering::Acquire), 120);
+        assert!(control.accepts_generation(first));
+
+        let second = control.request_seek(480);
+        assert_eq!(second.get(), 2);
+        assert!(control.accepts_generation(first));
+        assert!(!control.accepts_generation(second));
+
+        assert_eq!(
+            control.apply_pending_seek_at_callback_boundary(),
+            Some(second)
+        );
+        assert_eq!(control.frame_cursor.load(std::sync::atomic::Ordering::Acquire), 480);
+        assert!(!control.accepts_generation(first));
+        assert!(control.accepts_generation(second));
+    }
+
+    #[test]
+    fn repeated_callback_boundary_without_new_seek_keeps_generation() {
+        let control = super::PlaybackControl::default();
+        let generation = control.request_seek(32);
+
+        assert_eq!(
+            control.apply_pending_seek_at_callback_boundary(),
+            Some(generation)
+        );
+        assert_eq!(control.apply_pending_seek_at_callback_boundary(), None);
+        assert_eq!(control.active_generation(), generation);
     }
 
     #[test]

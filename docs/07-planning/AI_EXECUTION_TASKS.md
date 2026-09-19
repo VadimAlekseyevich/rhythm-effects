@@ -125,8 +125,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-099** — Implement realtime callback copying prepared PCM without allocation, decode, resample or file I/O.
 - [x] **AI-100** — Implement play/pause/end state transitions.
 - [x] **AI-101** — Implement paused seek by updating EditorSession playhead only.
-- [ ] **AI-102** — Implement playing seek using a new playback generation and callback cursor switch.
-- [ ] **AI-103** — Implement playback-generation atomics and stale-anchor rejection.
+- [x] **AI-102** — Implement playing seek using a new playback generation and callback cursor switch.
+- [x] **AI-103** — Implement playback-generation atomics and stale-anchor rejection.
 - [ ] **AI-104** — Publish CPAL playback timestamp plus ProjectTimeNs clock anchors from the callback.
 - [ ] **AI-105** — Implement editor-side audible ProjectTimeNs estimation using the stream clock.
 - [ ] **AI-106** — Implement documented output-frame/latency fallback when backend timestamps are unusable.
