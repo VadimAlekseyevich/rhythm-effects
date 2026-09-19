@@ -26,6 +26,7 @@ This directory is the canonical implementation and product documentation for the
 5. the canonical subsystem spec(s);
 6. relevant ADR(s);
 7. [Implementation Readiness](07-planning/IMPLEMENTATION_READINESS.md);
+8. [Documentation Audit](07-planning/DOCUMENTATION_AUDIT.md);
 8. relevant milestone/backlog gate.
 
 ## Architecture core

@@ -1,6 +1,7 @@
 # 07 — Planning
 
 - [IMPLEMENTATION_READINESS.md](IMPLEMENTATION_READINESS.md) — architecture-to-code gate and required validation spikes.
+- [DOCUMENTATION_AUDIT.md](DOCUMENTATION_AUDIT.md) — final pre-code completeness audit.
 - [MILESTONES.md](MILESTONES.md) — M0–M12 capability gates.
 - [MVP_BACKLOG.md](MVP_BACKLOG.md) — accepted implementation epics/tasks.
 - [RISKS.md](RISKS.md) — living risk register.
