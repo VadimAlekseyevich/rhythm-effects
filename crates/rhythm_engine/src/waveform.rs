@@ -237,9 +237,135 @@ fn build_base_level(audio: &DecodedAudio, channels: usize) -> Vec<WavePeak> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BASE_BUCKET_FRAMES, WavePeak, build_waveform_pyramid};
+    use std::{sync::Arc, time::Instant};
+
+    use super::{
+        BASE_BUCKET_FRAMES, WavePeak, WaveformData, WaveformLevel, WaveformPyramid,
+        build_waveform_pyramid,
+    };
     use crate::audio::{AudioChannelLayout, DecodedAudio};
     use rhythm_core::ids::AssetId;
+
+    fn generated_ten_minute_waveform_fixture() -> WaveformData {
+        const SAMPLE_RATE: u32 = 48_000;
+        const DURATION_SECONDS: u64 = 10 * 60;
+        const SOURCE_FRAMES: u64 = SAMPLE_RATE as u64 * DURATION_SECONDS;
+
+        let base_peak_count = usize::try_from(
+            SOURCE_FRAMES.div_ceil(BASE_BUCKET_FRAMES as u64),
+        )
+        .expect("10-minute fixture fits usize");
+        let mut base = Vec::with_capacity(base_peak_count);
+
+        for index in 0..base_peak_count {
+            let phase = (index % 257) as f32 / 256.0;
+            let amplitude = 0.1 + phase * 0.9;
+            base.push(WavePeak {
+                min: -amplitude,
+                max: amplitude,
+            });
+        }
+
+        let mut levels = vec![WaveformLevel {
+            frames_per_peak: BASE_BUCKET_FRAMES as u64,
+            peaks: Arc::from(base),
+        }];
+
+        while levels.last().is_some_and(|level| level.peaks.len() > 1) {
+            let previous = levels.last().expect("level exists");
+            let mut next = Vec::with_capacity(previous.peaks.len().div_ceil(2));
+            for pair in previous.peaks.chunks(2) {
+                next.push(match pair {
+                    [a, b] => a.combine(*b),
+                    [a] => *a,
+                    _ => unreachable!("chunks(2) yields one or two peaks"),
+                });
+            }
+            levels.push(WaveformLevel {
+                frames_per_peak: previous.frames_per_peak.saturating_mul(2),
+                peaks: Arc::from(next),
+            });
+        }
+
+        WaveformData {
+            asset_id: AssetId::new(99).expect("asset id"),
+            generation: 1,
+            pyramid: Arc::new(WaveformPyramid {
+                source_sample_rate: SAMPLE_RATE,
+                source_frame_count: SOURCE_FRAMES,
+                levels: Arc::from(levels),
+            }),
+        }
+    }
+
+    #[test]
+    fn ten_minute_waveform_fixture_has_bounded_peak_memory_and_zoom_queries() {
+        let waveform = generated_ten_minute_waveform_fixture();
+        assert_eq!(waveform.pyramid.source_sample_rate, 48_000);
+        assert_eq!(waveform.pyramid.source_frame_count, 28_800_000);
+        assert_eq!(waveform.pyramid.levels[0].peaks.len(), 450_000);
+
+        let total_peaks: usize = waveform
+            .pyramid
+            .levels
+            .iter()
+            .map(|level| level.peaks.len())
+            .sum();
+        assert!(total_peaks < 900_000);
+
+        for (start, end, width) in [
+            (0, 28_800_000, 1_920.0),
+            (14_000_000, 14_288_000, 1_920.0),
+            (1_000_000, 1_048_000, 960.0),
+            (28_700_000, 28_800_000, 1_280.0),
+        ] {
+            let level = waveform.choose_level_for_view(start, end, width);
+            let slice = waveform
+                .visible_slice(level, start, end)
+                .expect("selected level exists");
+            assert!(!slice.peaks.is_empty());
+            assert!(slice.peaks.len() <= width.ceil() as usize * 2 + 2);
+        }
+    }
+
+    #[test]
+    #[ignore = "manual waveform zoom benchmark; run with --ignored --nocapture"]
+    fn benchmark_ten_minute_waveform_zoom_queries() {
+        let waveform = generated_ten_minute_waveform_fixture();
+        let start = Instant::now();
+        let mut checksum = 0_usize;
+
+        for iteration in 0..20_000_u64 {
+            let window_frames = match iteration % 4 {
+                0 => 28_800_000,
+                1 => 2_880_000,
+                2 => 288_000,
+                _ => 48_000,
+            };
+            let max_start = waveform
+                .pyramid
+                .source_frame_count
+                .saturating_sub(window_frames);
+            let visible_start = if max_start == 0 {
+                0
+            } else {
+                iteration.saturating_mul(97_531) % max_start
+            };
+            let visible_end = visible_start.saturating_add(window_frames);
+            let level =
+                waveform.choose_level_for_view(visible_start, visible_end, 1_920.0);
+            let slice = waveform
+                .visible_slice(level, visible_start, visible_end)
+                .expect("selected level exists");
+            checksum = checksum.wrapping_add(level).wrapping_add(slice.peaks.len());
+        }
+
+        let elapsed = start.elapsed();
+        println!(
+            "10-minute waveform zoom benchmark: 20,000 queries in {elapsed:?}; checksum={checksum}"
+        );
+        assert_ne!(checksum, 0);
+    }
 
     #[test]
     fn immutable_waveform_result_keeps_asset_generation_identity() {

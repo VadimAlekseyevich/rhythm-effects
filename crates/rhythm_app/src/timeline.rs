@@ -198,11 +198,7 @@ impl TimelineRowLayout {
     }
 
     #[must_use]
-    pub fn visible_range(
-        &self,
-        scroll_top: f32,
-        viewport_height: f32,
-    ) -> std::ops::Range<usize> {
+    pub fn visible_range(&self, scroll_top: f32, viewport_height: f32) -> std::ops::Range<usize> {
         let row_count = self.offsets.len().saturating_sub(1);
         if row_count == 0 || !scroll_top.is_finite() || !viewport_height.is_finite() {
             return 0..0;
@@ -1254,7 +1250,10 @@ mod tests {
             animation::{Animated, Interpolation, Keyframe},
             domain::{LinearRgba, Vec2},
             ids::{KeyframeId, ObjectId},
-            project::{Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
             time::{GridOffsetNs, MusicalTick, TempoMap},
         };
 

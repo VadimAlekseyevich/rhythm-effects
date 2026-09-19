@@ -166,7 +166,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-137** — Implement vertical visible-row virtualization.
 - [x] **AI-138** — Implement horizontal visible-MusicalTick keyframe query API.
 - [x] **AI-139** — Implement timeline empty states for no audio, no BPM and no objects.
-- [ ] **AI-140** — Add a generated 10-minute waveform/zoom benchmark fixture.
+- [x] **AI-140** — Add a generated 10-minute waveform/zoom benchmark fixture.
 
 ## M6 — Keyframe timeline editing
 
