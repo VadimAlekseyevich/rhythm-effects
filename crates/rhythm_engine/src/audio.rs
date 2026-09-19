@@ -106,17 +106,17 @@ impl CpalOutputEndpoint {
     }
 
     #[must_use]
-    pub const fn sample_rate(&self) -> u32 {
+    pub fn sample_rate(&self) -> u32 {
         self.config.sample_rate()
     }
 
     #[must_use]
-    pub const fn channels(&self) -> u16 {
+    pub fn channels(&self) -> u16 {
         self.config.channels()
     }
 
     #[must_use]
-    pub const fn sample_format(&self) -> cpal::SampleFormat {
+    pub fn sample_format(&self) -> cpal::SampleFormat {
         self.config.sample_format()
     }
 
