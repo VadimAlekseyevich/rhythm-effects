@@ -1,7 +1,4 @@
-use crate::{
-    ids::KeyframeId,
-    time::MusicalTick,
-};
+use crate::{ids::KeyframeId, time::MusicalTick};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BezierEasing {
@@ -127,10 +124,7 @@ impl<T> Animated<T> {
 #[cfg(test)]
 mod tests {
     use super::{Animated, AnimationInvariantError, Interpolation, Keyframe};
-    use crate::{
-        ids::KeyframeId,
-        time::MusicalTick,
-    };
+    use crate::{ids::KeyframeId, time::MusicalTick};
 
     fn keyframe(id: u64, tick: i64, value: f32) -> Keyframe<f32> {
         Keyframe::new(
@@ -164,14 +158,14 @@ mod tests {
 
     #[test]
     fn duplicate_tick_is_rejected() {
-        let result = Animated::with_keyframes(
-            0.0,
-            vec![keyframe(1, 240, 1.0), keyframe(2, 240, 2.0)],
-        );
+        let result =
+            Animated::with_keyframes(0.0, vec![keyframe(1, 240, 1.0), keyframe(2, 240, 2.0)]);
 
         assert_eq!(
             result,
-            Err(AnimationInvariantError::DuplicateTick(MusicalTick::new(240)))
+            Err(AnimationInvariantError::DuplicateTick(MusicalTick::new(
+                240
+            )))
         );
     }
 
