@@ -330,8 +330,7 @@ pub fn prepare_playback_buffer(
         .checked_mul(1_000_000_000)
         .and_then(|value| value.checked_div(u128::from(output_sample_rate)))
         .ok_or(AudioDecodeError::DurationOverflow)?;
-    let duration_ns =
-        u64::try_from(duration_ns).map_err(|_| AudioDecodeError::DurationOverflow)?;
+    let duration_ns = u64::try_from(duration_ns).map_err(|_| AudioDecodeError::DurationOverflow)?;
 
     Ok(PlaybackBuffer {
         sample_rate: SampleRate::new(output_sample_rate),
@@ -423,10 +422,7 @@ mod tests {
             super::prepare_playback_buffer(decoded, 48_000).expect("prepare playback buffer");
 
         assert_eq!(playback.frame_count(), 2);
-        assert_eq!(
-            playback.interleaved_stereo_f32(),
-            &[0.1, 0.2, 0.3, 0.4]
-        );
+        assert_eq!(playback.interleaved_stereo_f32(), &[0.1, 0.2, 0.3, 0.4]);
         assert_eq!(playback.duration().get(), 41_666);
     }
 
