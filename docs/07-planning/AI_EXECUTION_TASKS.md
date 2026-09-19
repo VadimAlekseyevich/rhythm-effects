@@ -133,7 +133,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-107** — Implement gain application with finite scalar validation.
 - [x] **AI-108** — Handle audio-device/stream error by stopping playback without mutating Project.
 - [x] **AI-109** — Add diagnostics for device/config/generation/clock/error count/memory.
-- [ ] **AI-110** — Run 44.1k source -> 48k output integration test.
+- [x] **AI-110** — Run 44.1k source -> 48k output integration test.
 - [ ] **AI-111** — Run rapid play/pause/seek manual stress test.
 - [ ] **AI-112** — Run the initial 10-minute no-cumulative-drift sync test.
 

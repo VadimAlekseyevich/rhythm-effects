@@ -1451,6 +1451,39 @@ mod tests {
     }
 
     #[test]
+    fn source_44100_prepares_exact_one_second_48000_playback_buffer() {
+        let input_frames = 44_100_usize;
+        let mut samples = Vec::with_capacity(input_frames);
+        for frame in 0..input_frames {
+            let phase = frame as f32 / 44_100.0;
+            samples.push((phase * 440.0 * std::f32::consts::TAU).sin() * 0.25);
+        }
+
+        let decoded = DecodedAudio {
+            sample_rate: 44_100,
+            channel_layout: AudioChannelLayout::Mono,
+            interleaved_f32: samples,
+        };
+
+        let worker = super::spawn_playback_buffer_prepare(decoded, 48_000);
+        let playback = worker
+            .join()
+            .expect("playback preparation worker must not panic")
+            .expect("44.1k to 48k preparation succeeds");
+
+        assert_eq!(playback.sample_rate().get(), 48_000);
+        assert_eq!(playback.frame_count(), 48_000);
+        assert_eq!(playback.duration().get(), 1_000_000_000);
+        assert_eq!(playback.interleaved_stereo_f32().len(), 96_000);
+        assert!(
+            playback
+                .interleaved_stereo_f32()
+                .iter()
+                .all(|sample| sample.is_finite())
+        );
+    }
+
+    #[test]
     fn output_resample_runs_on_worker_and_changes_sample_rate() {
         let input_frames = 4_410_usize;
         let mut samples = Vec::with_capacity(input_frames);
