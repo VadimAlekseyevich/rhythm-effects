@@ -50,7 +50,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-030** — Apply the accepted dark theme and initial Inter-like typography sizing using egui defaults until bundled Inter is added.
 - [x] **AI-031** — Expose a small diagnostics panel with adapter name, backend, window size and frame time.
 - [x] **AI-032** — Display the offscreen composition texture inside the viewport panel.
-- [ ] **AI-033** — Implement viewport panel resize without changing composition dimensions.
+- [x] **AI-033** — Implement viewport panel resize without changing composition dimensions.
 - [ ] **AI-034** — Implement Auto/Full/Half/Quarter preview-quality state in EditorSession placeholder state.
 - [ ] **AI-035** — Add a renderer capability check for Rgba16Float render-attachment support.
 - [ ] **AI-036** — Add a startup error path when no compatible GPU adapter/device can be created.

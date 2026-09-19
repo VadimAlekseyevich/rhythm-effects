@@ -1,3 +1,18 @@
+fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
+    const COMPOSITION_ASPECT: f32 = 1920.0 / 1080.0;
+
+    if available.x <= 0.0 || available.y <= 0.0 {
+        return egui::Vec2::ZERO;
+    }
+
+    let available_aspect = available.x / available.y;
+    if available_aspect > COMPOSITION_ASPECT {
+        egui::vec2(available.y * COMPOSITION_ASPECT, available.y)
+    } else {
+        egui::vec2(available.x, available.x / COMPOSITION_ASPECT)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DiagnosticsView {
     pub adapter_name: String,
@@ -97,13 +112,34 @@ pub fn draw_editor_shell(
         ui.separator();
         ui.centered_and_justified(|ui| {
             if let Some(texture_id) = composition_texture_id {
-                ui.add(egui::Image::from_texture(egui::load::SizedTexture::new(
-                    texture_id,
-                    egui::vec2(640.0, 360.0),
-                )));
+                let preview_size = fit_composition_preview(ui.available_size());
+                ui.add(
+                    egui::Image::from_texture(egui::load::SizedTexture::new(
+                        texture_id,
+                        egui::vec2(1920.0, 1080.0),
+                    ))
+                    .fit_to_exact_size(preview_size),
+                );
             } else {
                 ui.label("Composition preview unavailable");
             }
         });
     });
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::fit_composition_preview;
+
+    #[test]
+    fn preview_fit_preserves_composition_aspect() {
+        let wide = fit_composition_preview(egui::vec2(1000.0, 400.0));
+        let tall = fit_composition_preview(egui::vec2(400.0, 1000.0));
+
+        assert!((wide.x / wide.y - 16.0 / 9.0).abs() < 0.0001);
+        assert!((tall.x / tall.y - 16.0 / 9.0).abs() < 0.0001);
+        assert!(wide.x <= 1000.0 && wide.y <= 400.0);
+        assert!(tall.x <= 400.0 && tall.y <= 1000.0);
+    }
 }
