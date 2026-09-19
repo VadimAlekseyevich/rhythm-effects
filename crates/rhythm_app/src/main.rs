@@ -22,7 +22,11 @@ use winit::{
     window::{Window, WindowId},
 };
 
-fn fail_startup(event_loop: &ActiveEventLoop, stage: &'static str, message: impl std::fmt::Display) {
+fn fail_startup(
+    event_loop: &ActiveEventLoop,
+    stage: &'static str,
+    message: impl std::fmt::Display,
+) {
     error!(stage, error = %message, "fatal startup failure");
     event_loop.exit();
 }
