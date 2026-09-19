@@ -250,17 +250,11 @@ where
         .build_output_stream(
             config,
             move |output: &mut [T], _| {
-                let mut cursor = usize::try_from(
-                    callback_control.frame_cursor.load(Ordering::Acquire),
-                )
-                .unwrap_or(usize::MAX);
+                let mut cursor =
+                    usize::try_from(callback_control.frame_cursor.load(Ordering::Acquire))
+                        .unwrap_or(usize::MAX);
 
-                write_playback_samples(
-                    &buffer,
-                    &mut cursor,
-                    output_channels,
-                    output,
-                );
+                write_playback_samples(&buffer, &mut cursor, output_channels, output);
 
                 callback_control
                     .frame_cursor
