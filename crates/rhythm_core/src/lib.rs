@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ids;
+pub mod time;
 
 pub const APP_NAME: &str = "Rhythm Effects";
 
