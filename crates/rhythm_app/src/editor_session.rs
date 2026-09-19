@@ -30,6 +30,13 @@ impl PreviewQuality {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TimelineBoxSelection {
+    start: [f32; 2],
+    current: [f32; 2],
+    ctrl_toggle: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TimelineView {
     start: ProjectTimeNs,
@@ -43,6 +50,7 @@ pub struct EditorSession {
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
     selected_keyframes: HashSet<KeyframeId>,
+    timeline_box_selection: Option<TimelineBoxSelection>,
 }
 
 impl Default for EditorSession {
@@ -53,6 +61,7 @@ impl Default for EditorSession {
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
             selected_keyframes: HashSet::new(),
+            timeline_box_selection: None,
         }
     }
 }
@@ -95,6 +104,55 @@ impl EditorSession {
 
     pub fn clear_keyframe_selection(&mut self) {
         self.selected_keyframes.clear();
+    }
+
+    pub fn replace_keyframe_selection(
+        &mut self,
+        keyframe_ids: impl IntoIterator<Item = KeyframeId>,
+    ) {
+        self.selected_keyframes.clear();
+        self.selected_keyframes.extend(keyframe_ids);
+    }
+
+    pub fn toggle_keyframe_selection_many(
+        &mut self,
+        keyframe_ids: impl IntoIterator<Item = KeyframeId>,
+    ) {
+        for keyframe_id in keyframe_ids {
+            self.toggle_keyframe_selection(keyframe_id);
+        }
+    }
+
+    pub fn begin_timeline_box_selection(
+        &mut self,
+        start: [f32; 2],
+        ctrl_toggle: bool,
+    ) {
+        self.timeline_box_selection = Some(TimelineBoxSelection {
+            start,
+            current: start,
+            ctrl_toggle,
+        });
+    }
+
+    pub fn update_timeline_box_selection(&mut self, current: [f32; 2]) {
+        if let Some(selection) = self.timeline_box_selection.as_mut() {
+            selection.current = current;
+        }
+    }
+
+    #[must_use]
+    pub fn timeline_box_selection(&self) -> Option<([f32; 2], [f32; 2], bool)> {
+        self.timeline_box_selection
+            .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
+    }
+
+    pub fn take_timeline_box_selection(
+        &mut self,
+    ) -> Option<([f32; 2], [f32; 2], bool)> {
+        self.timeline_box_selection
+            .take()
+            .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
     }
 
     pub const fn set_authoring_division(&mut self, division: BeatDivision) {
@@ -318,6 +376,30 @@ mod tests {
             BpmMicros::new(120_000_000).expect("BPM"),
             TimeSignature::default(),
         )
+    }
+
+    #[test]
+    fn box_selection_replace_and_ctrl_toggle_are_applied_on_commit() {
+        let first = rhythm_core::ids::KeyframeId::new(21).expect("key id");
+        let second = rhythm_core::ids::KeyframeId::new(22).expect("key id");
+        let third = rhythm_core::ids::KeyframeId::new(23).expect("key id");
+        let mut session = EditorSession::default();
+
+        session.replace_keyframe_selection([first, second]);
+        assert_eq!(session.selected_keyframe_count(), 2);
+
+        session.toggle_keyframe_selection_many([second, third]);
+        assert!(session.is_keyframe_selected(first));
+        assert!(!session.is_keyframe_selected(second));
+        assert!(session.is_keyframe_selected(third));
+
+        session.begin_timeline_box_selection([10.0, 20.0], true);
+        session.update_timeline_box_selection([30.0, 40.0]);
+        assert_eq!(
+            session.take_timeline_box_selection(),
+            Some(([10.0, 20.0], [30.0, 40.0], true))
+        );
+        assert!(session.timeline_box_selection().is_none());
     }
 
     #[test]

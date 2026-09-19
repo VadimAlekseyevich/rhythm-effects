@@ -727,6 +727,8 @@ fn draw_timeline_rows(
         .max_height(available_height)
         .show_viewport(ui, |ui, viewport| {
             let visible = layout.visible_range(viewport.top(), viewport.height());
+            let selection_clip_rect = ui.clip_rect();
+            let mut visible_key_hits = Vec::new();
             ui.add_space(layout.row_top(visible.start));
 
             for row in &rows[visible.clone()] {
@@ -773,6 +775,10 @@ fn draw_timeline_rows(
                                     rect.center().y,
                                 );
                                 let hit_rect = keyframe_hit_rect(center);
+                                visible_key_hits.push(VisibleKeyHit {
+                                    id: keyframe.id,
+                                    rect: hit_rect,
+                                });
                                 let response = ui.interact(
                                     hit_rect,
                                     egui::Id::new(("timeline_keyframe", keyframe.id.get())),
@@ -809,6 +815,73 @@ fn draw_timeline_rows(
                 }
             }
 
+            let (primary_pressed, primary_down, primary_released, pointer_pos, press_origin, ctrl) =
+                ui.input(|input| {
+                    (
+                        input.pointer.primary_pressed(),
+                        input.pointer.primary_down(),
+                        input.pointer.primary_released(),
+                        input.pointer.interact_pos(),
+                        input.pointer.press_origin(),
+                        input.modifiers.ctrl,
+                    )
+                });
+
+            if primary_pressed
+                && let Some(origin) = press_origin
+                && selection_clip_rect.contains(origin)
+                && !visible_key_hits.iter().any(|hit| hit.rect.contains(origin))
+            {
+                session.begin_timeline_box_selection([origin.x, origin.y], ctrl);
+            }
+
+            if primary_down
+                && let Some(pointer) = pointer_pos
+                && session.timeline_box_selection().is_some()
+            {
+                session.update_timeline_box_selection([pointer.x, pointer.y]);
+            }
+
+            if let Some((start, current, _)) = session.timeline_box_selection() {
+                let selection_rect = egui::Rect::from_two_pos(
+                    egui::pos2(start[0], start[1]),
+                    egui::pos2(current[0], current[1]),
+                );
+                let clipped = selection_rect.intersect(selection_clip_rect);
+                if clipped.is_positive() {
+                    ui.painter().rect_stroke(
+                        clipped,
+                        0.0,
+                        egui::Stroke::new(
+                            1.0,
+                            ui.visuals().selection.stroke.color,
+                        ),
+                        egui::StrokeKind::Inside,
+                    );
+                    ui.painter().rect_filled(
+                        clipped,
+                        0.0,
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.12),
+                    );
+                }
+            }
+
+            if primary_released
+                && let Some((start, current, ctrl_toggle)) =
+                    session.take_timeline_box_selection()
+            {
+                let selection_rect = egui::Rect::from_two_pos(
+                    egui::pos2(start[0], start[1]),
+                    egui::pos2(current[0], current[1]),
+                );
+                let selected = keyframe_ids_in_box(selection_rect, &visible_key_hits);
+                if ctrl_toggle {
+                    session.toggle_keyframe_selection_many(selected);
+                } else {
+                    session.replace_keyframe_selection(selected);
+                }
+            }
+
             let rendered_bottom = layout.row_top(visible.end);
             ui.add_space((layout.total_height() - rendered_bottom).max(0.0));
         });
@@ -837,6 +910,22 @@ fn visible_tick_range(
     }
 
     Some((MusicalTick::new(start as i64), MusicalTick::new(end as i64)))
+}
+
+#[derive(Debug, Clone, Copy)]
+struct VisibleKeyHit {
+    id: KeyframeId,
+    rect: egui::Rect,
+}
+
+fn keyframe_ids_in_box(
+    selection: egui::Rect,
+    hits: &[VisibleKeyHit],
+) -> Vec<KeyframeId> {
+    hits.iter()
+        .filter(|hit| selection.contains(hit.rect.center()))
+        .map(|hit| hit.id)
+        .collect()
 }
 
 fn keyframe_hit_rect(center: egui::Pos2) -> egui::Rect {
@@ -1242,6 +1331,28 @@ mod tests {
         BeatDivision, BpmMicros, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
     };
     use rhythm_engine::waveform::{WavePeak, WaveformSlice};
+
+    #[test]
+    fn box_selection_collects_key_centers_inside_rect() {
+        let first = rhythm_core::ids::KeyframeId::new(31).expect("key id");
+        let second = rhythm_core::ids::KeyframeId::new(32).expect("key id");
+        let hits = [
+            super::VisibleKeyHit {
+                id: first,
+                rect: super::keyframe_hit_rect(egui::pos2(20.0, 20.0)),
+            },
+            super::VisibleKeyHit {
+                id: second,
+                rect: super::keyframe_hit_rect(egui::pos2(80.0, 80.0)),
+            },
+        ];
+        let selected = super::keyframe_ids_in_box(
+            egui::Rect::from_two_pos(egui::pos2(0.0, 0.0), egui::pos2(50.0, 50.0)),
+            &hits,
+        );
+
+        assert_eq!(selected, vec![first]);
+    }
 
     #[test]
     fn keyframe_hit_box_is_at_least_18_by_18() {

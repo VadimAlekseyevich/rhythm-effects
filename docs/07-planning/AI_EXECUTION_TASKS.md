@@ -173,8 +173,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-141** — Render keyframe diamonds with at least 18x18 logical hit boxes.
 - [x] **AI-142** — Implement single keyframe selection by stable KeyframeId.
 - [x] **AI-143** — Implement Ctrl-click keyframe toggle selection.
-- [ ] **AI-144** — Implement empty-canvas box selection.
-- [ ] **AI-145** — Implement Ctrl box-add/toggle selection semantics.
+- [x] **AI-144** — Implement empty-canvas box selection.
+- [x] **AI-145** — Implement Ctrl box-add/toggle selection semantics.
 - [ ] **AI-146** — Implement K on a static focused property to create the first key at nearest grid and move playhead there.
 - [ ] **AI-147** — Implement K on an existing resolved key to remove that key.
 - [ ] **AI-148** — Implement K on an animated property without a current key to create one from evaluated value.
