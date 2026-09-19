@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use gpu::GpuContext;
 use rhythm_core::APP_NAME;
+use rhythm_engine::renderer::Renderer;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 use winit::{
@@ -20,6 +21,7 @@ use winit::{
 struct RhythmApp {
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
+    renderer: Option<Renderer>,
 }
 
 impl ApplicationHandler for RhythmApp {
@@ -39,8 +41,11 @@ impl ApplicationHandler for RhythmApp {
 
                 match GpuContext::initialize(Arc::clone(&window)) {
                     Ok(gpu) => {
+                        let renderer = Renderer::new(&gpu.device);
                         let adapter = gpu.adapter_summary();
                         let surface_size = gpu.surface_size();
+                        let composition_size = renderer.composition_size();
+                        let composition_format = renderer.composition_format();
                         info!(
                             window_id = ?window.id(),
                             engine = rhythm_engine::status(),
@@ -48,8 +53,11 @@ impl ApplicationHandler for RhythmApp {
                             gpu_backend = %adapter.backend,
                             gpu_device_type = %adapter.device_type,
                             surface_size = ?surface_size,
-                            "application window, GPU context, and surface created"
+                            composition_size = ?composition_size,
+                            composition_format = ?composition_format,
+                            "application window, GPU context, surface, and composition target created"
                         );
+                        self.renderer = Some(renderer);
                         self.gpu = Some(gpu);
                         self.window = Some(window);
                     }

@@ -42,7 +42,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-022** — Initialize one wgpu Instance/Adapter/Device/Queue compatible with the application window.
 - [x] **AI-023** — Create and configure the wgpu window surface and handle zero-size/minimized windows.
 - [x] **AI-024** — Add resize handling that reconfigures the surface only for non-zero dimensions.
-- [ ] **AI-025** — Create an offscreen Rgba16Float composition texture at a fixed 1920x1080 test size.
+- [x] **AI-025** — Create an offscreen Rgba16Float composition texture at a fixed 1920x1080 test size.
 - [ ] **AI-026** — Add a render pass that clears the offscreen composition texture to opaque black.
 - [ ] **AI-027** — Integrate egui Context and egui-winit State with the winit event loop.
 - [ ] **AI-028** — Integrate egui-wgpu rendering using the same wgpu Device/Queue.
