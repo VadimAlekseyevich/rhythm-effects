@@ -1,3 +1,5 @@
+use crate::editor_session::{EditorSession, PreviewQuality};
+
 fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
     const COMPOSITION_ASPECT: f32 = 1920.0 / 1080.0;
 
@@ -50,6 +52,7 @@ pub fn configure_theme(context: &egui::Context) {
 
 pub fn draw_editor_shell(
     ui: &mut egui::Ui,
+    session: &mut EditorSession,
     diagnostics: &DiagnosticsView,
     composition_texture_id: Option<egui::TextureId>,
 ) {
@@ -64,6 +67,18 @@ pub fn draw_editor_shell(
                 ui.label("BPM —");
                 ui.label("4/4");
                 ui.label("Grid 1/4");
+                ui.separator();
+                egui::ComboBox::from_id_salt("preview_quality")
+                    .selected_text(session.preview_quality.label())
+                    .show_ui(ui, |ui| {
+                        for quality in PreviewQuality::ALL {
+                            ui.selectable_value(
+                                &mut session.preview_quality,
+                                quality,
+                                quality.label(),
+                            );
+                        }
+                    });
             });
         });
 

@@ -7,6 +7,20 @@ pub enum PreviewQuality {
     Quarter,
 }
 
+impl PreviewQuality {
+    pub const ALL: [Self; 4] = [Self::Auto, Self::Full, Self::Half, Self::Quarter];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Full => "Full",
+            Self::Half => "Half",
+            Self::Quarter => "Quarter",
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct EditorSession {
     pub preview_quality: PreviewQuality,

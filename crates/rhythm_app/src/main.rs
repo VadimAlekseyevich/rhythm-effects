@@ -188,6 +188,7 @@ impl ApplicationHandler for RhythmApp {
                         if let Some(diagnostics) = self.diagnostics.as_ref() {
                             editor_ui::draw_editor_shell(
                                 root_ui,
+                                &mut self.session,
                                 diagnostics,
                                 self.composition_texture_id,
                             );
