@@ -684,7 +684,7 @@ pub fn draw_timeline(
         draw_empty_state_label(ui, ruler_rect, "Set BPM to enable rhythm grid");
     }
     draw_playhead(ui, grid_rect, ruler_transform, session.playhead());
-    draw_timeline_rows(ui, &rows);
+    draw_timeline_rows(ui, &rows, project, tempo_map, ruler_transform);
 }
 
 fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {
@@ -697,7 +697,13 @@ fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {
     );
 }
 
-fn draw_timeline_rows(ui: &mut egui::Ui, rows: &[TimelineRow<'_>]) {
+fn draw_timeline_rows(
+    ui: &mut egui::Ui,
+    rows: &[TimelineRow<'_>],
+    project: &Project,
+    tempo_map: &TempoMap,
+    transform: TimelineTransform,
+) {
     let available_height = ui.available_height().max(0.0);
     if available_height <= 0.0 {
         return;
@@ -712,6 +718,7 @@ fn draw_timeline_rows(ui: &mut egui::Ui, rows: &[TimelineRow<'_>]) {
         return;
     }
 
+    let visible_tick_range = visible_tick_range(tempo_map, transform);
     let layout = TimelineRowLayout::new(rows);
     egui::ScrollArea::vertical()
         .id_salt("timeline_rows_scroll")
@@ -739,9 +746,9 @@ fn draw_timeline_rows(ui: &mut egui::Ui, rows: &[TimelineRow<'_>]) {
                         );
                     }
                     TimelineRow::Property {
+                        object_id,
                         property,
                         keyframe_count,
-                        ..
                     } => {
                         ui.painter().text(
                             egui::pos2(rect.left() + 18.0, rect.center().y),
@@ -750,6 +757,38 @@ fn draw_timeline_rows(ui: &mut egui::Ui, rows: &[TimelineRow<'_>]) {
                             egui::FontId::proportional(12.0),
                             color.gamma_multiply(0.85),
                         );
+
+                        if let Some((start_tick, end_tick)) = visible_tick_range {
+                            for keyframe in query_visible_keyframes(
+                                project,
+                                *object_id,
+                                *property,
+                                start_tick,
+                                end_tick,
+                            ) {
+                                let Ok(project_time) = tempo_map.project_time_for_tick(keyframe.tick)
+                                else {
+                                    continue;
+                                };
+                                let center = egui::pos2(
+                                    transform.project_time_to_x(project_time),
+                                    rect.center().y,
+                                );
+                                let hit_rect = keyframe_hit_rect(center);
+                                let response = ui.interact(
+                                    hit_rect,
+                                    egui::Id::new(("timeline_keyframe", keyframe.id.get())),
+                                    egui::Sense::click_and_drag(),
+                                );
+                                draw_keyframe_diamond(
+                                    ui,
+                                    center,
+                                    response.hovered(),
+                                    color,
+                                );
+                            }
+                        }
+
                         if *keyframe_count > 0 {
                             ui.painter().text(
                                 egui::pos2(rect.right() - 6.0, rect.center().y),
@@ -766,6 +805,63 @@ fn draw_timeline_rows(ui: &mut egui::Ui, rows: &[TimelineRow<'_>]) {
             let rendered_bottom = layout.row_top(visible.end);
             ui.add_space((layout.total_height() - rendered_bottom).max(0.0));
         });
+}
+
+fn visible_tick_range(
+    tempo_map: &TempoMap,
+    transform: TimelineTransform,
+) -> Option<(MusicalTick, MusicalTick)> {
+    let start = tempo_map
+        .continuous_tick_position(transform.start_time())
+        .ok()?
+        .floor();
+    let end = tempo_map
+        .continuous_tick_position(transform.end_time())
+        .ok()?
+        .ceil();
+    if !start.is_finite()
+        || !end.is_finite()
+        || start < i64::MIN as f64
+        || start > i64::MAX as f64
+        || end < i64::MIN as f64
+        || end > i64::MAX as f64
+    {
+        return None;
+    }
+
+    Some((
+        MusicalTick::new(start as i64),
+        MusicalTick::new(end as i64),
+    ))
+}
+
+fn keyframe_hit_rect(center: egui::Pos2) -> egui::Rect {
+    egui::Rect::from_center_size(center, egui::vec2(18.0, 18.0))
+}
+
+fn draw_keyframe_diamond(
+    ui: &egui::Ui,
+    center: egui::Pos2,
+    hovered: bool,
+    base_color: egui::Color32,
+) {
+    let radius = if hovered { 5.5 } else { 4.5 };
+    let color = if hovered {
+        ui.visuals().selection.stroke.color
+    } else {
+        base_color
+    };
+    let points = vec![
+        egui::pos2(center.x, center.y - radius),
+        egui::pos2(center.x + radius, center.y),
+        egui::pos2(center.x, center.y + radius),
+        egui::pos2(center.x - radius, center.y),
+    ];
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        color,
+        egui::Stroke::NONE,
+    ));
 }
 
 fn draw_playhead(
@@ -1139,6 +1235,15 @@ mod tests {
         BeatDivision, BpmMicros, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
     };
     use rhythm_engine::waveform::{WavePeak, WaveformSlice};
+
+    #[test]
+    fn keyframe_hit_box_is_at_least_18_by_18() {
+        let rect = super::keyframe_hit_rect(egui::pos2(100.0, 50.0));
+
+        assert!(rect.width() >= 18.0);
+        assert!(rect.height() >= 18.0);
+        assert_eq!(rect.center(), egui::pos2(100.0, 50.0));
+    }
 
     #[test]
     fn row_layout_virtualizes_mixed_height_rows() {
