@@ -83,7 +83,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-060** — Implement RectangleObject with animated size/fill/corner radius.
 - [x] **AI-061** — Implement EllipseObject with animated size/fill.
 - [x] **AI-062** — Implement ImageObject storing only AssetId.
-- [ ] **AI-063** — Implement TextObject static text/font/font-size/alignment plus animated color.
+- [x] **AI-063** — Implement TextObject static text/font/font-size/alignment plus animated color.
 - [ ] **AI-064** — Implement FontReference family/weight/style semantic types.
 - [ ] **AI-065** — Implement the five typed EffectKind variants and their parameter structs.
 - [ ] **AI-066** — Implement AssetRecord/AssetKind/AssetSource and AudioTrack semantic structures.

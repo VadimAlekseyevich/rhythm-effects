@@ -71,8 +71,27 @@ pub struct ImageObject {
     pub asset: AssetId,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct TextObject;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextAlignment {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontReference {
+    pub family: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextObject {
+    pub text: String,
+    pub font: FontReference,
+    pub font_size: f32,
+    pub color: Animated<LinearRgba>,
+    pub alignment: TextAlignment,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
@@ -175,6 +194,25 @@ impl TransformAnimation {
 mod tests {
     use super::TransformAnimation;
     use crate::{animation::Animated, domain::Vec2};
+
+    #[test]
+    fn text_object_separates_static_layout_from_animated_color() {
+        let text = super::TextObject {
+            text: "Привет, rhythm".to_owned(),
+            font: super::FontReference {
+                family: "Inter".to_owned(),
+            },
+            font_size: 48.0,
+            color: Animated::new_static(crate::domain::LinearRgba::black_opaque()),
+            alignment: super::TextAlignment::Center,
+        };
+
+        assert_eq!(text.text, "Привет, rhythm");
+        assert_eq!(text.font.family, "Inter");
+        assert_eq!(text.font_size, 48.0);
+        assert_eq!(text.alignment, super::TextAlignment::Center);
+        assert_eq!(*text.color.base_value(), crate::domain::LinearRgba::black_opaque());
+    }
 
     #[test]
     fn image_object_stores_only_asset_identity() {
