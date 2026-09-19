@@ -186,11 +186,7 @@ pub fn interpolate_rotation_degrees(from: f32, to: f32, progress: f64) -> f32 {
 }
 
 #[must_use]
-pub fn interpolate_linear_rgba(
-    from: LinearRgba,
-    to: LinearRgba,
-    progress: f64,
-) -> LinearRgba {
+pub fn interpolate_linear_rgba(from: LinearRgba, to: LinearRgba, progress: f64) -> LinearRgba {
     LinearRgba::new(
         interpolate_linear_f32(from.r(), to.r(), progress),
         interpolate_linear_f32(from.g(), to.g(), progress),
