@@ -32,9 +32,9 @@ fn fail_startup(
     event_loop.exit();
 }
 
-#[derive(Default)]
 struct RhythmApp {
     session: EditorSession,
+    project_editor: rhythm_core::editor::ProjectEditor,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
@@ -45,6 +45,33 @@ struct RhythmApp {
     diagnostics: Option<DiagnosticsView>,
     waveform: Option<rhythm_engine::waveform::WaveformData>,
     last_frame_instant: Option<Instant>,
+}
+
+impl Default for RhythmApp {
+    fn default() -> Self {
+        let project = rhythm_core::project::Project::new(
+            "Untitled",
+            rhythm_core::project::ProjectSettings::default(),
+            rhythm_core::time::TempoMap::unset(rhythm_core::time::GridOffsetNs::new(0)),
+        );
+        let project_editor =
+            rhythm_core::editor::ProjectEditor::new(project).expect("default project is valid");
+
+        Self {
+            session: EditorSession::default(),
+            project_editor,
+            window: None,
+            gpu: None,
+            renderer: None,
+            egui_context: None,
+            egui_state: None,
+            egui_renderer: None,
+            composition_texture_id: None,
+            diagnostics: None,
+            waveform: None,
+            last_frame_instant: None,
+        }
+    }
 }
 
 impl ApplicationHandler for RhythmApp {
@@ -191,6 +218,7 @@ impl ApplicationHandler for RhythmApp {
                             editor_ui::draw_editor_shell(
                                 root_ui,
                                 &mut self.session,
+                                self.project_editor.project(),
                                 diagnostics,
                                 self.composition_texture_id,
                                 self.waveform.as_ref(),

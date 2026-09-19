@@ -149,11 +149,11 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-120** — Implement mip-level choice from visible time range and pixel width.
 - [x] **AI-121** — Render the waveform as a batched egui mesh/shape rather than one widget per bucket.
 - [x] **AI-122** — Implement one shared TimelineTransform for project-time to x and inverse mapping.
-- [ ] **AI-123** — Implement timeline ruler row.
-- [ ] **AI-124** — Render bar lines using TimeSignature and TempoMap.
-- [ ] **AI-125** — Render beat lines with medium visual priority.
-- [ ] **AI-126** — Render subdivision lines for the current BeatDivision.
-- [ ] **AI-127** — Hide labels before grid lines become visually overcrowded.
+- [x] **AI-123** — Implement timeline ruler row.
+- [x] **AI-124** — Render bar lines using TimeSignature and TempoMap.
+- [x] **AI-125** — Render beat lines with medium visual priority.
+- [x] **AI-126** — Render subdivision lines for the current BeatDivision.
+- [x] **AI-127** — Hide labels before grid lines become visually overcrowded.
 - [ ] **AI-128** — Implement continuous playhead ruler click/drag seek.
 - [ ] **AI-129** — Implement Left/Right current-grid playhead stepping.
 - [ ] **AI-130** — Implement Ctrl+Left/Right one-beat stepping.

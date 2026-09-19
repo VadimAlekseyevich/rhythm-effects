@@ -1,7 +1,14 @@
-use rhythm_core::time::ProjectTimeNs;
+use crate::editor_session::EditorSession;
+use rhythm_core::time::{
+    BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
+    floor_tick_position_to_grid,
+};
 use rhythm_engine::waveform::{WaveformData, WaveformSlice};
 
+const RULER_ROW_HEIGHT: f32 = 28.0;
 const WAVEFORM_ROW_HEIGHT: f32 = 64.0;
+const MIN_RULER_LABEL_SPACING_PX: f32 = 72.0;
+const MAX_GRID_LINES_PER_FRAME: usize = 100_000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimelineTransform {
@@ -65,41 +72,318 @@ impl TimelineTransform {
     }
 }
 
-pub fn draw_timeline_waveform(ui: &mut egui::Ui, waveform: Option<&WaveformData>) {
-    let desired_size = egui::vec2(ui.available_width(), WAVEFORM_ROW_HEIGHT);
-    let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MusicalGridLineKind {
+    Bar,
+    Beat,
+    Subdivision,
+}
 
-    let Some(waveform) = waveform else {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MusicalGridLine {
+    tick: MusicalTick,
+    kind: MusicalGridLineKind,
+}
+
+pub fn draw_timeline(
+    ui: &mut egui::Ui,
+    session: &EditorSession,
+    tempo_map: &TempoMap,
+    project_duration: DurationNs,
+    waveform: Option<&WaveformData>,
+) {
+    let duration_ns = i64::try_from(project_duration.get())
+        .unwrap_or(i64::MAX)
+        .max(1);
+    let start_time = ProjectTimeNs::new(0);
+    let end_time = ProjectTimeNs::new(duration_ns);
+
+    let (ruler_rect, _ruler_response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), RULER_ROW_HEIGHT),
+        egui::Sense::hover(),
+    );
+    let (waveform_rect, _waveform_response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), WAVEFORM_ROW_HEIGHT),
+        egui::Sense::hover(),
+    );
+
+    let Some(ruler_transform) = TimelineTransform::new(ruler_rect, start_time, end_time) else {
         return;
     };
-    let source_frames = waveform.pyramid.source_frame_count;
-    if source_frames == 0 || rect.width() <= 0.0 {
+    let Some(waveform_transform) = TimelineTransform::new(waveform_rect, start_time, end_time)
+    else {
+        return;
+    };
+
+    draw_waveform(ui, waveform_rect, waveform_transform, waveform);
+
+    let grid_rect = egui::Rect::from_min_max(
+        egui::pos2(ruler_rect.left(), ruler_rect.top()),
+        egui::pos2(waveform_rect.right(), waveform_rect.bottom()),
+    );
+    draw_musical_grid(
+        ui,
+        grid_rect,
+        ruler_transform,
+        tempo_map,
+        session.authoring_division(),
+    );
+    draw_time_ruler(ui, ruler_rect, ruler_transform);
+}
+
+fn draw_time_ruler(ui: &egui::Ui, rect: egui::Rect, transform: TimelineTransform) {
+    let interval_ns = choose_ruler_interval_ns(transform);
+    let first = transform.start_time().get().div_euclid(interval_ns) * interval_ns;
+    let color = ui.visuals().widgets.noninteractive.fg_stroke.color;
+    let subtle = color.gamma_multiply(0.45);
+    let mut tick_time = first;
+    let mut rendered = 0_usize;
+
+    while tick_time <= transform.end_time().get() && rendered < 10_000 {
+        if tick_time >= transform.start_time().get() {
+            let project_time = ProjectTimeNs::new(tick_time);
+            let x = transform.project_time_to_x(project_time);
+            ui.painter().line_segment(
+                [
+                    egui::pos2(x, rect.bottom() - 7.0),
+                    egui::pos2(x, rect.bottom()),
+                ],
+                egui::Stroke::new(1.0, subtle),
+            );
+            ui.painter().text(
+                egui::pos2(x + 3.0, rect.top() + 2.0),
+                egui::Align2::LEFT_TOP,
+                format_ruler_label(project_time, interval_ns),
+                egui::FontId::monospace(11.0),
+                color,
+            );
+        }
+
+        let Some(next) = tick_time.checked_add(interval_ns) else {
+            break;
+        };
+        tick_time = next;
+        rendered += 1;
+    }
+}
+
+fn choose_ruler_interval_ns(transform: TimelineTransform) -> i64 {
+    const INTERVALS: [i64; 14] = [
+        100_000_000,
+        250_000_000,
+        500_000_000,
+        1_000_000_000,
+        2_000_000_000,
+        5_000_000_000,
+        10_000_000_000,
+        30_000_000_000,
+        60_000_000_000,
+        120_000_000_000,
+        300_000_000_000,
+        600_000_000_000,
+        1_800_000_000_000,
+        3_600_000_000_000,
+    ];
+
+    for interval in INTERVALS {
+        let x0 = transform.project_time_to_x(transform.start_time());
+        let x1 = transform.project_time_to_x(ProjectTimeNs::new(
+            transform.start_time().get().saturating_add(interval),
+        ));
+        if (x1 - x0).abs() >= MIN_RULER_LABEL_SPACING_PX {
+            return interval;
+        }
+    }
+
+    INTERVALS[INTERVALS.len() - 1]
+}
+
+fn format_ruler_label(project_time: ProjectTimeNs, interval_ns: i64) -> String {
+    let total_ns = project_time.get().max(0);
+    let total_seconds = total_ns as f64 / 1_000_000_000.0;
+
+    if total_seconds >= 60.0 {
+        let minutes = (total_seconds / 60.0).floor() as u64;
+        let seconds = total_seconds - minutes as f64 * 60.0;
+        format!("{minutes}:{seconds:04.1}")
+    } else if interval_ns < 1_000_000_000 {
+        format!("{total_seconds:.1}s")
+    } else {
+        format!("{total_seconds:.0}s")
+    }
+}
+
+fn draw_musical_grid(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    transform: TimelineTransform,
+    tempo_map: &TempoMap,
+    division: BeatDivision,
+) {
+    let Some(segment) = tempo_map.initial_segment() else {
+        return;
+    };
+    let lines = collect_musical_grid_lines(tempo_map, division, transform);
+    if lines.is_empty() {
         return;
     }
 
-    let Some(end_time) =
-        project_time_for_source_frame(source_frames, waveform.pyramid.source_sample_rate)
-    else {
-        return;
+    let base_color = ui.visuals().widgets.noninteractive.fg_stroke.color;
+    let subdivision_color = base_color.gamma_multiply(0.16);
+    let beat_color = base_color.gamma_multiply(0.32);
+    let bar_color = base_color.gamma_multiply(0.58);
+
+    let subdivision_spacing = grid_spacing_px(tempo_map, division.ticks_per_step(), transform);
+    let beat_spacing = grid_spacing_px(tempo_map, PPQ, transform);
+    let ticks_per_bar = ticks_per_bar(segment.meter());
+    let bar_spacing = grid_spacing_px(tempo_map, ticks_per_bar, transform);
+    let draw_subdivisions = subdivision_spacing >= 4.0;
+    let draw_beats = beat_spacing >= 5.0;
+    let draw_bar_labels = bar_spacing >= MIN_RULER_LABEL_SPACING_PX;
+
+    for line in lines {
+        if line.kind == MusicalGridLineKind::Subdivision && !draw_subdivisions {
+            continue;
+        }
+        if line.kind == MusicalGridLineKind::Beat && !draw_beats {
+            continue;
+        }
+
+        let Ok(project_time) = tempo_map.project_time_for_tick(line.tick) else {
+            continue;
+        };
+        let x = transform.project_time_to_x(project_time);
+        if x < rect.left() || x > rect.right() {
+            continue;
+        }
+
+        let (width, color) = match line.kind {
+            MusicalGridLineKind::Bar => (1.5, bar_color),
+            MusicalGridLineKind::Beat => (1.0, beat_color),
+            MusicalGridLineKind::Subdivision => (0.5, subdivision_color),
+        };
+        ui.painter().line_segment(
+            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+            egui::Stroke::new(width, color),
+        );
+
+        if line.kind == MusicalGridLineKind::Bar && draw_bar_labels && ticks_per_bar > 0 {
+            let bar_index = line.tick.get().div_euclid(ticks_per_bar) + 1;
+            ui.painter().text(
+                egui::pos2(x + 3.0, rect.top() + 14.0),
+                egui::Align2::LEFT_TOP,
+                format!("B{bar_index}"),
+                egui::FontId::monospace(10.0),
+                bar_color,
+            );
+        }
+    }
+}
+
+fn collect_musical_grid_lines(
+    tempo_map: &TempoMap,
+    division: BeatDivision,
+    transform: TimelineTransform,
+) -> Vec<MusicalGridLine> {
+    let Some(segment) = tempo_map.initial_segment() else {
+        return Vec::new();
     };
-    let Some(transform) =
-        TimelineTransform::new(rect, ProjectTimeNs::new(0), end_time)
-    else {
-        return;
+    let Ok(start_tick_position) = tempo_map.continuous_tick_position(transform.start_time()) else {
+        return Vec::new();
+    };
+    let Ok(end_tick_position) = tempo_map.continuous_tick_position(transform.end_time()) else {
+        return Vec::new();
     };
 
-    let level_index = waveform.choose_level_for_view(0, source_frames, rect.width());
-    let Some(slice) = waveform.visible_slice(level_index, 0, source_frames) else {
+    let Ok(mut tick) = floor_tick_position_to_grid(start_tick_position, division) else {
+        return Vec::new();
+    };
+    let step = division.ticks_per_step();
+    let last_tick = end_tick_position.ceil() as i64;
+    let bar_ticks = ticks_per_bar(segment.meter());
+    if step <= 0 || bar_ticks <= 0 {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    for _ in 0..MAX_GRID_LINES_PER_FRAME {
+        if tick.get() > last_tick {
+            break;
+        }
+
+        let kind = if tick.get().rem_euclid(bar_ticks) == 0 {
+            MusicalGridLineKind::Bar
+        } else if tick.get().rem_euclid(PPQ) == 0 {
+            MusicalGridLineKind::Beat
+        } else {
+            MusicalGridLineKind::Subdivision
+        };
+        lines.push(MusicalGridLine { tick, kind });
+
+        let Some(next) = tick.get().checked_add(step) else {
+            break;
+        };
+        tick = MusicalTick::new(next);
+    }
+
+    lines
+}
+
+fn ticks_per_bar(meter: rhythm_core::time::TimeSignature) -> i64 {
+    let numerator = i64::from(meter.numerator());
+    let denominator = i64::from(meter.denominator());
+    PPQ.saturating_mul(4)
+        .saturating_mul(numerator)
+        .checked_div(denominator)
+        .unwrap_or(0)
+}
+
+fn grid_spacing_px(
+    tempo_map: &TempoMap,
+    tick_delta: i64,
+    transform: TimelineTransform,
+) -> f32 {
+    let Ok(a) = tempo_map.project_time_for_tick(MusicalTick::new(0)) else {
+        return 0.0;
+    };
+    let Ok(b) = tempo_map.project_time_for_tick(MusicalTick::new(tick_delta)) else {
+        return 0.0;
+    };
+    (transform.project_time_to_x(b) - transform.project_time_to_x(a)).abs()
+}
+
+fn draw_waveform(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    transform: TimelineTransform,
+    waveform: Option<&WaveformData>,
+) {
+    let Some(waveform) = waveform else {
+        return;
+    };
+    let sample_rate = waveform.pyramid.source_sample_rate;
+    let source_frames = waveform.pyramid.source_frame_count;
+    if sample_rate == 0 || source_frames == 0 {
+        return;
+    }
+
+    let visible_start_frame = source_frame_for_project_time(transform.start_time(), sample_rate);
+    let visible_end_frame =
+        source_frame_for_project_time(transform.end_time(), sample_rate).min(source_frames);
+    if visible_end_frame <= visible_start_frame {
+        return;
+    }
+
+    let level_index =
+        waveform.choose_level_for_view(visible_start_frame, visible_end_frame, rect.width());
+    let Some(slice) =
+        waveform.visible_slice(level_index, visible_start_frame, visible_end_frame)
+    else {
         return;
     };
 
     let color = ui.visuals().widgets.noninteractive.fg_stroke.color;
-    let mesh = build_waveform_mesh(
-        slice,
-        waveform.pyramid.source_sample_rate,
-        transform,
-        color,
-    );
+    let mesh = build_waveform_mesh(slice, sample_rate, transform, color);
     if !mesh.indices.is_empty() {
         ui.painter().add(egui::Shape::mesh(mesh));
     }
@@ -132,8 +416,7 @@ fn build_waveform_mesh(
         let peak_start = peak_index.saturating_mul(slice.frames_per_peak);
         let peak_end = peak_start.saturating_add(slice.frames_per_peak);
 
-        let Some(peak_start_time) =
-            project_time_for_source_frame(peak_start, source_sample_rate)
+        let Some(peak_start_time) = project_time_for_source_frame(peak_start, source_sample_rate)
         else {
             continue;
         };
@@ -180,10 +463,25 @@ fn project_time_for_source_frame(frame: u64, sample_rate: u32) -> Option<Project
     Some(ProjectTimeNs::new(i64::try_from(nanos).ok()?))
 }
 
+fn source_frame_for_project_time(project_time: ProjectTimeNs, sample_rate: u32) -> u64 {
+    if project_time.get() <= 0 || sample_rate == 0 {
+        return 0;
+    }
+
+    let frames = (project_time.get() as u128)
+        .saturating_mul(u128::from(sample_rate))
+        / 1_000_000_000_u128;
+    u64::try_from(frames).unwrap_or(u64::MAX)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{TimelineTransform, build_waveform_mesh};
-    use rhythm_core::time::ProjectTimeNs;
+    use super::{
+        MusicalGridLineKind, TimelineTransform, build_waveform_mesh, collect_musical_grid_lines,
+    };
+    use rhythm_core::time::{
+        BeatDivision, BpmMicros, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
+    };
     use rhythm_engine::waveform::{WavePeak, WaveformSlice};
 
     #[test]
@@ -216,6 +514,72 @@ mod tests {
     }
 
     #[test]
+    fn four_four_grid_classifies_bars_beats_and_subdivisions() {
+        let tempo = TempoMap::with_initial_tempo(
+            GridOffsetNs::new(0),
+            BpmMicros::new(120_000_000).expect("BPM"),
+            TimeSignature::default(),
+        );
+        let rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 100.0));
+        let transform = TimelineTransform::new(
+            rect,
+            ProjectTimeNs::new(0),
+            ProjectTimeNs::new(2_000_000_000),
+        )
+        .expect("transform");
+        let lines = collect_musical_grid_lines(
+            &tempo,
+            BeatDivision::new(4).expect("division"),
+            transform,
+        );
+
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.kind == MusicalGridLineKind::Bar)
+                .count(),
+            2
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.kind == MusicalGridLineKind::Beat)
+                .count(),
+            3
+        );
+        assert!(
+            lines
+                .iter()
+                .filter(|line| line.kind == MusicalGridLineKind::Subdivision)
+                .count()
+                >= 12
+        );
+    }
+
+    #[test]
+    fn unset_tempo_has_no_musical_grid() {
+        let tempo = TempoMap::unset(GridOffsetNs::new(0));
+        let rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 100.0));
+        let transform = TimelineTransform::new(
+            rect,
+            ProjectTimeNs::new(0),
+            ProjectTimeNs::new(10_000_000_000),
+        )
+        .expect("transform");
+
+        assert!(
+            collect_musical_grid_lines(
+                &tempo,
+                BeatDivision::new(4).expect("division"),
+                transform,
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn waveform_uses_one_mesh_for_all_visible_peaks() {
         let peaks = [
             WavePeak {
@@ -233,7 +597,8 @@ mod tests {
             frames_per_peak: 64,
             peaks: &peaks,
         };
-        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 64.0));
+        let rect =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 64.0));
         let transform = TimelineTransform::new(
             rect,
             ProjectTimeNs::new(0),
@@ -259,7 +624,8 @@ mod tests {
             frames_per_peak: 256,
             peaks: &peaks,
         };
-        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
+        let rect =
+            egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
         let transform = TimelineTransform::new(
             rect,
             ProjectTimeNs::new(256_000_000),

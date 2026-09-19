@@ -1,8 +1,8 @@
 use crate::{
     editor_session::{EditorSession, PreviewQuality},
-    timeline::draw_timeline_waveform,
+    timeline::draw_timeline,
 };
-use rhythm_core::time::ProjectTimeNs;
+use rhythm_core::{project::Project, time::ProjectTimeNs};
 
 fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
     const COMPOSITION_ASPECT: f32 = 1920.0 / 1080.0;
@@ -57,6 +57,7 @@ pub fn configure_theme(context: &egui::Context) {
 pub fn draw_editor_shell(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
+    project: &Project,
     diagnostics: &DiagnosticsView,
     composition_texture_id: Option<egui::TextureId>,
     waveform: Option<&rhythm_engine::waveform::WaveformData>,
@@ -74,9 +75,21 @@ pub fn draw_editor_shell(
                 let playhead_seconds = session.playhead().get() as f64 / 1_000_000_000.0;
                 ui.label(format!("Playhead {playhead_seconds:.3}s"));
                 ui.separator();
-                ui.label("BPM —");
-                ui.label("4/4");
-                ui.label("Grid 1/4");
+                if let Some(segment) = project.tempo_map.initial_segment() {
+                    ui.label(format!("BPM {}", segment.bpm().format_decimal()));
+                    ui.label(format!(
+                        "{}/{}",
+                        segment.meter().numerator(),
+                        segment.meter().denominator()
+                    ));
+                } else {
+                    ui.label("BPM —");
+                    ui.label("4/4");
+                }
+                ui.label(format!(
+                    "Grid 1/{}",
+                    session.authoring_division().parts_per_beat()
+                ));
                 ui.separator();
                 egui::ComboBox::from_id_salt("preview_quality")
                     .selected_text(session.preview_quality.label())
@@ -98,7 +111,13 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.heading("Timeline");
             ui.separator();
-            draw_timeline_waveform(ui, waveform);
+            draw_timeline(
+                ui,
+                session,
+                &project.tempo_map,
+                project.settings.duration,
+                waveform,
+            );
             ui.take_available_space();
         });
 
