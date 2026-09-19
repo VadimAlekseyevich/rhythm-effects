@@ -1,8 +1,58 @@
-use crate::project::{Project, ProjectValidationError};
+use crate::{
+    animation::Keyframe,
+    domain::Vec2,
+    ids::ObjectId,
+    project::{Object, Project, ProjectValidationError},
+    time::TempoMap,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EditError {
     InvalidProject(ProjectValidationError),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditCommand {
+    AddObject {
+        object: Object,
+    },
+    DeleteObject {
+        object_id: ObjectId,
+    },
+    RenameObject {
+        object_id: ObjectId,
+        name: String,
+    },
+    SetPositionBase {
+        object_id: ObjectId,
+        value: Vec2,
+    },
+    SetOpacityBase {
+        object_id: ObjectId,
+        value: f32,
+    },
+    AddOpacityKeyframe {
+        object_id: ObjectId,
+        keyframe: Keyframe<f32>,
+    },
+    SetTempoMap {
+        tempo_map: TempoMap,
+    },
+}
+
+impl EditCommand {
+    #[must_use]
+    pub const fn semantic_name(&self) -> &'static str {
+        match self {
+            Self::AddObject { .. } => "AddObject",
+            Self::DeleteObject { .. } => "DeleteObject",
+            Self::RenameObject { .. } => "RenameObject",
+            Self::SetPositionBase { .. } => "SetPositionBase",
+            Self::SetOpacityBase { .. } => "SetOpacityBase",
+            Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
+            Self::SetTempoMap { .. } => "SetTempoMap",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -34,6 +84,16 @@ mod tests {
         project::{Project, ProjectSettings},
         time::{GridOffsetNs, TempoMap},
     };
+
+    #[test]
+    fn edit_commands_are_explicit_and_loggable() {
+        let command = super::EditCommand::RenameObject {
+            object_id: crate::ids::ObjectId::new(1).expect("object id"),
+            name: "Beat".to_owned(),
+        };
+
+        assert_eq!(command.semantic_name(), "RenameObject");
+    }
 
     #[test]
     fn project_editor_owns_a_valid_project_and_exposes_read_only_access() {

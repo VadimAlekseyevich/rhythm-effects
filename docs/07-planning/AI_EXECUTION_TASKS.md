@@ -99,7 +99,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-076** — Implement binary-search segment lookup for arbitrary evaluation order.
 - [x] **AI-077** — Implement EvaluatedScene containing renderer-ready evaluated object state only.
 - [x] **AI-078** — Implement ProjectEditor as the only normal creative mutation boundary.
-- [ ] **AI-079** — Implement explicit EditCommand intent types for first object/property/keyframe mutations.
+- [x] **AI-079** — Implement explicit EditCommand intent types for first object/property/keyframe mutations.
 - [ ] **AI-080** — Implement HistoryEntry before/after payloads without whole-Project snapshots.
 - [ ] **AI-081** — Implement undo/redo cursor and redo-branch truncation.
 - [ ] **AI-082** — Implement begin/update/commit/cancel transaction support.
