@@ -4,17 +4,53 @@ use crate::{
     time::MusicalTick,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BezierEasingError {
+    NonFinite,
+    ControlPointOutOfRange,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BezierEasing {
-    pub(crate) x1: f32,
-    pub(crate) y1: f32,
-    pub(crate) x2: f32,
-    pub(crate) y2: f32,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
 }
 
 impl BezierEasing {
-    pub(crate) const fn from_unchecked(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
-        Self { x1, y1, x2, y2 }
+    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Result<Self, BezierEasingError> {
+        if !x1.is_finite() || !y1.is_finite() || !x2.is_finite() || !y2.is_finite() {
+            return Err(BezierEasingError::NonFinite);
+        }
+        if ![x1, y1, x2, y2]
+            .into_iter()
+            .all(|value| (0.0..=1.0).contains(&value))
+        {
+            return Err(BezierEasingError::ControlPointOutOfRange);
+        }
+
+        Ok(Self { x1, y1, x2, y2 })
+    }
+
+    #[must_use]
+    pub const fn x1(self) -> f32 {
+        self.x1
+    }
+
+    #[must_use]
+    pub const fn y1(self) -> f32 {
+        self.y1
+    }
+
+    #[must_use]
+    pub const fn x2(self) -> f32 {
+        self.x2
+    }
+
+    #[must_use]
+    pub const fn y2(self) -> f32 {
+        self.y2
     }
 }
 
@@ -185,6 +221,28 @@ mod tests {
             value,
             Interpolation::Linear,
         )
+    }
+
+    #[test]
+    fn bezier_easing_constrains_all_handles_to_unit_square() {
+        let easing = super::BezierEasing::new(0.25, 0.1, 0.25, 1.0).expect("valid easing");
+        assert_eq!(easing.x1(), 0.25);
+        assert_eq!(easing.y1(), 0.1);
+        assert_eq!(easing.x2(), 0.25);
+        assert_eq!(easing.y2(), 1.0);
+
+        assert_eq!(
+            super::BezierEasing::new(-0.01, 0.0, 1.0, 1.0),
+            Err(super::BezierEasingError::ControlPointOutOfRange)
+        );
+        assert_eq!(
+            super::BezierEasing::new(0.0, 0.0, 1.01, 1.0),
+            Err(super::BezierEasingError::ControlPointOutOfRange)
+        );
+        assert_eq!(
+            super::BezierEasing::new(0.0, f32::NAN, 1.0, 1.0),
+            Err(super::BezierEasingError::NonFinite)
+        );
     }
 
     #[test]
