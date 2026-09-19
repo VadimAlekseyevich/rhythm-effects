@@ -139,7 +139,7 @@ The user can configure the musical grid for the imported track.
 - subdivision selector;
 - optional meter display, initially 4/4;
 - fine offset nudge;
-- tap tempo is desirable but not mandatory for first implementation.
+- tap tempo is post-MVP; BPM entry and fine offset nudge are sufficient for MVP.
 
 ### Required behavior
 
@@ -246,7 +246,7 @@ The inspector shows relevant properties for the current selection.
 Rectangle/Ellipse:
 - size;
 - fill;
-- limited additional styling where inexpensive.
+- Rectangle corner radius.
 
 Image:
 - source asset;
@@ -390,17 +390,13 @@ The user should be able to apply a useful easing preset without opening a comple
 
 ## 17. Effects
 
-The MVP should include a small effect set sufficient to prove that visual effect parameters can also be rhythm-animated.
-
-Candidate set:
+The MVP effect set is fixed:
 
 - Blur;
 - Glow;
 - Tint/Color adjustment;
 - Noise;
-- RGB Split / Chromatic Aberration.
-
-The final MVP may contain fewer effects if necessary.
+- RGB Split.
 
 Effect controls appear contextually in the inspector and must follow the same UI-density rules as object properties.
 
