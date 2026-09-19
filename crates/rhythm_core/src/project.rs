@@ -56,10 +56,7 @@ impl TransformAnimation {
 #[cfg(test)]
 mod tests {
     use super::TransformAnimation;
-    use crate::{
-        animation::Animated,
-        domain::Vec2,
-    };
+    use crate::{animation::Animated, domain::Vec2};
 
     #[test]
     fn project_settings_match_mvp_defaults() {

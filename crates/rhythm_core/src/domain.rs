@@ -117,9 +117,6 @@ mod tests {
             Vec2::new(f32::INFINITY, 0.0),
             Err(DomainValueError::NonFinite)
         );
-        assert_eq!(
-            Vec2::new(0.0, f32::NAN),
-            Err(DomainValueError::NonFinite)
-        );
+        assert_eq!(Vec2::new(0.0, f32::NAN), Err(DomainValueError::NonFinite));
     }
 }
