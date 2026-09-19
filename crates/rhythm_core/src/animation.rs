@@ -180,6 +180,41 @@ pub fn interpolate_linear_vec2(from: Vec2, to: Vec2, progress: f64) -> Vec2 {
     .expect("linear interpolation of finite Vec2 endpoints stays finite")
 }
 
+fn cubic_bezier_coordinate(t: f64, p1: f64, p2: f64) -> f64 {
+    let one_minus_t = 1.0 - t;
+    3.0 * one_minus_t * one_minus_t * t * p1
+        + 3.0 * one_minus_t * t * t * p2
+        + t * t * t
+}
+
+#[must_use]
+pub fn evaluate_bezier_easing(easing: BezierEasing, progress: f64) -> f64 {
+    let progress = clamp_progress(progress);
+    if progress <= 0.0 {
+        return 0.0;
+    }
+    if progress >= 1.0 {
+        return 1.0;
+    }
+
+    let mut low = 0.0_f64;
+    let mut high = 1.0_f64;
+
+    for _ in 0..32 {
+        let t = (low + high) * 0.5;
+        let x = cubic_bezier_coordinate(t, f64::from(easing.x1), f64::from(easing.x2));
+        if x < progress {
+            low = t;
+        } else {
+            high = t;
+        }
+    }
+
+    let t = (low + high) * 0.5;
+    cubic_bezier_coordinate(t, f64::from(easing.y1), f64::from(easing.y2))
+        .clamp(0.0, 1.0)
+}
+
 #[must_use]
 pub fn interpolate_rotation_degrees(from: f32, to: f32, progress: f64) -> f32 {
     interpolate_linear_f32(from, to, progress)
@@ -217,6 +252,20 @@ mod tests {
             value,
             Interpolation::Linear,
         )
+    }
+
+    #[test]
+    fn bezier_easing_is_deterministic_and_preserves_endpoints() {
+        let linear = super::BezierEasing::new(0.0, 0.0, 1.0, 1.0).expect("valid easing");
+        assert_eq!(super::evaluate_bezier_easing(linear, 0.0), 0.0);
+        assert_eq!(super::evaluate_bezier_easing(linear, 1.0), 1.0);
+        assert!((super::evaluate_bezier_easing(linear, 0.5) - 0.5).abs() < 1e-9);
+
+        let ease = super::BezierEasing::new(0.25, 0.1, 0.25, 1.0).expect("valid easing");
+        let first = super::evaluate_bezier_easing(ease, 0.5);
+        let second = super::evaluate_bezier_easing(ease, 0.5);
+        assert_eq!(first, second);
+        assert!((first - 0.802_403_4).abs() < 0.000_01);
     }
 
     #[test]
