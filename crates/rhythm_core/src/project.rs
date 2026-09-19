@@ -53,11 +53,18 @@ pub enum ObjectContent {
     Text(TextObject),
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct RectangleObject;
+#[derive(Debug, Clone, PartialEq)]
+pub struct RectangleObject {
+    pub size: Animated<Vec2>,
+    pub fill: Animated<LinearRgba>,
+    pub corner_radius: Animated<f32>,
+}
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct EllipseObject;
+#[derive(Debug, Clone, PartialEq)]
+pub struct EllipseObject {
+    pub size: Animated<Vec2>,
+    pub fill: Animated<LinearRgba>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageObject {
@@ -168,6 +175,25 @@ impl TransformAnimation {
 mod tests {
     use super::TransformAnimation;
     use crate::{animation::Animated, domain::Vec2};
+
+    #[test]
+    fn rectangle_and_ellipse_store_only_accepted_mvp_fields() {
+        let size = Animated::new_static(Vec2::new(100.0, 50.0).expect("finite size"));
+        let fill = Animated::new_static(
+            crate::domain::LinearRgba::new(1.0, 0.0, 0.0, 1.0).expect("finite color"),
+        );
+
+        let rectangle = super::RectangleObject {
+            size: size.clone(),
+            fill: fill.clone(),
+            corner_radius: Animated::new_static(8.0),
+        };
+        let ellipse = super::EllipseObject { size, fill };
+
+        assert_eq!(rectangle.size.base_value().x(), 100.0);
+        assert_eq!(*rectangle.corner_radius.base_value(), 8.0);
+        assert_eq!(ellipse.size.base_value().y(), 50.0);
+    }
 
     #[test]
     fn new_project_root_starts_with_empty_creative_collections() {

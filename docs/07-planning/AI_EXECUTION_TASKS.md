@@ -80,8 +80,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-057** — Implement the accepted TransformAnimation semantic fields.
 - [x] **AI-058** — Implement ProjectSettings defaulting to 1920x1080, 60 FPS, 10 seconds and black background.
 - [x] **AI-059** — Implement the Project root, metadata, Composition and Object structures for schema V1.
-- [ ] **AI-060** — Implement RectangleObject with animated size/fill/corner radius.
-- [ ] **AI-061** — Implement EllipseObject with animated size/fill.
+- [x] **AI-060** — Implement RectangleObject with animated size/fill/corner radius.
+- [x] **AI-061** — Implement EllipseObject with animated size/fill.
 - [ ] **AI-062** — Implement ImageObject storing only AssetId.
 - [ ] **AI-063** — Implement TextObject static text/font/font-size/alignment plus animated color.
 - [ ] **AI-064** — Implement FontReference family/weight/style semantic types.
