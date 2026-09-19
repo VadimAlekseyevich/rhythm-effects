@@ -46,7 +46,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-026** — Add a render pass that clears the offscreen composition texture to opaque black.
 - [x] **AI-027** — Integrate egui Context and egui-winit State with the winit event loop.
 - [x] **AI-028** — Integrate egui-wgpu rendering using the same wgpu Device/Queue.
-- [ ] **AI-029** — Render the accepted five-region editor shell using placeholder panels only.
+- [x] **AI-029** — Render the accepted five-region editor shell using placeholder panels only.
 - [ ] **AI-030** — Apply the accepted dark theme and initial Inter-like typography sizing using egui defaults until bundled Inter is added.
 - [ ] **AI-031** — Expose a small diagnostics panel with adapter name, backend, window size and frame time.
 - [ ] **AI-032** — Display the offscreen composition texture inside the viewport panel.

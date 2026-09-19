@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod editor_ui;
 mod gpu;
 
 use std::sync::Arc;
@@ -140,7 +141,9 @@ impl ApplicationHandler for RhythmApp {
                     self.egui_renderer.as_mut(),
                 ) {
                     let raw_input = egui_state.take_egui_input(window);
-                    let full_output = egui_context.run_ui(raw_input, |_ui| {});
+                    let full_output = egui_context.run_ui(raw_input, |_root_ui| {
+                        editor_ui::draw_editor_shell(egui_context);
+                    });
                     let paint_jobs =
                         egui_context.tessellate(full_output.shapes, full_output.pixels_per_point);
                     let mut textures_delta = full_output.textures_delta;
