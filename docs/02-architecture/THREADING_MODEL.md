@@ -1,6 +1,6 @@
 # Threading Model
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document defines which work may happen on which execution context, how data crosses thread boundaries, and which operations are forbidden from blocking realtime/editor paths.
 
@@ -522,3 +522,18 @@ Threading model is implementation-ready when:
 - autosave/import/waveform paths do not require global project locks;
 - export snapshot boundary is explicit;
 - shutdown/cancellation paths are testable.
+
+
+---
+
+## Accepted worker policy
+
+MVP uses explicit bounded workers/queues rather than a general pool abstraction.
+
+Initial background responsibilities may share one low-priority general worker only if jobs are serialized deliberately and do not create latency; otherwise decode/waveform/recovery/export use dedicated ownership.
+
+No worker is allowed to mutate Project directly.
+
+Stale results are rejected with resource generation tokens.
+
+This policy is accepted; implementation may tune the number of worker threads without changing the ownership contract.

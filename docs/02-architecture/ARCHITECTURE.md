@@ -1,6 +1,6 @@
 # Architecture
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document defines the top-level runtime architecture and dependency direction for the MVP.
 
@@ -72,7 +72,7 @@ The UI never becomes the source of truth for project content.
 
 Do not start with a large crate graph.
 
-Recommended initial workspace:
+Accepted initial workspace:
 
 ~~~text
 crates/
@@ -325,7 +325,7 @@ MVP needs background work for tasks such as:
 
 Do not introduce a general async runtime unless a concrete need appears.
 
-Preferred starting point:
+Accepted starting point:
 
 - explicit worker thread(s);
 - bounded job queue;
@@ -472,7 +472,7 @@ This is required for trustworthy preview/export parity.
 
 The composition renderer and egui renderer may share a wgpu device/queue.
 
-Preferred conceptual flow:
+Accepted conceptual flow:
 
 1. render composition to an offscreen texture;
 2. expose that texture to the editor viewport;
@@ -660,3 +660,35 @@ Architecture is ready for implementation when:
 - command/history mutation path is accepted;
 - renderer/audio integration boundaries are clear;
 - unresolved implementation choices are explicitly listed rather than hidden.
+
+
+---
+
+## Accepted architecture baseline
+
+The MVP starts with exactly three application crates:
+
+~~~text
+rhythm_core
+rhythm_engine
+rhythm_app
+~~~
+
+Dependency direction:
+
+~~~text
+rhythm_app -> rhythm_engine -> rhythm_core
+rhythm_app -----------------> rhythm_core
+~~~
+
+rhythm_core never depends on egui, wgpu, CPAL, FFmpeg, or OS UI libraries.
+
+The active Project has one writer in the app/editor ownership path.
+
+Engine subsystems receive semantic snapshots/commands and return runtime results; they do not acquire a project-wide mutable lock.
+
+The event loop and normal preview rendering remain on the application/main orchestration path.
+
+Background work is explicit and bounded rather than organized around a generic async runtime.
+
+These boundaries are considered stable for MVP. Crate extraction requires measured build-time, ownership, or reuse justification.

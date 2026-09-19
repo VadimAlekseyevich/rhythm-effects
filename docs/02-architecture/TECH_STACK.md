@@ -1,12 +1,12 @@
 # Technology Stack
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > Evaluated: 2026-09-19.
 >
 > Exact Cargo versions will be pinned when implementation begins.
 
-## 1. Recommended MVP stack
+## 1. Accepted MVP stack
 
 | Area | Choice |
 |---|---|
@@ -18,7 +18,7 @@
 | Shaders | WGSL |
 | Audio output | CPAL |
 | Audio decode | Symphonia |
-| Audio resampling | Rubato candidate |
+| Audio resampling | Rubato |
 | Serialization | serde |
 | Composition text | cosmic-text + glyphon prototype |
 | Video encode/mux | FFmpeg |
@@ -163,7 +163,7 @@ Target:
 
 ## 10. Rubato
 
-Candidate for sample-rate conversion.
+Accepted for offline/background sample-rate conversion. Resampling is not performed in the realtime callback.
 
 Reason:
 
@@ -271,7 +271,7 @@ See ADR 0005.
 
 Need structured diagnostics.
 
-tracing is candidate.
+Use tracing + tracing-subscriber for structured diagnostics.
 
 Measure dependency/build cost before accepting broad subscriber stack.
 
@@ -303,9 +303,41 @@ Before deep implementation, validate:
 3. audio decode/playback;
 4. audio-driven animation clock;
 5. waveform preprocessing;
-6. Cyrillic text with candidate stack;
+6. Cyrillic text with cosmic-text + glyphon;
 7. one multi-pass effect;
 8. offscreen frame readback for export;
 9. acceptable incremental build loop.
 
 Any failure reopens the relevant ADR instead of being hidden behind workaround layers.
+
+
+---
+
+## Dependency decisions
+
+Accepted MVP dependency roles:
+
+- serde + serde_json: project schema and migration representations;
+- thiserror: structured subsystem/domain errors where it improves clarity;
+- tracing + tracing-subscriber: diagnostics;
+- image: PNG/JPEG/WebP image decoding;
+- rfd: native file open/save dialogs for MVP;
+- Rubato: background/offline audio resampling;
+- cosmic-text + glyphon: composition text prototype/implementation;
+- FFmpeg executable: export process boundary;
+- no Tokio/general async runtime;
+- no FFT dependency for waveform generation;
+- no ECS;
+- no plugin framework;
+- no generic scene graph library.
+
+Exact crate versions are pinned together at implementation start and recorded in Cargo.lock. The architecture does not promise floating latest versions.
+
+Default Cargo features should be disabled where they pull unrelated codecs/backends or materially increase build time.
+
+A new heavyweight dependency requires a short decision note covering:
+
+- functionality gained;
+- transitive/build cost;
+- native requirements;
+- whether existing dependencies already solve it.

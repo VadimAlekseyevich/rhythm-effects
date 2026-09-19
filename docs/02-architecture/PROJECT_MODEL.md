@@ -1,6 +1,6 @@
 # Project Model
 
-> **Status: Draft — core schema contract accepted; final MVP field cut still open in a few places**
+> **Status: Accepted for MVP**
 >
 > This document defines persisted creative data and its boundary from editor-session, runtime, cache, and device state.
 
@@ -562,3 +562,68 @@ Project schema is ready to freeze when:
 - V1 fixture round-trips;
 - load validation covers all invariants;
 - duplication/deletion behavior is tested.
+
+
+---
+
+## 35. Resolved schema V1 field decisions
+
+All schema-freeze questions are now resolved for MVP.
+
+### FontReference
+
+MVP supports system/installed fonts only.
+
+~~~rust
+FontReference {
+    family: String,
+    weight: FontWeight,
+    style: FontStyle,
+}
+~~~
+
+FontWeight is a small semantic enum/value compatible with the text stack.
+
+FontStyle supports at least Normal and Italic.
+
+If the exact requested font is unavailable, the project opens with a visible missing-font/fallback state and uses the bundled Inter family as fallback. Imported/embedded font assets are post-MVP.
+
+### Effects
+
+Schema V1 EffectKind is:
+
+~~~text
+Blur
+Glow
+Tint
+Noise
+RgbSplit
+~~~
+
+No generic custom/plugin effect variant exists.
+
+### ImageObject
+
+Schema V1 ImageObject stores only AssetId.
+
+Intrinsic image pixel dimensions define local bounds.
+
+Transform scale provides resizing, including non-uniform resizing.
+
+Crop, contain/cover fit modes, and destructive image editing are post-MVP.
+
+### Project file extension
+
+The MVP project extension is:
+
+~~~text
+.rhfx
+~~~
+
+The payload is versioned JSON.
+
+### Schema freeze
+
+With these decisions, Project schema V1 is considered architecturally frozen.
+
+Implementation may rename Rust fields before the first persisted fixture is committed, but changing semantic meaning or persisted structure after the V1 fixture exists requires migration/version review.

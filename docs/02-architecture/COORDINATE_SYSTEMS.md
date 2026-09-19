@@ -1,6 +1,6 @@
 # Coordinate Systems and Transform Semantics
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document defines composition, object-local, viewport, and GPU coordinate conventions.
 
@@ -248,3 +248,14 @@ Coordinate semantics are implementation-ready when:
 - anchor behavior remains stable under bounds changes;
 - hit testing uses inverse transforms;
 - UI DPI/view state cannot affect exported composition coordinates.
+
+
+---
+
+## Accepted geometry policy
+
+CPU geometric hit testing is the MVP picking implementation.
+
+No GPU ID-buffer/readback picking is used.
+
+Spatial effect radii are expressed in composition-pixel semantics and must be corrected for reduced preview resolution so preview scale does not change the apparent creative result.

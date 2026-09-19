@@ -1,6 +1,6 @@
 # Domain Types
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > Canonical primitive and domain representations used across project data, animation, time conversion, rendering input, serialization, and editor logic.
 
@@ -306,3 +306,20 @@ The domain-type contract is implementation-ready when:
 - persisted values cannot contain NaN/Infinity;
 - transform semantics use documented units;
 - conversion-heavy types have unit tests.
+
+
+---
+
+## Accepted schema primitive decisions
+
+- BpmMicros is persisted fixed-point BPM.
+- ProjectTimeNs/GridOffsetNs use integer nanoseconds.
+- MusicalTick is signed i64.
+- PPQ is fixed at 960 for schema V1.
+- FrameRate is rational.
+- Project colors are LinearRgba.
+- Rotation is degrees.
+- Anchor is normalized.
+- Project-local entity IDs are typed u64 wrappers with zero reserved.
+
+These are schema-level contracts rather than display preferences.

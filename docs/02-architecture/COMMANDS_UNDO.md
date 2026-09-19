@@ -1,6 +1,6 @@
 # Commands & Undo/Redo
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > All user-authored project mutation must be compatible with predictable undo/redo.
 
@@ -169,7 +169,7 @@ This pattern applies to:
 
 Text/numeric edit should not create history on each keystroke.
 
-Recommended behavior:
+Accepted behavior:
 
 - focus begins edit transaction;
 - intermediate values update preview when valid;
@@ -389,7 +389,7 @@ Example: waveform completion changes runtime cache state, not creative project h
 
 Besides explicit drag transactions, nearby edits may be coalesced selectively.
 
-Candidates:
+Accepted scope:
 
 - repeated arrow-key nudge;
 - repeated numeric increment;
@@ -447,11 +447,76 @@ Tests should make this path extremely rare.
 
 ---
 
-## 25. Open decisions
+## 25. Accepted remaining policies
 
-- exact command/history Rust representation;
-- maximum history memory policy;
-- whether undo restores selection;
-- exact coalescing for held keyboard nudge;
-- how asset import + object creation are grouped;
-- whether project setting edits commit on every field Enter/focus loss or explicit Apply.
+### Command/history representation
+
+Use explicit EditCommand intent plus specialized HistoryEntry before/after payloads.
+
+Do not store full-Project snapshots per edit.
+
+### History capacity
+
+Keep at most 500 committed logical history entries in MVP.
+
+When capacity is exceeded, drop oldest entries.
+
+This is a predictable guardrail, not a claim that every history entry has equal memory cost. PERFORMANCE.md requires stress measurement of destructive large-object edits.
+
+### Selection restoration
+
+Project history does not persist selection.
+
+The app may opportunistically reselect a restored/created object after undo/redo when the target identity is unambiguous, but selection restoration is not part of semantic undo correctness.
+
+### Keyboard nudge coalescing
+
+A continuous OS key-repeat burst affecting the same target/operation is one logical history entry.
+
+End the burst when:
+
+- the key is released;
+- selection changes;
+- another edit begins;
+- approximately 300 ms passes without another matching repeat event.
+
+### Import + create grouping
+
+"Add Image from File" is one compound edit:
+
+- create AssetRecord if needed;
+- create ImageObject;
+- reference the asset.
+
+Undo removes the object and removes the newly-created asset record only if that record was introduced by the same compound action and has no remaining references.
+
+### Settings editing
+
+Project-setting and property fields commit on Enter or focus loss.
+
+Escape restores the pre-edit value.
+
+No explicit Apply button is used for routine inspector/project numeric settings.
+
+## 26. Revision semantics
+
+Each committed history state receives a monotonically increasing session revision ID.
+
+Save records the current revision as saved_revision.
+
+Dirty state is false only when current history state is the recorded saved state.
+
+If the saved state is dropped from bounded history and the user continues editing, dirty remains true until the next successful Save.
+
+## 27. Definition of Done
+
+The command/history contract is implementation-ready when:
+
+- all creative mutations route through ProjectEditor;
+- continuous transactions produce one history entry;
+- invalid operations are atomic/no-op on failure;
+- redo branch truncation works;
+- dirty state follows revision position;
+- 500-entry cap behaves predictably;
+- compound image import/create undo is tested;
+- key-repeat coalescing is tested.

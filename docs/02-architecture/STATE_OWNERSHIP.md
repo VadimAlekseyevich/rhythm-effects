@@ -1,6 +1,6 @@
 # State Ownership
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document defines where each category of state lives, whether it is persisted, and who is allowed to mutate it.
 
@@ -198,7 +198,7 @@ Changing a view preference must not change persisted keyframe timing.
 
 ## 11. Current authoring subdivision
 
-Recommended MVP ownership:
+Accepted MVP ownership:
 
 - EditorSession / workspace preference, not core Project semantics.
 
@@ -362,3 +362,14 @@ State ownership is ready when:
 - playhead authority transition is explicit;
 - background results require owner validation;
 - future features have a mandatory ownership review.
+
+
+---
+
+## Accepted persistence split
+
+Current authoring BeatDivision remains EditorSession state for MVP.
+
+Panel sizes, expanded rows, timeline zoom, and viewport camera are also session/workspace state and are not stored in the creative .rhfx document.
+
+MVP does not persist workspace layout between launches unless trivial to add as AppSettings. Loss of workspace preferences must never affect creative data.

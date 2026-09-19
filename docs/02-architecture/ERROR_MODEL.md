@@ -1,6 +1,6 @@
 # Error Model
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document defines how failures move from low-level subsystems to logs and user-facing UI without leaking implementation details or corrupting project state.
 
@@ -393,3 +393,16 @@ Error model is implementation-ready when:
 - recoverable runtime failures do not mutate creative state;
 - project files are validated rather than trusted;
 - repeated errors are deduplicated/rate-limited where necessary.
+
+
+---
+
+## Accepted app error presentation
+
+MVP uses three user-facing presentation levels:
+
+- inline validation for field/context errors;
+- non-modal persistent banner/toast area for recoverable subsystem failures;
+- modal confirmation/dialog only for project-open failure, unsaved-data close decisions, or another action that cannot safely continue without user choice.
+
+Backend error strings are always logged; user-facing text is authored at the app boundary.
