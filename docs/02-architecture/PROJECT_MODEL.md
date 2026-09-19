@@ -1,133 +1,124 @@
 # Project Model
 
-> **Status: Draft**
+> **Status: Draft — core schema contract accepted; final MVP field cut still open in a few places**
 >
-> This document defines persisted creative data and the boundary between project state and runtime/editor state.
+> This document defines persisted creative data and its boundary from editor-session, runtime, cache, and device state.
 
 ## 1. Principles
 
-The project model should be:
+Project data must be:
 
-- stable;
-- easy to serialize;
-- deterministic enough to test;
-- independent from egui/wgpu/CPAL;
-- explicit about IDs;
-- simple enough to evolve;
-- optimized for correctness before premature database-like complexity.
+- serializable;
+- deterministic enough for fixtures and tests;
+- independent from egui, wgpu, CPAL, and FFmpeg;
+- explicit about units and IDs;
+- validatable;
+- evolvable through schema migration;
+- free from runtime handles and derived caches.
 
----
+Canonical supporting documents:
 
-## 2. Top-level structure
+- DOMAIN_TYPES.md
+- TIME_MODEL.md
+- COORDINATE_SYSTEMS.md
+- STATE_OWNERSHIP.md
+- SERIALIZATION.md
 
-Conceptual MVP model:
+## 2. Schema wrapper
 
-~~~rust
-Project {
-    schema_version,
-    metadata,
-    settings,
-    tempo_map,
-    audio_track,
-    assets,
-    composition,
-    next_entity_id,
-}
-~~~
-
----
-
-## 3. Project metadata
-
-Examples:
-
-~~~rust
-ProjectMetadata {
-    name,
-    created_with_version,
-}
-~~~
-
-Avoid persisting transient values such as last save timestamp unless a concrete feature needs them.
-
----
-
-## 4. Schema version
-
-Every project contains a format/schema version.
-
-~~~rust
-ProjectSchemaVersion(u32)
-~~~
-
-Load path:
-
-~~~text
-read
-→ identify version
-→ migrate if supported
-→ validate
-→ construct current Project
-~~~
-
-Do not deserialize old files directly into whatever the current structs happen to be without migration policy.
-
----
-
-## 5. Typed project-local IDs
-
-MVP uses project-local integer IDs.
+Schema V1 uses versioned JSON.
 
 Concept:
 
 ~~~rust
-ObjectId(u64)
-AssetId(u64)
-EffectId(u64)
-KeyframeId(u64)
+ProjectFileV1 {
+    schema_version: u32,
+    created_with_version: String,
+    project: Project,
+}
 ~~~
 
-Benefits:
+Rules:
 
-- compact;
-- deterministic;
-- fast;
-- easy serialization;
-- avoids UUID dependency.
+- schema_version is independent from application version;
+- unknown newer schema fails safely;
+- migration happens before the candidate Project becomes active;
+- malformed/corrupt input never partially replaces the current Project.
 
-IDs are never reused within the same project's lifetime after deletion if practical.
+## 3. Project root
 
-Project stores the next allocation counter.
+Conceptual MVP structure:
 
-When copying/importing entities from another context, allocate new IDs.
+~~~rust
+Project {
+    metadata: ProjectMetadata,
+    settings: ProjectSettings,
+    tempo_map: TempoMap,
+    audio_track: Option<AudioTrack>,
+    assets: Vec<AssetRecord>,
+    composition: Composition,
+    next_entity_id: u64,
+}
+~~~
 
----
+A valid project may exist before audio is imported.
+
+## 4. Metadata
+
+~~~rust
+ProjectMetadata {
+    name: String,
+}
+~~~
+
+Do not persist transient editor timestamps or session values unless product behavior explicitly requires them.
+
+## 5. IDs
+
+Typed project-local u64 IDs are used:
+
+~~~rust
+ObjectId
+AssetId
+EffectId
+KeyframeId
+~~~
+
+MVP may use one shared monotonically increasing next_entity_id counter.
+
+Rules:
+
+- reserve zero as invalid;
+- never intentionally reuse IDs;
+- duplication allocates fresh IDs;
+- load validates uniqueness;
+- next_entity_id must be greater than all allocated IDs;
+- cross-project copy/import remaps identity.
 
 ## 6. Project settings
 
 ~~~rust
 ProjectSettings {
-    composition_width,
-    composition_height,
-    frame_rate,
-    duration,
-    background,
+    composition_width: u32,
+    composition_height: u32,
+    frame_rate: FrameRate,
+    duration: DurationNs,
+    background: LinearRgba,
 }
 ~~~
 
-Use validated domain types rather than arbitrary integers/floats where correctness matters.
+Requirements:
 
-Example:
+- dimensions positive and within supported limits;
+- rational frame rate valid;
+- duration valid;
+- background finite.
 
-- positive dimensions;
-- supported rational frame rate;
-- non-negative duration.
-
----
+Product/export UI owns preset choices; core model owns validity.
 
 ## 7. Composition
 
-MVP has one composition.
+MVP has one composition:
 
 ~~~rust
 Composition {
@@ -135,21 +126,17 @@ Composition {
 }
 ~~~
 
-Vector order is draw/layer order unless later separated.
+Object vector order is painter/draw order.
 
-Do not introduce nested compositions yet.
-
----
+Nested compositions are post-MVP.
 
 ## 8. Object
-
-Prefer one common object wrapper with typed content.
 
 ~~~rust
 Object {
     id: ObjectId,
     name: String,
-    enabled: bool,
+    visible: bool,
     locked: bool,
     transform: TransformAnimation,
     content: ObjectContent,
@@ -157,7 +144,16 @@ Object {
 }
 ~~~
 
-Potential content enum:
+Semantics:
+
+- visible affects render/export;
+- locked is persisted authoring metadata;
+- name is authoring metadata;
+- effect order is significant.
+
+## 9. ObjectContent
+
+MVP content variants:
 
 ~~~rust
 enum ObjectContent {
@@ -168,36 +164,35 @@ enum ObjectContent {
 }
 ~~~
 
-This keeps common transform/effects uniform.
+SVG is not part of schema V1 unless explicitly promoted before schema freeze.
 
----
+Do not include speculative empty variants for post-MVP features.
 
-## 9. Transform
+## 10. TransformAnimation
 
 ~~~rust
 TransformAnimation {
     position: Animated<Vec2>,
     scale: Animated<Vec2>,
-    rotation: Animated<f32>,
+    rotation_degrees: Animated<f32>,
     anchor: Animated<Vec2>,
     opacity: Animated<f32>,
 }
 ~~~
 
-Units must be documented:
+Semantics come from DOMAIN_TYPES.md and COORDINATE_SYSTEMS.md.
 
-- position: composition logical/pixel units;
-- rotation: choose degrees for persisted/user model or radians internally, but do not mix;
-- opacity: normalized 0..1 internally is recommended;
-- scale: explicit convention, for example 1.0 = 100%.
+Recommended defaults:
 
-The inspector may display different friendly units.
+~~~text
+position = composition center
+scale = (1,1)
+rotation = 0
+anchor = (0.5,0.5)
+opacity = 1
+~~~
 
----
-
-## 10. Animated<T>
-
-Concept:
+## 11. Animated<T>
 
 ~~~rust
 Animated<T> {
@@ -206,139 +201,160 @@ Animated<T> {
 }
 ~~~
 
-Invariant:
+Invariants:
 
 - keyframes sorted by MusicalTick;
-- no duplicate tick for same property;
-- every keyframe owns stable KeyframeId;
-- base_value is used when there are no keyframes and for defined before/after behavior.
+- one keyframe per tick;
+- stable KeyframeId;
+- finite/valid values;
+- evaluation semantics defined by ANIMATION_ENGINE.md.
 
-The exact before-first/after-last evaluation policy is specified in ANIMATION_ENGINE.md.
+## 12. Rectangle
 
----
-
-## 11. Rectangle
+Recommended schema V1:
 
 ~~~rust
 RectangleObject {
     size: Animated<Vec2>,
-    fill: Animated<Color>,
-    corner_radius: Option<Animated<f32>>,
+    fill: Animated<LinearRgba>,
+    corner_radius: Animated<f32>,
 }
 ~~~
 
-Corner radius may be dropped from MVP without changing overall model.
+If corner radius is removed from MVP UI before implementation, omit it from V1 instead of shipping unused schema.
 
----
-
-## 12. Ellipse
+## 13. Ellipse
 
 ~~~rust
 EllipseObject {
     size: Animated<Vec2>,
-    fill: Animated<Color>,
+    fill: Animated<LinearRgba>,
 }
 ~~~
 
----
+## 14. Image
 
-## 13. Image object
+Minimal MVP:
 
 ~~~rust
 ImageObject {
     asset: AssetId,
-    size_or_fit_settings,
 }
 ~~~
 
-The actual decoded texture is runtime state and is not embedded here.
+Intrinsic image dimensions define base local bounds.
 
-If the asset is missing, the object still exists and can be repaired.
+Normal resizing can use object transform scale.
 
----
+If explicit crop/fit/size behavior is required by UX, add the smallest accepted field set before schema freeze.
 
-## 14. Text object
+GPU textures and decoded pixels are runtime state only.
+
+## 15. Text
+
+Recommended MVP:
 
 ~~~rust
 TextObject {
     text: String,
     font: FontReference,
-    font_size: Animated<f32> or static MVP value,
-    color: Animated<Color>,
-    alignment,
+    font_size: f32,
+    color: Animated<LinearRgba>,
+    alignment: TextAlignment,
 }
 ~~~
 
-Not every text property must be animatable in MVP.
+Font size may remain static for MVP because transform scale already animates visual size.
 
-Only properties explicitly supported by product scope receive Animated<T>.
+If prototype testing proves direct font-size animation essential, promote it to Animated<f32> before schema freeze.
 
----
+## 16. FontReference
 
-## 15. Asset registry
+Concept:
 
 ~~~rust
-AssetRegistry {
-    assets: Vec<AssetRecord>,
+enum FontReference {
+    System(FontDescriptor),
+    Asset(AssetId),
 }
 ~~~
+
+MVP may start with System only if imported fonts are deferred.
+
+Missing system font must produce recoverable unresolved/fallback state.
+
+Exact FontDescriptor fields depend on text-stack prototype and remain one of the final schema-open items.
+
+## 17. Assets
 
 ~~~rust
 AssetRecord {
     id: AssetId,
     kind: AssetKind,
     source: AssetSource,
-    metadata,
+    metadata: AssetMetadata,
 }
 ~~~
 
-Asset kinds:
+MVP asset kinds:
 
 - Audio;
 - Image;
-- Font;
-- future SVG if accepted.
+- optional Font if imported fonts are promoted.
 
-Persist references, not runtime decoded bytes, unless a later packed-project format intentionally changes this.
+Persist source/reference information, not decoded runtime bytes.
 
----
+## 18. Audio track
 
-## 16. Primary audio track
-
-MVP has one primary track.
+MVP supports zero or one primary audio track:
 
 ~~~rust
 AudioTrack {
     asset_id: AssetId,
-    gain: f32, // optional, default 1
+    gain: f32,
 }
 ~~~
 
-Playback cursor is editor/runtime state and is not persisted as creative data unless "last position" is later treated as workspace state.
+Gain defaults to 1.0.
 
----
+Playback cursor is runtime/session state and never part of Project.
 
-## 17. Tempo map
+## 19. TempoMap
 
-Project contains:
+Concept:
 
 ~~~rust
 TempoMap {
-    ppq,
-    grid_offset,
-    segments,
+    grid_offset: GridOffsetNs,
+    segments: Vec<TempoSegment>,
 }
 ~~~
 
-MVP normally contains one segment.
+MVP normally contains one segment:
 
-Current editor subdivision is likely workspace/editor state, not creative project data, unless the product explicitly wants reopening to preserve it.
+~~~rust
+TempoSegment {
+    start_tick: MusicalTick,
+    bpm: BpmMicros,
+    meter: TimeSignature,
+}
+~~~
 
-BPM itself is project data.
+Initial segment starts at tick 0.
 
----
+PPQ is schema/core semantics and remains 960.
 
-## 18. Effects
+Tempo-change editing UI is post-MVP.
+
+## 20. Current beat division
+
+Current authoring BeatDivision is EditorSession/workspace state, not creative Project state.
+
+Changing 1/4 to 1/16 does not change project semantics.
+
+It may later be saved in workspace preferences.
+
+## 21. Effects
 
 ~~~rust
 Effect {
@@ -348,7 +364,9 @@ Effect {
 }
 ~~~
 
-Typed variants are preferred for MVP:
+Typed effect variants only.
+
+Candidate MVP set:
 
 ~~~rust
 enum EffectKind {
@@ -360,216 +378,187 @@ enum EffectKind {
 }
 ~~~
 
-Avoid a generic stringly-typed plugin parameter map before plugin support exists.
+The final list may shrink before schema freeze.
 
-Effect parameters use Animated<T> where meaningful.
+Effect parameters use Animated<T> only where the product exposes animation.
 
----
+Do not build a generic string parameter map before plugin support exists.
 
-## 19. Color
+## 22. Color
 
-Define one canonical persisted color model for MVP.
+Every project color uses LinearRgba semantic values.
 
-Recommended initial internal project representation:
+UI converts user-facing sRGB values at the boundary.
 
-~~~rust
-Color {
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
-}
-~~~
+Do not persist egui/wgpu-specific color types.
 
-with documented color-space semantics.
+## 23. Ordering
 
-Do not mix editor UI color types into core.
+Explicit Vec order defines:
 
-Advanced color management/HDR is outside MVP.
+- object draw order;
+- effect stack order;
+- keyframe sorted order.
 
----
+No user-visible order depends on hash-map iteration.
 
-## 20. Ordering
+## 24. Runtime indexes
 
-Object vector order defines drawing order.
-
-Effect vector order defines effect-stack order.
-
-Keyframe vector order is sorted by tick.
-
-Do not use hash-map iteration order for user-visible ordering.
-
----
-
-## 21. Runtime indexes
-
-Persisted Vec structures may have runtime acceleration indexes.
-
-Examples:
+Runtime may derive indexes such as:
 
 ~~~text
 ObjectId -> object index
-AssetId  -> asset index
-Keyframe tick -> binary search in sorted vec
+AssetId -> asset index
+EffectId -> owner/index
 ~~~
 
-Indexes are rebuilt after load and updated on mutation.
+Indexes are:
 
-They are not serialized.
+- rebuildable;
+- not serialized;
+- updated by mutation layer.
 
-Start simple; add indexes only where useful.
+Start without an index if simple linear lookup is sufficient.
 
----
+## 25. Editor/session separation
 
-## 22. Editor session is separate
+Not part of Project:
 
-Examples not stored in Project by default:
-
-- current selection;
+- selection;
 - playhead;
-- timeline scroll/zoom;
+- timeline zoom/scroll;
 - viewport pan/zoom;
-- open/collapsed rows;
-- focused property;
-- hover state;
-- drag state;
-- undo stack.
+- focused panel/property;
+- hover;
+- active drag;
+- undo stack;
+- current beat division.
 
-Possible separate type:
+## 26. App preferences separation
 
-~~~rust
-EditorSession {
-    selection,
-    playhead,
-    workspace,
-    interaction,
-    history,
-}
-~~~
-
----
-
-## 23. App preferences are separate
-
-Examples:
+Not part of Project:
 
 - theme;
+- UI scale;
+- preferred audio device;
 - recent files;
-- audio device preference;
-- shortcut remaps later;
-- UI scale preference.
+- shortcut remaps.
 
-These belong in application settings, not project serialization.
+## 27. Deletion
 
----
+Deleting an Object:
 
-## 24. Validation
+- removes contained effects and keyframes;
+- does not automatically remove asset records;
+- undo stores enough object subtree data for exact restore.
 
-After load and after risky operations, project invariants can be validated in debug/tests.
+Deleting an AssetRecord:
 
-Examples:
+- should be blocked while semantically referenced, or require explicit handling;
+- normal commands must not silently create dangling AssetIds.
 
-- IDs unique;
-- asset references resolvable or explicitly missing;
-- dimensions valid;
-- BPM valid;
-- keyframes sorted;
-- no duplicate keyframe ticks per property;
-- opacity ranges valid if clamped by model;
-- no NaN/Infinity in persisted numeric values.
+A missing external file is different from deleting the AssetRecord: the record remains valid but unresolved.
 
-Do not permit invalid floats to silently enter project state.
+## 28. Duplication
 
----
+Duplicating Object:
 
-## 25. Deletion semantics
-
-Deleting object:
-
-- removes object and contained effects/keyframes;
-- asset records are not necessarily deleted automatically;
-- undo stores enough object data to restore exact state.
-
-Deleting asset:
-
-- should be restricted if actively referenced, or produce explicit missing reference behavior;
-- final UX defined in ASSETS.md.
-
----
-
-## 26. Duplication semantics
-
-Duplicating object:
-
-- allocate new ObjectId;
-- allocate new EffectId values;
-- allocate new KeyframeId values;
+- allocate fresh ObjectId;
+- fresh EffectIds;
+- fresh KeyframeIds;
+- preserve asset references;
 - preserve values/ticks/easing;
-- reference same assets;
-- choose deterministic new name.
+- choose deterministic copy name.
 
-Duplicating keyframes:
+Duplicating a keyframe pattern:
 
-- allocate new KeyframeIds;
-- preserve relative musical offsets.
+- allocate fresh KeyframeIds;
+- preserve relative MusicalTick offsets.
 
----
+## 29. Validation
 
-## 27. Serialization boundary
+On load and controlled debug/test boundaries validate:
 
-Persist only semantic user data.
+- IDs nonzero if zero reserved;
+- all IDs unique;
+- next_entity_id greater than allocated IDs;
+- dimensions valid;
+- frame rate valid;
+- duration valid;
+- persisted floats finite;
+- opacity within [0,1];
+- BPM valid;
+- asset references point to records;
+- asset kind matches semantic reference;
+- keyframes sorted and unique;
+- object/effect variant payload valid.
 
-Do not persist:
+Missing external source file is recoverable runtime state, not invalid schema.
 
-- GPU texture IDs;
+## 30. Serialization boundary
+
+Persist semantic project data only.
+
+Never persist:
+
+- GPU handles;
 - egui IDs;
-- raw pointers/handles;
-- audio device names unless as preference;
-- decoder internals;
-- waveform cache bytes in the core project structure;
-- computed animation values.
+- decoder state;
+- PCM buffers;
+- waveform mip data in main JSON;
+- glyph atlas;
+- selection;
+- undo stack;
+- EvaluatedScene;
+- audio device handles;
+- FFmpeg process state.
 
-Cache sidecars may exist separately.
+## 31. Forward evolution
 
----
+Likely later additions:
 
-## 28. Forward evolution
-
-Design for adding later:
-
-- additional object types;
 - parenting;
 - masks;
+- additional object types;
 - multiple compositions;
-- richer effects;
-- tempo changes;
-- packed assets.
+- packed assets;
+- richer text;
+- tempo changes.
 
-Do not implement placeholder fields for speculative features.
+Add them through real schema migrations when they exist.
 
-Use schema migration when real features arrive.
+Do not reserve speculative placeholder fields.
 
----
+## 32. Schema V1 freeze gate
 
-## 29. Required tests
+Before schema V1 becomes Implemented, resolve only these remaining field-cut decisions:
+
+1. exact FontReference shape after text spike;
+2. final MVP EffectKind list;
+3. whether ImageObject needs explicit size/crop/fit data;
+4. final project file extension.
+
+Core schema architecture outside those details is accepted.
+
+## 33. Required tests
 
 - default project validates;
-- ID allocation never collides;
-- duplicate object gets fully fresh entity IDs;
-- project serialization round-trip preserves semantic equality;
-- missing asset reference produces recoverable state;
-- keyframes remain sorted after command operations;
-- invalid NaN/Infinity rejected;
-- old schema migration tests once version 2 exists.
+- ID allocator never collides/reuses;
+- object duplication refreshes nested IDs;
+- JSON round trip preserves semantic equality;
+- missing file leaves AssetRecord valid;
+- keyframe order/uniqueness survives commands;
+- invalid NaN/Infinity/ranges rejected;
+- next_entity_id invalid state rejected or explicitly repaired;
+- current beat division absent from creative schema.
 
----
+## 34. Definition of Done
 
-## 30. Open decisions
+Project schema is ready to freeze when:
 
-- exact project file format;
-- exact composition duration type;
-- whether font files become Asset records or font descriptors;
-- whether object ordering remains direct Vec order after parenting exists;
-- final Color space convention;
-- which text/effect properties are animatable in MVP;
-- whether editor grid subdivision is project or workspace state.
+- four remaining field-cut decisions are resolved;
+- every persisted field has an explicit unit and owner;
+- no runtime/cache state leaks into JSON;
+- V1 fixture round-trips;
+- load validation covers all invariants;
+- duplication/deletion behavior is tested.
