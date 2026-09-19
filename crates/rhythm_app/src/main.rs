@@ -1,5 +1,10 @@
 #![forbid(unsafe_code)]
 
+mod gpu;
+
+use std::sync::Arc;
+
+use gpu::GpuContext;
 use rhythm_core::APP_NAME;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -13,7 +18,8 @@ use winit::{
 
 #[derive(Default)]
 struct RhythmApp {
-    window: Option<Window>,
+    window: Option<Arc<Window>>,
+    gpu: Option<GpuContext>,
 }
 
 impl ApplicationHandler for RhythmApp {
@@ -29,12 +35,27 @@ impl ApplicationHandler for RhythmApp {
 
         match event_loop.create_window(attributes) {
             Ok(window) => {
-                info!(
-                    window_id = ?window.id(),
-                    engine = rhythm_engine::status(),
-                    "application window created"
-                );
-                self.window = Some(window);
+                let window = Arc::new(window);
+
+                match GpuContext::initialize(Arc::clone(&window)) {
+                    Ok(gpu) => {
+                        let adapter = gpu.adapter_summary();
+                        info!(
+                            window_id = ?window.id(),
+                            engine = rhythm_engine::status(),
+                            gpu_name = %adapter.name,
+                            gpu_backend = %adapter.backend,
+                            gpu_device_type = %adapter.device_type,
+                            "application window and GPU context created"
+                        );
+                        self.gpu = Some(gpu);
+                        self.window = Some(window);
+                    }
+                    Err(error) => {
+                        warn!(%error, "failed to initialize GPU");
+                        event_loop.exit();
+                    }
+                }
             }
             Err(error) => {
                 warn!(%error, "failed to create application window");

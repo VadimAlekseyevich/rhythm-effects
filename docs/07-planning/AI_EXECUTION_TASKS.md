@@ -39,7 +39,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 ## M2 — Render/UI shell
 
 - [x] **AI-021** — Create a renderer module in rhythm_engine without exposing wgpu types to rhythm_core.
-- [ ] **AI-022** — Initialize one wgpu Instance/Adapter/Device/Queue compatible with the application window.
+- [x] **AI-022** — Initialize one wgpu Instance/Adapter/Device/Queue compatible with the application window.
 - [ ] **AI-023** — Create and configure the wgpu window surface and handle zero-size/minimized windows.
 - [ ] **AI-024** — Add resize handling that reconfigures the surface only for non-zero dimensions.
 - [ ] **AI-025** — Create an offscreen Rgba16Float composition texture at a fixed 1920x1080 test size.
