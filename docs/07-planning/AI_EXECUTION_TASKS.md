@@ -122,7 +122,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-096** — Implement background output-rate resampling with Rubato.
 - [x] **AI-097** — Implement immutable stereo PlaybackBuffer and release temporary source PCM after waveform handoff.
 - [x] **AI-098** — Initialize the system-default CPAL output device and stream config.
-- [ ] **AI-099** — Implement realtime callback copying prepared PCM without allocation, decode, resample or file I/O.
+- [x] **AI-099** — Implement realtime callback copying prepared PCM without allocation, decode, resample or file I/O.
 - [ ] **AI-100** — Implement play/pause/end state transitions.
 - [ ] **AI-101** — Implement paused seek by updating EditorSession playhead only.
 - [ ] **AI-102** — Implement playing seek using a new playback generation and callback cursor switch.

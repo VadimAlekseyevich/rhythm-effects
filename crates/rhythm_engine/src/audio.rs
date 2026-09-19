@@ -1,10 +1,16 @@
 use std::{
     fs::File,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
 };
 
-use cpal::traits::{DeviceTrait, HostTrait};
+use cpal::{
+    FromSample, I24, SizedSample, U24,
+    traits::{DeviceTrait, HostTrait},
+};
 use rhythm_core::time::{DurationNs, SampleRate};
 use rubato::{Fft, FixedSync, Resampler, audioadapter_buffers::owned::InterleavedOwned};
 use symphonia::core::{
@@ -87,6 +93,55 @@ impl PlaybackBuffer {
 }
 
 #[derive(Debug)]
+pub enum AudioStreamBuildError {
+    Build(String),
+    UnsupportedSampleFormat(cpal::SampleFormat),
+}
+
+struct PlaybackControl {
+    frame_cursor: AtomicU64,
+    ended: AtomicBool,
+    stream_error_count: AtomicU64,
+}
+
+impl Default for PlaybackControl {
+    fn default() -> Self {
+        Self {
+            frame_cursor: AtomicU64::new(0),
+            ended: AtomicBool::new(false),
+            stream_error_count: AtomicU64::new(0),
+        }
+    }
+}
+
+pub struct CpalPlaybackStream {
+    stream: cpal::Stream,
+    control: Arc<PlaybackControl>,
+}
+
+impl CpalPlaybackStream {
+    #[must_use]
+    pub fn frame_cursor(&self) -> u64 {
+        self.control.frame_cursor.load(Ordering::Acquire)
+    }
+
+    #[must_use]
+    pub fn ended(&self) -> bool {
+        self.control.ended.load(Ordering::Acquire)
+    }
+
+    #[must_use]
+    pub fn stream_error_count(&self) -> u64 {
+        self.control.stream_error_count.load(Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub fn stream(&self) -> &cpal::Stream {
+        &self.stream
+    }
+}
+
+#[derive(Debug)]
 pub enum AudioOutputInitError {
     NoDefaultOutputDevice,
     Device(String),
@@ -123,6 +178,142 @@ impl CpalOutputEndpoint {
     #[must_use]
     pub fn stream_config(&self) -> cpal::StreamConfig {
         self.config.config()
+    }
+}
+
+pub fn build_playback_stream(
+    endpoint: &CpalOutputEndpoint,
+    buffer: PlaybackBuffer,
+) -> Result<CpalPlaybackStream, AudioStreamBuildError> {
+    let output_channels = usize::from(endpoint.channels());
+    let config = endpoint.stream_config();
+    let control = Arc::new(PlaybackControl::default());
+
+    let stream = match endpoint.sample_format() {
+        cpal::SampleFormat::I8 => {
+            build_typed_playback_stream::<i8>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::I16 => {
+            build_typed_playback_stream::<i16>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::I24 => {
+            build_typed_playback_stream::<I24>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::I32 => {
+            build_typed_playback_stream::<i32>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::I64 => {
+            build_typed_playback_stream::<i64>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::U8 => {
+            build_typed_playback_stream::<u8>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::U16 => {
+            build_typed_playback_stream::<u16>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::U24 => {
+            build_typed_playback_stream::<U24>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::U32 => {
+            build_typed_playback_stream::<u32>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::U64 => {
+            build_typed_playback_stream::<u64>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::F32 => {
+            build_typed_playback_stream::<f32>(endpoint, config, buffer, output_channels, &control)
+        }
+        cpal::SampleFormat::F64 => {
+            build_typed_playback_stream::<f64>(endpoint, config, buffer, output_channels, &control)
+        }
+        format => return Err(AudioStreamBuildError::UnsupportedSampleFormat(format)),
+    }?;
+
+    Ok(CpalPlaybackStream { stream, control })
+}
+
+fn build_typed_playback_stream<T>(
+    endpoint: &CpalOutputEndpoint,
+    config: cpal::StreamConfig,
+    buffer: PlaybackBuffer,
+    output_channels: usize,
+    control: &Arc<PlaybackControl>,
+) -> Result<cpal::Stream, AudioStreamBuildError>
+where
+    T: SizedSample + FromSample<f32>,
+{
+    let callback_control = Arc::clone(control);
+    let error_control = Arc::clone(control);
+
+    endpoint
+        .device
+        .build_output_stream(
+            config,
+            move |output: &mut [T], _| {
+                let mut cursor = usize::try_from(
+                    callback_control.frame_cursor.load(Ordering::Acquire),
+                )
+                .unwrap_or(usize::MAX);
+
+                write_playback_samples(
+                    &buffer,
+                    &mut cursor,
+                    output_channels,
+                    output,
+                );
+
+                callback_control
+                    .frame_cursor
+                    .store(cursor as u64, Ordering::Release);
+                callback_control
+                    .ended
+                    .store(cursor >= buffer.frame_count(), Ordering::Release);
+            },
+            move |_| {
+                error_control
+                    .stream_error_count
+                    .fetch_add(1, Ordering::Relaxed);
+            },
+            None,
+        )
+        .map_err(|error| AudioStreamBuildError::Build(error.to_string()))
+}
+
+fn write_playback_samples<T>(
+    buffer: &PlaybackBuffer,
+    frame_cursor: &mut usize,
+    output_channels: usize,
+    output: &mut [T],
+) where
+    T: SizedSample + FromSample<f32>,
+{
+    if output_channels == 0 {
+        return;
+    }
+
+    let silence = T::from_sample(0.0_f32);
+    output.fill(silence);
+
+    for output_frame in output.chunks_mut(output_channels) {
+        if *frame_cursor >= buffer.frame_count() {
+            break;
+        }
+
+        let source_index = *frame_cursor * 2;
+        let left = buffer.interleaved_stereo_f32[source_index];
+        let right = buffer.interleaved_stereo_f32[source_index + 1];
+
+        match output_channels {
+            1 => {
+                output_frame[0] = T::from_sample((left + right) * 0.5);
+            }
+            _ => {
+                output_frame[0] = T::from_sample(left);
+                output_frame[1] = T::from_sample(right);
+            }
+        }
+
+        *frame_cursor += 1;
     }
 }
 
@@ -477,6 +668,66 @@ mod tests {
 
     fn temp_fixture_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn callback_writer_copies_stereo_and_emits_silence_at_end() {
+        let playback = super::prepare_playback_buffer(
+            DecodedAudio {
+                sample_rate: 48_000,
+                channel_layout: AudioChannelLayout::Stereo,
+                interleaved_f32: vec![0.25, -0.25, 0.5, -0.5],
+            },
+            48_000,
+        )
+        .expect("playback");
+
+        let mut cursor = 0;
+        let mut output = [9.0_f32; 6];
+        super::write_playback_samples(&playback, &mut cursor, 2, &mut output);
+
+        assert_eq!(cursor, 2);
+        assert_eq!(output, [0.25, -0.25, 0.5, -0.5, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn callback_writer_adapts_stereo_to_mono_without_allocation() {
+        let playback = super::prepare_playback_buffer(
+            DecodedAudio {
+                sample_rate: 48_000,
+                channel_layout: AudioChannelLayout::Stereo,
+                interleaved_f32: vec![1.0, -1.0, 0.5, 0.25],
+            },
+            48_000,
+        )
+        .expect("playback");
+
+        let mut cursor = 0;
+        let mut output = [9.0_f32; 2];
+        super::write_playback_samples(&playback, &mut cursor, 1, &mut output);
+
+        assert_eq!(cursor, 2);
+        assert_eq!(output, [0.0, 0.375]);
+    }
+
+    #[test]
+    fn callback_writer_uses_first_two_channels_and_silences_extras() {
+        let playback = super::prepare_playback_buffer(
+            DecodedAudio {
+                sample_rate: 48_000,
+                channel_layout: AudioChannelLayout::Stereo,
+                interleaved_f32: vec![0.25, -0.25],
+            },
+            48_000,
+        )
+        .expect("playback");
+
+        let mut cursor = 0;
+        let mut output = [9.0_f32; 4];
+        super::write_playback_samples(&playback, &mut cursor, 4, &mut output);
+
+        assert_eq!(cursor, 1);
+        assert_eq!(output, [0.25, -0.25, 0.0, 0.0]);
     }
 
     #[test]
