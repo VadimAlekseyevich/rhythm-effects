@@ -1,6 +1,6 @@
 # ADR 0001 — Direct egui + winit + wgpu Integration
 
-> **Status: Accepted for MVP prototype**
+> **Status: Accepted for MVP**
 >
 > **Date: 2026-09-19**
 
