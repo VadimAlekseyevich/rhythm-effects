@@ -111,11 +111,7 @@ impl Project {
             if !audio_track.gain.is_finite() {
                 return Err(ProjectValidationError::NonFiniteValue("audio_track.gain"));
             }
-            validate_asset_reference(
-                audio_track.asset_id,
-                AssetKind::Audio,
-                &asset_kinds,
-            )?;
+            validate_asset_reference(audio_track.asset_id, AssetKind::Audio, &asset_kinds)?;
         }
 
         if self.next_entity_id == 0 || self.next_entity_id <= max_entity_id {
@@ -127,10 +123,10 @@ impl Project {
 }
 
 fn validate_settings(settings: &ProjectSettings) -> Result<(), ProjectValidationError> {
-    let width_valid =
-        (MIN_COMPOSITION_DIMENSION..=MAX_COMPOSITION_DIMENSION).contains(&settings.composition_width);
-    let height_valid =
-        (MIN_COMPOSITION_DIMENSION..=MAX_COMPOSITION_DIMENSION).contains(&settings.composition_height);
+    let width_valid = (MIN_COMPOSITION_DIMENSION..=MAX_COMPOSITION_DIMENSION)
+        .contains(&settings.composition_width);
+    let height_valid = (MIN_COMPOSITION_DIMENSION..=MAX_COMPOSITION_DIMENSION)
+        .contains(&settings.composition_height);
 
     if !width_valid || !height_valid {
         return Err(ProjectValidationError::InvalidCompositionDimensions);
@@ -161,14 +157,12 @@ fn validate_asset_reference(
     expected_kind: AssetKind,
     asset_kinds: &HashMap<AssetId, AssetKind>,
 ) -> Result<(), ProjectValidationError> {
-    let actual_kind =
-        asset_kinds
-            .get(&asset_id)
-            .copied()
-            .ok_or(ProjectValidationError::MissingAssetReference {
-                asset_id: asset_id.get(),
-                expected_kind,
-            })?;
+    let actual_kind = asset_kinds.get(&asset_id).copied().ok_or(
+        ProjectValidationError::MissingAssetReference {
+            asset_id: asset_id.get(),
+            expected_kind,
+        },
+    )?;
 
     if actual_kind != expected_kind {
         return Err(ProjectValidationError::AssetKindMismatch {
@@ -264,7 +258,12 @@ fn validate_effect(
         EffectKind::RgbSplit(split) => {
             register_animated_ids(&split.amount_px, seen_ids, max_entity_id)?;
             register_animated_ids(&split.angle_degrees, seen_ids, max_entity_id)?;
-            validate_animated_range(&split.amount_px, 0.0, 64.0, "rgb_split.amount_px")?;
+            validate_animated_range(
+                &split.amount_px,
+                0.0,
+                64.0,
+                "rgb_split.amount_px",
+            )?;
             validate_animated_finite(&split.angle_degrees, "rgb_split.angle_degrees")
         }
     }
@@ -552,9 +551,9 @@ impl TransformAnimation {
 #[cfg(test)]
 mod tests {
     use super::{
-        AssetKind, AssetRecord, AssetSource, Effect, EffectKind, ImageObject, Object, ObjectContent,
-        Project, ProjectSettings, ProjectValidationError, RectangleObject, TransformAnimation,
-        MAX_PROJECT_DURATION_NS,
+        AssetKind, AssetRecord, AssetSource, Effect, EffectKind, ImageObject,
+        MAX_PROJECT_DURATION_NS, Object, ObjectContent, Project, ProjectSettings,
+        ProjectValidationError, RectangleObject, TransformAnimation,
     };
     use crate::{
         animation::Animated,
@@ -714,9 +713,7 @@ mod tests {
         project.composition.objects[0].transform.opacity = Animated::new_static(1.5);
         assert_eq!(
             project.validate(),
-            Err(ProjectValidationError::ValueOutOfRange(
-                "transform.opacity"
-            ))
+            Err(ProjectValidationError::ValueOutOfRange("transform.opacity"))
         );
     }
 
@@ -884,9 +881,7 @@ mod tests {
     #[test]
     fn rectangle_and_ellipse_store_only_accepted_mvp_fields() {
         let size = Animated::new_static(Vec2::new(100.0, 50.0).expect("finite size"));
-        let fill = Animated::new_static(
-            LinearRgba::new(1.0, 0.0, 0.0, 1.0).expect("finite color"),
-        );
+        let fill = Animated::new_static(LinearRgba::new(1.0, 0.0, 0.0, 1.0).expect("finite color"));
 
         let rectangle = RectangleObject {
             size: size.clone(),
