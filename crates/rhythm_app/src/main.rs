@@ -274,14 +274,15 @@ impl ApplicationHandler for RhythmApp {
             WindowEvent::Resized(size) => match self.gpu.as_mut() {
                 Some(gpu) => match gpu.resize_surface(size.width, size.height) {
                     Ok(reconfigured) => {
-                        if reconfigured && self.egui_renderer.is_none() {
-                            if let Some(config) = gpu.surface_config.as_ref() {
-                                self.egui_renderer = Some(egui_wgpu::Renderer::new(
-                                    &gpu.device,
-                                    config.format,
-                                    egui_wgpu::RendererOptions::default(),
-                                ));
-                            }
+                        if reconfigured
+                            && self.egui_renderer.is_none()
+                            && let Some(config) = gpu.surface_config.as_ref()
+                        {
+                            self.egui_renderer = Some(egui_wgpu::Renderer::new(
+                                &gpu.device,
+                                config.format,
+                                egui_wgpu::RendererOptions::default(),
+                            ));
                         }
 
                         info!(
