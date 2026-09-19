@@ -6,6 +6,7 @@ pub mod editor;
 
 pub mod ids;
 pub mod project;
+pub mod property;
 pub mod time;
 
 pub const APP_NAME: &str = "Rhythm Effects";

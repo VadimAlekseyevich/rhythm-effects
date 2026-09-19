@@ -162,6 +162,23 @@ impl<T> Animated<T> {
         }
     }
 
+    #[must_use]
+    pub fn keyframe_at_tick(&self, tick: MusicalTick) -> Option<&Keyframe<T>> {
+        let index = self
+            .keyframes
+            .binary_search_by_key(&tick, |keyframe| keyframe.tick)
+            .ok()?;
+        self.keyframes.get(index)
+    }
+
+    pub fn remove_keyframe_at_tick(&mut self, tick: MusicalTick) -> Option<Keyframe<T>> {
+        let index = self
+            .keyframes
+            .binary_search_by_key(&tick, |keyframe| keyframe.tick)
+            .ok()?;
+        Some(self.keyframes.remove(index))
+    }
+
     pub fn remove_keyframe_by_id(&mut self, id: KeyframeId) -> Option<Keyframe<T>> {
         let index = self
             .keyframes
