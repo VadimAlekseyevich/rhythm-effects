@@ -1,5 +1,5 @@
 use crate::{
-    domain::Vec2,
+    domain::{LinearRgba, Vec2},
     ids::KeyframeId,
     time::MusicalTick,
 };
@@ -144,6 +144,22 @@ pub fn interpolate_linear_vec2(from: Vec2, to: Vec2, progress: f64) -> Vec2 {
     .expect("linear interpolation of finite Vec2 endpoints stays finite")
 }
 
+
+#[must_use]
+pub fn interpolate_linear_rgba(
+    from: LinearRgba,
+    to: LinearRgba,
+    progress: f64,
+) -> LinearRgba {
+    LinearRgba::new(
+        interpolate_linear_f32(from.r(), to.r(), progress),
+        interpolate_linear_f32(from.g(), to.g(), progress),
+        interpolate_linear_f32(from.b(), to.b(), progress),
+        interpolate_linear_f32(from.a(), to.a(), progress),
+    )
+    .expect("linear interpolation of valid LinearRgba endpoints stays valid")
+}
+
 #[must_use]
 pub fn interpolate_hold<T: Clone>(from: &T, to: &T, progress: f64) -> T {
     if progress >= 1.0 {
@@ -165,6 +181,18 @@ mod tests {
             value,
             Interpolation::Linear,
         )
+    }
+
+    #[test]
+    fn linear_rgba_interpolation_operates_in_linear_light_values() {
+        let from = crate::domain::LinearRgba::new(0.0, 0.0, 0.0, 0.0).expect("valid color");
+        let to = crate::domain::LinearRgba::new(1.0, 0.5, 0.25, 1.0).expect("valid color");
+        let midpoint = super::interpolate_linear_rgba(from, to, 0.5);
+
+        assert_eq!(midpoint.r(), 0.5);
+        assert_eq!(midpoint.g(), 0.25);
+        assert_eq!(midpoint.b(), 0.125);
+        assert_eq!(midpoint.a(), 0.5);
     }
 
     #[test]
