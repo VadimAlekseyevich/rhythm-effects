@@ -165,14 +165,41 @@ pub struct RgbSplitEffect {
     pub angle_degrees: Animated<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetKind {
+    Audio,
+    Image,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetSource {
+    File {
+        path: String,
+        relative_to_project: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetRecord {
     pub id: AssetId,
+    pub kind: AssetKind,
+    pub source: AssetSource,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioTrack {
     pub asset_id: AssetId,
+    pub gain: f32,
+}
+
+impl AudioTrack {
+    #[must_use]
+    pub const fn new(asset_id: AssetId) -> Self {
+        Self {
+            asset_id,
+            gain: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -235,6 +262,31 @@ impl TransformAnimation {
 mod tests {
     use super::TransformAnimation;
     use crate::{animation::Animated, domain::Vec2};
+
+    #[test]
+    fn asset_and_audio_track_schema_match_mvp_contract() {
+        let asset_id = crate::ids::AssetId::new(11).expect("nonzero asset id");
+        let asset = super::AssetRecord {
+            id: asset_id,
+            kind: super::AssetKind::Audio,
+            source: super::AssetSource::File {
+                path: "audio/song.flac".to_owned(),
+                relative_to_project: true,
+            },
+        };
+        let track = super::AudioTrack::new(asset_id);
+
+        assert_eq!(asset.kind, super::AssetKind::Audio);
+        assert_eq!(track.asset_id, asset_id);
+        assert_eq!(track.gain, 1.0);
+        assert!(matches!(
+            asset.source,
+            super::AssetSource::File {
+                relative_to_project: true,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn effect_variants_use_typed_mvp_parameter_structs() {
