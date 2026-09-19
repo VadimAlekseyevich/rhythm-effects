@@ -132,20 +132,38 @@ pub enum EffectKind {
     RgbSplit(RgbSplitEffect),
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct BlurEffect;
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlurEffect {
+    pub radius_px: Animated<f32>,
+}
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct GlowEffect;
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlowEffect {
+    pub radius_px: Animated<f32>,
+    pub intensity: Animated<f32>,
+    pub threshold: Animated<f32>,
+    pub color: Animated<LinearRgba>,
+}
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct TintEffect;
+#[derive(Debug, Clone, PartialEq)]
+pub struct TintEffect {
+    pub color: Animated<LinearRgba>,
+    pub amount: Animated<f32>,
+}
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct NoiseEffect;
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoiseEffect {
+    pub amount: Animated<f32>,
+    pub size_px: Animated<f32>,
+    pub evolution: Animated<f32>,
+    pub seed: u32,
+}
 
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct RgbSplitEffect;
+#[derive(Debug, Clone, PartialEq)]
+pub struct RgbSplitEffect {
+    pub amount_px: Animated<f32>,
+    pub angle_degrees: Animated<f32>,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssetRecord {
@@ -217,6 +235,41 @@ impl TransformAnimation {
 mod tests {
     use super::TransformAnimation;
     use crate::{animation::Animated, domain::Vec2};
+
+    #[test]
+    fn effect_variants_use_typed_mvp_parameter_structs() {
+        let black = crate::domain::LinearRgba::black_opaque();
+
+        let blur = super::EffectKind::Blur(super::BlurEffect {
+            radius_px: Animated::new_static(12.0),
+        });
+        let glow = super::EffectKind::Glow(super::GlowEffect {
+            radius_px: Animated::new_static(16.0),
+            intensity: Animated::new_static(1.5),
+            threshold: Animated::new_static(0.25),
+            color: Animated::new_static(black),
+        });
+        let tint = super::EffectKind::Tint(super::TintEffect {
+            color: Animated::new_static(black),
+            amount: Animated::new_static(0.5),
+        });
+        let noise = super::EffectKind::Noise(super::NoiseEffect {
+            amount: Animated::new_static(0.2),
+            size_px: Animated::new_static(4.0),
+            evolution: Animated::new_static(2.0),
+            seed: 42,
+        });
+        let split = super::EffectKind::RgbSplit(super::RgbSplitEffect {
+            amount_px: Animated::new_static(8.0),
+            angle_degrees: Animated::new_static(45.0),
+        });
+
+        assert!(matches!(blur, super::EffectKind::Blur(_)));
+        assert!(matches!(glow, super::EffectKind::Glow(_)));
+        assert!(matches!(tint, super::EffectKind::Tint(_)));
+        assert!(matches!(noise, super::EffectKind::Noise(_)));
+        assert!(matches!(split, super::EffectKind::RgbSplit(_)));
+    }
 
     #[test]
     fn font_reference_defaults_to_normal_upright_style() {
