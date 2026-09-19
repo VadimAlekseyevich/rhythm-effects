@@ -3,6 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use rubato::{
+    Fft, FixedSync, Resampler,
+    audioadapter_buffers::owned::InterleavedOwned,
+};
 use symphonia::core::{
     codecs::{AudioDecoderOptions, CodecParameters},
     errors::Error as SymphoniaError,
@@ -53,6 +57,10 @@ pub enum AudioDecodeError {
     Io(std::io::Error),
     Probe(String),
     Decode(String),
+    Resample(String),
+    InvalidSampleRate,
+    InvalidPcmLength,
+    NonFinitePcm,
     NoAudioTrack,
     MissingSampleRate,
     MissingChannelLayout,
@@ -191,6 +199,65 @@ pub fn decode_audio_file(path: &Path) -> Result<DecodedAudio, AudioDecodeError> 
     })
 }
 
+pub fn spawn_output_resample(
+    audio: DecodedAudio,
+    output_sample_rate: u32,
+) -> std::thread::JoinHandle<Result<DecodedAudio, AudioDecodeError>> {
+    std::thread::spawn(move || resample_decoded_audio(audio, output_sample_rate))
+}
+
+fn resample_decoded_audio(
+    audio: DecodedAudio,
+    output_sample_rate: u32,
+) -> Result<DecodedAudio, AudioDecodeError> {
+    if audio.sample_rate == 0 || output_sample_rate == 0 {
+        return Err(AudioDecodeError::InvalidSampleRate);
+    }
+
+    let channels = usize::from(audio.channel_layout.channels());
+    if audio.interleaved_f32.len() % channels != 0 {
+        return Err(AudioDecodeError::InvalidPcmLength);
+    }
+    if !audio.interleaved_f32.iter().all(|sample| sample.is_finite()) {
+        return Err(AudioDecodeError::NonFinitePcm);
+    }
+
+    if audio.sample_rate == output_sample_rate {
+        return Ok(audio);
+    }
+
+    let frame_count = audio.interleaved_f32.len() / channels;
+    if frame_count == 0 {
+        return Ok(DecodedAudio {
+            sample_rate: output_sample_rate,
+            channel_layout: audio.channel_layout,
+            interleaved_f32: Vec::new(),
+        });
+    }
+
+    let input = InterleavedOwned::new_from(audio.interleaved_f32, channels, frame_count)
+        .map_err(|error| AudioDecodeError::Resample(error.to_string()))?;
+
+    let mut resampler = Fft::<f32>::new(
+        audio.sample_rate as usize,
+        output_sample_rate as usize,
+        1024,
+        channels,
+        FixedSync::Both,
+    )
+    .map_err(|error| AudioDecodeError::Resample(error.to_string()))?;
+
+    let output = resampler
+        .process_all(&input, frame_count, None)
+        .map_err(|error| AudioDecodeError::Resample(error.to_string()))?;
+
+    Ok(DecodedAudio {
+        sample_rate: output_sample_rate,
+        channel_layout: audio.channel_layout,
+        interleaved_f32: output.take_data(),
+    })
+}
+
 fn channel_layout_from_count(channel_count: usize) -> Result<AudioChannelLayout, AudioDecodeError> {
     match channel_count {
         1 => Ok(AudioChannelLayout::Mono),
@@ -239,6 +306,32 @@ mod tests {
 
     fn temp_fixture_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn output_resample_runs_on_worker_and_changes_sample_rate() {
+        let input_frames = 4_410_usize;
+        let mut samples = Vec::with_capacity(input_frames);
+        for frame in 0..input_frames {
+            samples.push(((frame as f32) * 0.01).sin() * 0.5);
+        }
+
+        let audio = DecodedAudio {
+            sample_rate: 44_100,
+            channel_layout: AudioChannelLayout::Mono,
+            interleaved_f32: samples,
+        };
+
+        let worker = super::spawn_output_resample(audio, 48_000);
+        let output = worker
+            .join()
+            .expect("resample worker must not panic")
+            .expect("resample succeeds");
+
+        assert_eq!(output.sample_rate, 48_000);
+        assert_eq!(output.channel_layout, AudioChannelLayout::Mono);
+        assert_eq!(output.frame_count(), 4_800);
+        assert!(output.interleaved_f32.iter().all(|sample| sample.is_finite()));
     }
 
     #[test]

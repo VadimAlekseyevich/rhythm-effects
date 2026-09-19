@@ -119,7 +119,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [ ] **AI-093** — Implement AAC/M4A support for the pinned Symphonia feature set or return a clear unsupported error.
 - [x] **AI-094** — Implement mono/stereo decoded f32 interleaved PCM representation.
 - [x] **AI-095** — Reject unsupported multichannel input instead of undocumented downmix.
-- [ ] **AI-096** — Implement background output-rate resampling with Rubato.
+- [x] **AI-096** — Implement background output-rate resampling with Rubato.
 - [ ] **AI-097** — Implement immutable stereo PlaybackBuffer and release temporary source PCM after waveform handoff.
 - [ ] **AI-098** — Initialize the system-default CPAL output device and stream config.
 - [ ] **AI-099** — Implement realtime callback copying prepared PCM without allocation, decode, resample or file I/O.
