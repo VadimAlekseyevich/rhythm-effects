@@ -164,8 +164,7 @@ impl WaveformData {
         let first = usize::try_from(start_frame / level.frames_per_peak)
             .unwrap_or(usize::MAX)
             .min(peak_count);
-        let end_peak = end_frame
-            .saturating_add(level.frames_per_peak.saturating_sub(1))
+        let end_peak = end_frame.saturating_add(level.frames_per_peak.saturating_sub(1))
             / level.frames_per_peak;
         let end = usize::try_from(end_peak)
             .unwrap_or(usize::MAX)
@@ -239,8 +238,8 @@ fn build_base_level(audio: &DecodedAudio, channels: usize) -> Vec<WavePeak> {
 #[cfg(test)]
 mod tests {
     use super::{BASE_BUCKET_FRAMES, WavePeak, build_waveform_pyramid};
-    use rhythm_core::ids::AssetId;
     use crate::audio::{AudioChannelLayout, DecodedAudio};
+    use rhythm_core::ids::AssetId;
 
     #[test]
     fn immutable_waveform_result_keeps_asset_generation_identity() {
@@ -291,7 +290,11 @@ mod tests {
         let waveform = super::build_waveform_data(asset_id, 1, &audio).expect("waveform");
 
         let slice = waveform
-            .visible_slice(0, 2 * BASE_BUCKET_FRAMES as u64, 5 * BASE_BUCKET_FRAMES as u64)
+            .visible_slice(
+                0,
+                2 * BASE_BUCKET_FRAMES as u64,
+                5 * BASE_BUCKET_FRAMES as u64,
+            )
             .expect("level exists");
 
         assert_eq!(slice.first_peak_index, 2);
