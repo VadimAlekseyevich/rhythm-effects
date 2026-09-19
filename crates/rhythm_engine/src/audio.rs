@@ -1080,21 +1080,11 @@ mod tests {
         let duration = rhythm_core::time::DurationNs::new(10_000_000_000);
 
         assert_eq!(
-            super::estimate_project_time_from_frame_cursor(
-                48_480,
-                480,
-                sample_rate,
-                duration,
-            ),
+            super::estimate_project_time_from_frame_cursor(48_480, 480, sample_rate, duration,),
             Some(ProjectTimeNs::new(1_000_000_000))
         );
         assert_eq!(
-            super::estimate_project_time_from_frame_cursor(
-                240,
-                480,
-                sample_rate,
-                duration,
-            ),
+            super::estimate_project_time_from_frame_cursor(240, 480, sample_rate, duration,),
             Some(ProjectTimeNs::new(0))
         );
     }
