@@ -107,7 +107,6 @@ pub fn probe_audio_file(path: &Path) -> Result<AudioProbe, AudioDecodeError> {
     })
 }
 
-
 pub fn decode_audio_file(path: &Path) -> Result<DecodedAudio, AudioDecodeError> {
     let file = File::open(path)?;
     let mut hint = Hint::new();
@@ -239,10 +238,7 @@ mod tests {
     }
 
     fn temp_fixture_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "rhythm-effects-{}-{name}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
     }
 
     #[test]
