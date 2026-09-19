@@ -1,0 +1,16 @@
+[package]
+name = "rhythm_app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rhythm_core = { path = "../rhythm_core" }
+rhythm_engine = { path = "../rhythm_engine" }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true

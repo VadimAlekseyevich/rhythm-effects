@@ -1,0 +1,96 @@
+#![forbid(unsafe_code)]
+
+use rhythm_core::APP_NAME;
+use tracing::{info, warn};
+use tracing_subscriber::EnvFilter;
+use winit::{
+    application::ApplicationHandler,
+    dpi::LogicalSize,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::{Window, WindowId},
+};
+
+#[derive(Default)]
+struct RhythmApp {
+    window: Option<Window>,
+}
+
+impl ApplicationHandler for RhythmApp {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+
+        let attributes = Window::default_attributes()
+            .with_title(APP_NAME)
+            .with_inner_size(LogicalSize::new(1440.0, 900.0))
+            .with_min_inner_size(LogicalSize::new(1280.0, 720.0));
+
+        match event_loop.create_window(attributes) {
+            Ok(window) => {
+                info!(
+                    window_id = ?window.id(),
+                    engine = rhythm_engine::status(),
+                    "application window created"
+                );
+                self.window = Some(window);
+            }
+            Err(error) => {
+                warn!(%error, "failed to create application window");
+                event_loop.exit();
+            }
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+
+        if window.id() != window_id {
+            return;
+        }
+
+        match event {
+            WindowEvent::CloseRequested => {
+                info!("close requested");
+                event_loop.exit();
+            }
+            WindowEvent::Resized(size) => {
+                info!(width = size.width, height = size.height, "window resized");
+            }
+            _ => {}
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        info!("application exiting");
+    }
+}
+
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .compact()
+        .init();
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_tracing();
+
+    info!(app = APP_NAME, "starting application");
+
+    let event_loop = EventLoop::new()?;
+    let mut app = RhythmApp::default();
+    event_loop.run_app(&mut app)?;
+
+    Ok(())
+}

@@ -1,0 +1,12 @@
+[package]
+name = "rhythm_engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rhythm_core = { path = "../rhythm_core" }
+
+[lints]
+workspace = true
