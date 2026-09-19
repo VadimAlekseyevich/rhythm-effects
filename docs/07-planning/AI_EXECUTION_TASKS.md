@@ -59,7 +59,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 ## M3 — Domain/time/project/animation/history
 
-- [ ] **AI-039** — Implement typed project-local ObjectId, AssetId, EffectId and KeyframeId u64 newtypes with zero reserved.
+- [x] **AI-039** — Implement typed project-local ObjectId, AssetId, EffectId and KeyframeId u64 newtypes with zero reserved.
 - [ ] **AI-040** — Implement a monotonic project ID allocator and unit tests for non-reuse.
 - [ ] **AI-041** — Implement MusicalTick(i64), ProjectTimeNs(i64), DurationNs(u64), GridOffsetNs(i64), BpmMicros(u64), SampleRate(u32), AudioFramePosition(u64).
 - [ ] **AI-042** — Implement validated BpmMicros construction for the accepted 1..1000 BPM range.

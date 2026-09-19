@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod ids;
+
 pub const APP_NAME: &str = "Rhythm Effects";
 
 #[must_use]
