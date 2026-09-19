@@ -2,7 +2,7 @@
 
 A rhythm-first motion design editor.
 
-The core idea is simple: **motion design is authored on a musical BPM grid**. Visual objects and assets are animated with keyframes, but keyframe placement is rhythm-native rather than free-floating on an arbitrary timeline.
+**Core thesis:** motion-design keyframes are authored in musical time on a BPM grid, while playback/evaluation stays continuous and audio-synchronized.
 
 ## Documentation
 
@@ -10,11 +10,14 @@ Start here:
 
 - [Documentation Index](docs/README.md)
 - [Project Philosophy](docs/00-overview/PROJECT_PHILOSOPHY.md)
-- [MVP Scope](docs/00-overview/MVP_SCOPE.md)
-- [Russian MVP Master Plan](docs/ru/MVP_PLAN_RU.md)
+- [Accepted MVP Scope](docs/00-overview/MVP_SCOPE.md)
+- [Implementation Readiness](docs/07-planning/IMPLEMENTATION_READINESS.md)
+- [Русская финальная сводка](docs/ru/FINAL_MVP_ARCHITECTURE_RU.md)
 
-The original Russian master plan is also kept at [MVP_PLAN.md](MVP_PLAN.md).
+The original [MVP_PLAN.md](MVP_PLAN.md) is retained as historical planning context, not the current implementation contract.
 
 ## Current status
 
-Pre-MVP planning and architecture.
+**M0 — Architecture Contract: complete.**
+
+The repository is documentation-complete for the MVP architecture and ready to begin implementation milestones. Canonical specs are Accepted; implementation changes must update specs/ADRs rather than silently diverging.
