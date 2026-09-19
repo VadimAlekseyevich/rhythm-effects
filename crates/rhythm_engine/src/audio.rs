@@ -314,6 +314,27 @@ impl PlaybackControl {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioClockSource {
+    Timestamp,
+    FrameCursorFallback,
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioDiagnostics {
+    pub device_label: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub sample_format: cpal::SampleFormat,
+    pub callback_buffer_frames: u64,
+    pub playback_generation: PlaybackGeneration,
+    pub audible_project_time: Option<ProjectTimeNs>,
+    pub clock_source: AudioClockSource,
+    pub stream_error_count: u64,
+    pub playback_buffer_memory_bytes: usize,
+    pub playback_state: PlaybackState,
+}
+
 pub struct CpalPlaybackStream {
     stream: cpal::Stream,
     control: Arc<PlaybackControl>,
@@ -364,6 +385,29 @@ impl CpalPlaybackStream {
     #[must_use]
     pub const fn fallback_latency_frames(&self) -> u64 {
         self.fallback_latency_frames
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> AudioDiagnostics {
+        let clock_source = if self.clock_anchor().is_some() {
+            AudioClockSource::Timestamp
+        } else {
+            AudioClockSource::FrameCursorFallback
+        };
+
+        AudioDiagnostics {
+            device_label: self.device_label.clone(),
+            sample_rate: self.sample_rate.get(),
+            channels: self.output_channels,
+            sample_format: self.sample_format,
+            callback_buffer_frames: self.fallback_latency_frames,
+            playback_generation: self.active_generation(),
+            audible_project_time: self.estimated_audible_project_time(),
+            clock_source,
+            stream_error_count: self.stream_error_count(),
+            playback_buffer_memory_bytes: self.playback_buffer_memory_bytes,
+            playback_state: self.playback_state(),
+        }
     }
 
     #[must_use]
@@ -490,6 +534,10 @@ pub fn build_playback_stream(
     let frame_count = u64::try_from(buffer.frame_count()).unwrap_or(u64::MAX);
     let sample_rate = buffer.sample_rate();
     let duration = buffer.duration();
+    let playback_buffer_memory_bytes = buffer.memory_bytes();
+    let device_label = endpoint.device_label().to_owned();
+    let output_channels_u16 = endpoint.channels();
+    let sample_format = endpoint.sample_format();
     let control = Arc::new(PlaybackControl::default());
 
     let stream = match endpoint.sample_format() {
@@ -541,6 +589,10 @@ pub fn build_playback_stream(
         sample_rate,
         duration,
         fallback_latency_frames,
+        device_label,
+        output_channels: output_channels_u16,
+        sample_format,
+        playback_buffer_memory_bytes,
     })
 }
 
