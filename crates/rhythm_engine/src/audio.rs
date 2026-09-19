@@ -342,6 +342,10 @@ pub struct CpalPlaybackStream {
     sample_rate: SampleRate,
     duration: DurationNs,
     fallback_latency_frames: u64,
+    device_label: String,
+    output_channels: u16,
+    sample_format: cpal::SampleFormat,
+    playback_buffer_memory_bytes: usize,
 }
 
 impl CpalPlaybackStream {
