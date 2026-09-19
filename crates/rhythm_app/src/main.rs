@@ -40,13 +40,15 @@ impl ApplicationHandler for RhythmApp {
                 match GpuContext::initialize(Arc::clone(&window)) {
                     Ok(gpu) => {
                         let adapter = gpu.adapter_summary();
+                        let surface_size = gpu.surface_size();
                         info!(
                             window_id = ?window.id(),
                             engine = rhythm_engine::status(),
                             gpu_name = %adapter.name,
                             gpu_backend = %adapter.backend,
                             gpu_device_type = %adapter.device_type,
-                            "application window and GPU context created"
+                            surface_size = ?surface_size,
+                            "application window, GPU context, and surface created"
                         );
                         self.gpu = Some(gpu);
                         self.window = Some(window);
