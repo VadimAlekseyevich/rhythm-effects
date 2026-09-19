@@ -1,6 +1,6 @@
 # Design System
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document defines the visual and ergonomic constraints of the editor. Exact colors, font family, and pixel values are intentionally not finalized yet; the system rules are.
 
@@ -68,7 +68,7 @@ Numeric/timeline metadata may be somewhat denser than normal labels, but should 
 
 ### Font selection
 
-Final font is TBD.
+MVP UI uses Inter as the single primary interface family, including Cyrillic. Tabular-number features should be used where available for time/value readouts.
 
 Requirements:
 
@@ -454,3 +454,69 @@ Before finalizing tokens/colors, build a functional UI prototype containing:
 - focused/selected/disabled/error states.
 
 Evaluate the system at realistic content density, not in isolated component screenshots.
+
+
+---
+
+## 27. MVP design tokens
+
+These are implementation defaults, not immutable branding. Small tuning during usability work is allowed without an ADR as long as the comfort constraints remain intact.
+
+### Typography
+
+- primary UI family: Inter;
+- base UI text: 15 px logical;
+- secondary metadata: 13 px logical;
+- panel/section title: 16 px logical, medium/semibold weight;
+- avoid UI text below 12 px logical;
+- use the same family for numeric/time readouts, preferably with tabular numerals.
+
+MVP uses one primary UI font family. Do not introduce decorative secondary families.
+
+### Spacing
+
+Base spacing scale:
+
+~~~text
+4 / 8 / 12 / 16 / 24 / 32 logical px
+~~~
+
+Use 8 px as the most common internal spacing unit.
+
+### Control size
+
+- ordinary button/input height: at least 34 px;
+- preferred primary action height: 38–40 px;
+- minimum ordinary pointer target: 32×32 px;
+- keyframe visible glyph may be smaller, but hit box is at least 18×18 px;
+- panel splitter hit region: at least 8 px even if visual separator is thinner;
+- timeline object row: approximately 30 px;
+- property row: approximately 28 px.
+
+### Corners
+
+- ordinary controls: approximately 6 px radius;
+- major panels/popovers: approximately 8–10 px;
+- avoid pill styling unless the control semantically benefits from it.
+
+### Theme
+
+MVP ships one carefully designed dark editor theme.
+
+Light theme is post-MVP unless it becomes extremely cheap after tokenization.
+
+Editor chrome remains neutral/dark so colorful composition content dominates attention.
+
+## 28. Density constraint
+
+No feature may solve space pressure by reducing the global base font or ordinary hit targets.
+
+When a panel runs out of space, prefer:
+
+1. context;
+2. progressive disclosure;
+3. scrolling;
+4. command search;
+5. panel redesign.
+
+Shrinking everything is not an acceptable scaling strategy.
