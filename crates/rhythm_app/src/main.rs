@@ -122,7 +122,7 @@ impl ApplicationHandler for RhythmApp {
                     (self.egui_context.as_ref(), self.egui_state.as_mut())
                 {
                     let raw_input = egui_state.take_egui_input(window);
-                    let full_output = egui_context.run(raw_input, |_context| {});
+                    let full_output = egui_context.run_ui(raw_input, |_ui| {});
                     egui_state.handle_platform_output(window, full_output.platform_output);
                 }
             }
