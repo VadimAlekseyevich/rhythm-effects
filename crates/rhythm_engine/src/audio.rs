@@ -3,13 +3,13 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
     },
 };
 
 use cpal::{
     FromSample, I24, SizedSample, U24,
-    traits::{DeviceTrait, HostTrait},
+    traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use rhythm_core::time::{DurationNs, SampleRate};
 use rubato::{Fft, FixedSync, Resampler, audioadapter_buffers::owned::InterleavedOwned};
@@ -92,6 +92,35 @@ impl PlaybackBuffer {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PlaybackState {
+    Unavailable = 0,
+    Ready = 1,
+    Playing = 2,
+    Paused = 3,
+    Ended = 4,
+    Error = 5,
+}
+
+impl PlaybackState {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::Ready,
+            2 => Self::Playing,
+            3 => Self::Paused,
+            4 => Self::Ended,
+            5 => Self::Error,
+            _ => Self::Unavailable,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum AudioStreamControlError {
+    Cpal(String),
+}
+
 #[derive(Debug)]
 pub enum AudioStreamBuildError {
     Build(String),
@@ -101,6 +130,7 @@ pub enum AudioStreamBuildError {
 struct PlaybackControl {
     frame_cursor: AtomicU64,
     ended: AtomicBool,
+    state: AtomicU8,
     stream_error_count: AtomicU64,
 }
 
@@ -109,8 +139,19 @@ impl Default for PlaybackControl {
         Self {
             frame_cursor: AtomicU64::new(0),
             ended: AtomicBool::new(false),
+            state: AtomicU8::new(PlaybackState::Ready as u8),
             stream_error_count: AtomicU64::new(0),
         }
+    }
+}
+
+impl PlaybackControl {
+    fn state(&self) -> PlaybackState {
+        PlaybackState::from_u8(self.state.load(Ordering::Acquire))
+    }
+
+    fn set_state(&self, state: PlaybackState) {
+        self.state.store(state as u8, Ordering::Release);
     }
 }
 
@@ -120,6 +161,28 @@ pub struct CpalPlaybackStream {
 }
 
 impl CpalPlaybackStream {
+    #[must_use]
+    pub fn playback_state(&self) -> PlaybackState {
+        self.control.state()
+    }
+
+    pub fn play(&self) -> Result<(), AudioStreamControlError> {
+        self.stream
+            .play()
+            .map_err(|error| AudioStreamControlError::Cpal(error.to_string()))?;
+        self.control.ended.store(false, Ordering::Release);
+        self.control.set_state(PlaybackState::Playing);
+        Ok(())
+    }
+
+    pub fn pause(&self) -> Result<(), AudioStreamControlError> {
+        self.stream
+            .pause()
+            .map_err(|error| AudioStreamControlError::Cpal(error.to_string()))?;
+        self.control.set_state(PlaybackState::Paused);
+        Ok(())
+    }
+
     #[must_use]
     pub fn frame_cursor(&self) -> u64 {
         self.control.frame_cursor.load(Ordering::Acquire)
@@ -258,14 +321,17 @@ where
                 callback_control
                     .frame_cursor
                     .store(cursor as u64, Ordering::Release);
-                callback_control
-                    .ended
-                    .store(cursor >= buffer.frame_count(), Ordering::Release);
+                let ended = cursor >= buffer.frame_count();
+                callback_control.ended.store(ended, Ordering::Release);
+                if ended {
+                    callback_control.set_state(PlaybackState::Ended);
+                }
             },
             move |_| {
                 error_control
                     .stream_error_count
                     .fetch_add(1, Ordering::Relaxed);
+                error_control.set_state(PlaybackState::Error);
             },
             None,
         )
@@ -661,6 +727,24 @@ mod tests {
 
     fn temp_fixture_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn playback_control_state_transitions_are_explicit() {
+        let control = super::PlaybackControl::default();
+        assert_eq!(control.state(), super::PlaybackState::Ready);
+
+        control.set_state(super::PlaybackState::Playing);
+        assert_eq!(control.state(), super::PlaybackState::Playing);
+
+        control.set_state(super::PlaybackState::Paused);
+        assert_eq!(control.state(), super::PlaybackState::Paused);
+
+        control.set_state(super::PlaybackState::Ended);
+        assert_eq!(control.state(), super::PlaybackState::Ended);
+
+        control.set_state(super::PlaybackState::Error);
+        assert_eq!(control.state(), super::PlaybackState::Error);
     }
 
     #[test]
