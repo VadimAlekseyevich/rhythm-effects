@@ -241,12 +241,8 @@ impl ApplicationHandler for RhythmApp {
                         }
                     } else if !control && !shift && !alt && !super_key {
                         match code {
-                            KeyCode::BracketLeft => {
-                                self.session.change_authoring_division(false)
-                            }
-                            KeyCode::BracketRight => {
-                                self.session.change_authoring_division(true)
-                            }
+                            KeyCode::BracketLeft => self.session.change_authoring_division(false),
+                            KeyCode::BracketRight => self.session.change_authoring_division(true),
                             _ => false,
                         }
                     } else {

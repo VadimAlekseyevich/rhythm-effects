@@ -130,11 +130,7 @@ pub fn draw_timeline(
             } else {
                 scroll_delta.y
             };
-            session.pan_timeline_points(
-                project_duration,
-                horizontal_delta,
-                ruler_rect.width(),
-            );
+            session.pan_timeline_points(project_duration, horizontal_delta, ruler_rect.width());
         }
     }
 
@@ -146,11 +142,7 @@ pub fn draw_timeline(
         0.0
     };
     if middle_drag_delta.abs() > f32::EPSILON {
-        session.pan_timeline_points(
-            project_duration,
-            middle_drag_delta,
-            ruler_rect.width(),
-        );
+        session.pan_timeline_points(project_duration, middle_drag_delta, ruler_rect.width());
     }
 
     (start_time, end_time) = session.timeline_range(project_duration);
@@ -636,8 +628,7 @@ mod tests {
     #[test]
     fn unset_tempo_has_no_musical_grid() {
         let tempo = TempoMap::unset(GridOffsetNs::new(0));
-        let rect =
-            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 100.0));
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 100.0));
         let transform = TimelineTransform::new(
             rect,
             ProjectTimeNs::new(0),
@@ -692,8 +683,7 @@ mod tests {
             frames_per_peak: 256,
             peaks: &peaks,
         };
-        let rect =
-            egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
         let transform = TimelineTransform::new(
             rect,
             ProjectTimeNs::new(256_000_000),

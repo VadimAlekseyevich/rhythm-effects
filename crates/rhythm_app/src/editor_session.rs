@@ -119,10 +119,7 @@ impl EditorSession {
     }
 
     #[must_use]
-    pub fn timeline_range(
-        &self,
-        duration: DurationNs,
-    ) -> (ProjectTimeNs, ProjectTimeNs) {
+    pub fn timeline_range(&self, duration: DurationNs) -> (ProjectTimeNs, ProjectTimeNs) {
         let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
         let Some(view) = self.timeline_view else {
             return (ProjectTimeNs::new(0), ProjectTimeNs::new(duration_ns));
@@ -191,14 +188,17 @@ impl EditorSession {
             return false;
         }
 
-        let delta_ns =
-            (-(f64::from(content_delta_points)) / f64::from(viewport_width_points) * span as f64)
-                .round() as i64;
+        let delta_ns = (-(f64::from(content_delta_points)) / f64::from(viewport_width_points)
+            * span as f64)
+            .round() as i64;
         if delta_ns == 0 {
             return false;
         }
 
-        let new_start = start.get().saturating_add(delta_ns).clamp(0, duration_ns - span);
+        let new_start = start
+            .get()
+            .saturating_add(delta_ns)
+            .clamp(0, duration_ns - span);
         if new_start == start.get() {
             return false;
         }
@@ -220,7 +220,9 @@ impl EditorSession {
         };
 
         let next_index = if finer {
-            index.checked_add(1).filter(|next| *next < MVP_BEAT_DIVISIONS.len())
+            index
+                .checked_add(1)
+                .filter(|next| *next < MVP_BEAT_DIVISIONS.len())
         } else {
             index.checked_sub(1)
         };
@@ -291,11 +293,7 @@ mod tests {
         let duration = DurationNs::new(10_000_000_000);
         let mut session = EditorSession::default();
 
-        assert!(session.zoom_timeline(
-            duration,
-            ProjectTimeNs::new(5_000_000_000),
-            2.0,
-        ));
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(5_000_000_000), 2.0,));
         assert_eq!(
             session.timeline_range(duration),
             (
@@ -309,11 +307,7 @@ mod tests {
     fn timeline_pan_uses_content_motion_and_clamps_to_project() {
         let duration = DurationNs::new(10_000_000_000);
         let mut session = EditorSession::default();
-        assert!(session.zoom_timeline(
-            duration,
-            ProjectTimeNs::new(5_000_000_000),
-            2.0,
-        ));
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(5_000_000_000), 2.0,));
 
         assert!(session.pan_timeline_points(duration, -100.0, 1_000.0));
         assert_eq!(
@@ -327,10 +321,7 @@ mod tests {
         assert!(session.pan_timeline_points(duration, 10_000.0, 1_000.0));
         assert_eq!(
             session.timeline_range(duration),
-            (
-                ProjectTimeNs::new(0),
-                ProjectTimeNs::new(5_000_000_000),
-            )
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000),)
         );
     }
 
