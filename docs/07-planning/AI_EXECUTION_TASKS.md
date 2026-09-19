@@ -154,7 +154,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-125** — Render beat lines with medium visual priority.
 - [x] **AI-126** — Render subdivision lines for the current BeatDivision.
 - [x] **AI-127** — Hide labels before grid lines become visually overcrowded.
-- [ ] **AI-128** — Implement continuous playhead ruler click/drag seek.
+- [x] **AI-128** — Implement continuous playhead ruler click/drag seek.
 - [ ] **AI-129** — Implement Left/Right current-grid playhead stepping.
 - [ ] **AI-130** — Implement Ctrl+Left/Right one-beat stepping.
 - [ ] **AI-131** — Implement Ctrl+Shift+Left/Right one-bar stepping.

@@ -85,7 +85,7 @@ struct MusicalGridLine {
 
 pub fn draw_timeline(
     ui: &mut egui::Ui,
-    session: &EditorSession,
+    session: &mut EditorSession,
     tempo_map: &TempoMap,
     project_duration: DurationNs,
     waveform: Option<&WaveformData>,
@@ -96,9 +96,9 @@ pub fn draw_timeline(
     let start_time = ProjectTimeNs::new(0);
     let end_time = ProjectTimeNs::new(duration_ns);
 
-    let (ruler_rect, _ruler_response) = ui.allocate_exact_size(
+    let (ruler_rect, ruler_response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), RULER_ROW_HEIGHT),
-        egui::Sense::hover(),
+        egui::Sense::click_and_drag(),
     );
     let (waveform_rect, _waveform_response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), WAVEFORM_ROW_HEIGHT),
@@ -112,6 +112,12 @@ pub fn draw_timeline(
     else {
         return;
     };
+
+    if (ruler_response.clicked() || ruler_response.dragged())
+        && let Some(pointer) = ruler_response.interact_pointer_pos()
+    {
+        session.seek_paused(ruler_transform.x_to_project_time(pointer.x));
+    }
 
     draw_waveform(ui, waveform_rect, waveform_transform, waveform);
 
@@ -127,6 +133,27 @@ pub fn draw_timeline(
         session.authoring_division(),
     );
     draw_time_ruler(ui, ruler_rect, ruler_transform);
+    draw_playhead(ui, grid_rect, ruler_transform, session.playhead());
+}
+
+fn draw_playhead(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    transform: TimelineTransform,
+    playhead: ProjectTimeNs,
+) {
+    let x = transform.project_time_to_x(playhead);
+    if x < rect.left() || x > rect.right() {
+        return;
+    }
+
+    let color = ui.visuals().selection.stroke.color;
+    ui.painter().line_segment(
+        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
+        egui::Stroke::new(2.0, color),
+    );
+    ui.painter()
+        .circle_filled(egui::pos2(x, rect.top() + 4.0), 4.0, color);
 }
 
 fn draw_time_ruler(ui: &egui::Ui, rect: egui::Rect, transform: TimelineTransform) {
@@ -478,6 +505,22 @@ mod tests {
         BeatDivision, BpmMicros, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
     };
     use rhythm_engine::waveform::{WavePeak, WaveformSlice};
+
+    #[test]
+    fn ruler_midpoint_maps_to_continuous_project_time() {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1_000.0, 28.0));
+        let transform = TimelineTransform::new(
+            rect,
+            ProjectTimeNs::new(0),
+            ProjectTimeNs::new(10_000_000_000),
+        )
+        .expect("transform");
+
+        assert_eq!(
+            transform.x_to_project_time(333.3),
+            ProjectTimeNs::new(3_333_000_122)
+        );
+    }
 
     #[test]
     fn timeline_transform_round_trips_project_time_and_x() {
