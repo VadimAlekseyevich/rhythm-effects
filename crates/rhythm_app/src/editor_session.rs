@@ -1,6 +1,8 @@
-use rhythm_core::time::{
+use std::collections::HashSet;
+
+use rhythm_core::{ids::KeyframeId, time::{
     BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
-};
+}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreviewQuality {
@@ -37,6 +39,7 @@ pub struct EditorSession {
     playhead: ProjectTimeNs,
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
+    selected_keyframes: HashSet<KeyframeId>,
 }
 
 impl Default for EditorSession {
@@ -46,6 +49,7 @@ impl Default for EditorSession {
             playhead: ProjectTimeNs::new(0),
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
+            selected_keyframes: HashSet::new(),
         }
     }
 }
@@ -63,6 +67,31 @@ impl EditorSession {
     #[must_use]
     pub const fn authoring_division(&self) -> BeatDivision {
         self.authoring_division
+    }
+
+    #[must_use]
+    pub fn is_keyframe_selected(&self, keyframe_id: KeyframeId) -> bool {
+        self.selected_keyframes.contains(&keyframe_id)
+    }
+
+    #[must_use]
+    pub fn selected_keyframe_count(&self) -> usize {
+        self.selected_keyframes.len()
+    }
+
+    pub fn select_only_keyframe(&mut self, keyframe_id: KeyframeId) {
+        self.selected_keyframes.clear();
+        self.selected_keyframes.insert(keyframe_id);
+    }
+
+    pub fn toggle_keyframe_selection(&mut self, keyframe_id: KeyframeId) {
+        if !self.selected_keyframes.remove(&keyframe_id) {
+            self.selected_keyframes.insert(keyframe_id);
+        }
+    }
+
+    pub fn clear_keyframe_selection(&mut self) {
+        self.selected_keyframes.clear();
     }
 
     pub const fn set_authoring_division(&mut self, division: BeatDivision) {
@@ -286,6 +315,30 @@ mod tests {
             BpmMicros::new(120_000_000).expect("BPM"),
             TimeSignature::default(),
         )
+    }
+
+    #[test]
+    fn single_and_ctrl_toggle_keyframe_selection_use_stable_ids() {
+        let first = rhythm_core::ids::KeyframeId::new(11).expect("key id");
+        let second = rhythm_core::ids::KeyframeId::new(12).expect("key id");
+        let mut session = EditorSession::default();
+
+        session.select_only_keyframe(first);
+        assert!(session.is_keyframe_selected(first));
+        assert_eq!(session.selected_keyframe_count(), 1);
+
+        session.select_only_keyframe(second);
+        assert!(!session.is_keyframe_selected(first));
+        assert!(session.is_keyframe_selected(second));
+
+        session.toggle_keyframe_selection(first);
+        assert!(session.is_keyframe_selected(first));
+        assert!(session.is_keyframe_selected(second));
+        assert_eq!(session.selected_keyframe_count(), 2);
+
+        session.toggle_keyframe_selection(second);
+        assert!(!session.is_keyframe_selected(second));
+        assert_eq!(session.selected_keyframe_count(), 1);
     }
 
     #[test]

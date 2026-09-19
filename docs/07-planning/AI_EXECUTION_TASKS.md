@@ -171,8 +171,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 ## M6 — Keyframe timeline editing
 
 - [x] **AI-141** — Render keyframe diamonds with at least 18x18 logical hit boxes.
-- [ ] **AI-142** — Implement single keyframe selection by stable KeyframeId.
-- [ ] **AI-143** — Implement Ctrl-click keyframe toggle selection.
+- [x] **AI-142** — Implement single keyframe selection by stable KeyframeId.
+- [x] **AI-143** — Implement Ctrl-click keyframe toggle selection.
 - [ ] **AI-144** — Implement empty-canvas box selection.
 - [ ] **AI-145** — Implement Ctrl box-add/toggle selection semantics.
 - [ ] **AI-146** — Implement K on a static focused property to create the first key at nearest grid and move playhead there.

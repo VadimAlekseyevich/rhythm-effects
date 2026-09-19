@@ -684,7 +684,14 @@ pub fn draw_timeline(
         draw_empty_state_label(ui, ruler_rect, "Set BPM to enable rhythm grid");
     }
     draw_playhead(ui, grid_rect, ruler_transform, session.playhead());
-    draw_timeline_rows(ui, &rows, project, tempo_map, ruler_transform);
+    draw_timeline_rows(
+        ui,
+        session,
+        &rows,
+        project,
+        tempo_map,
+        ruler_transform,
+    );
 }
 
 fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {
@@ -699,6 +706,7 @@ fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {
 
 fn draw_timeline_rows(
     ui: &mut egui::Ui,
+    session: &mut EditorSession,
     rows: &[TimelineRow<'_>],
     project: &Project,
     tempo_map: &TempoMap,
@@ -780,9 +788,18 @@ fn draw_timeline_rows(
                                     egui::Id::new(("timeline_keyframe", keyframe.id.get())),
                                     egui::Sense::click_and_drag(),
                                 );
+                                if response.clicked() {
+                                    let ctrl = ui.input(|input| input.modifiers.ctrl);
+                                    if ctrl {
+                                        session.toggle_keyframe_selection(keyframe.id);
+                                    } else {
+                                        session.select_only_keyframe(keyframe.id);
+                                    }
+                                }
                                 draw_keyframe_diamond(
                                     ui,
                                     center,
+                                    session.is_keyframe_selected(keyframe.id),
                                     response.hovered(),
                                     color,
                                 );
@@ -842,11 +859,14 @@ fn keyframe_hit_rect(center: egui::Pos2) -> egui::Rect {
 fn draw_keyframe_diamond(
     ui: &egui::Ui,
     center: egui::Pos2,
+    selected: bool,
     hovered: bool,
     base_color: egui::Color32,
 ) {
-    let radius = if hovered { 5.5 } else { 4.5 };
-    let color = if hovered {
+    let radius = if selected || hovered { 5.5 } else { 4.5 };
+    let color = if selected {
+        ui.visuals().selection.bg_fill
+    } else if hovered {
         ui.visuals().selection.stroke.color
     } else {
         base_color
