@@ -83,6 +83,53 @@ pub enum BpmError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeSignatureError {
+    ZeroNumerator,
+    ZeroDenominator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TimeSignature {
+    numerator: u8,
+    denominator: u8,
+}
+
+impl TimeSignature {
+    pub const fn new(numerator: u8, denominator: u8) -> Result<Self, TimeSignatureError> {
+        if numerator == 0 {
+            return Err(TimeSignatureError::ZeroNumerator);
+        }
+        if denominator == 0 {
+            return Err(TimeSignatureError::ZeroDenominator);
+        }
+
+        Ok(Self {
+            numerator,
+            denominator,
+        })
+    }
+
+    #[must_use]
+    pub const fn numerator(self) -> u8 {
+        self.numerator
+    }
+
+    #[must_use]
+    pub const fn denominator(self) -> u8 {
+        self.denominator
+    }
+}
+
+impl Default for TimeSignature {
+    fn default() -> Self {
+        Self {
+            numerator: 4,
+            denominator: 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameRateError {
     ZeroNumerator,
     ZeroDenominator,
@@ -209,6 +256,21 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn time_signature_defaults_to_four_four() {
+        let meter = super::TimeSignature::default();
+        assert_eq!(meter.numerator(), 4);
+        assert_eq!(meter.denominator(), 4);
+        assert_eq!(
+            super::TimeSignature::new(0, 4),
+            Err(super::TimeSignatureError::ZeroNumerator)
+        );
+        assert_eq!(
+            super::TimeSignature::new(4, 0),
+            Err(super::TimeSignatureError::ZeroDenominator)
+        );
+    }
 
     #[test]
     fn frame_rate_normalizes_positive_rationals() {
