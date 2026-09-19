@@ -80,20 +80,30 @@ impl Project {
 
         for object in &self.composition.objects {
             register_entity_id(object.id.get(), &mut seen_ids, &mut max_entity_id)?;
-            validate_transform(&object.transform)?;
+            validate_transform(&object.transform, &mut seen_ids, &mut max_entity_id)?;
 
             match &object.content {
-                ObjectContent::Rectangle(rectangle) => validate_rectangle(rectangle)?,
-                ObjectContent::Ellipse(ellipse) => validate_ellipse(ellipse)?,
+                ObjectContent::Rectangle(rectangle) => {
+                    validate_rectangle(rectangle, &mut seen_ids, &mut max_entity_id)?;
+                }
+                ObjectContent::Ellipse(ellipse) => {
+                    validate_ellipse(ellipse, &mut seen_ids, &mut max_entity_id)?;
+                }
                 ObjectContent::Image(image) => {
                     validate_asset_reference(image.asset, AssetKind::Image, &asset_kinds)?;
                 }
-                ObjectContent::Text(text) => validate_text(text)?,
+                ObjectContent::Text(text) => {
+                    validate_text(text, &mut seen_ids, &mut max_entity_id)?;
+                }
             }
 
             for effect in &object.effects {
                 register_entity_id(effect.id.get(), &mut seen_ids, &mut max_entity_id)?;
-                validate_effect(&effect.kind)?;
+                validate_effect(
+                    &effect.kind,
+                    &mut seen_ids,
+                    &mut max_entity_id,
+                )?;
             }
         }
 
@@ -171,32 +181,47 @@ fn validate_asset_reference(
     Ok(())
 }
 
-fn validate_transform(transform: &TransformAnimation) -> Result<(), ProjectValidationError> {
-    validate_finite(
-        *transform.rotation_degrees.base_value(),
-        "transform.rotation_degrees",
-    )?;
-    validate_finite(*transform.opacity.base_value(), "transform.opacity")?;
-    validate_range(
-        *transform.opacity.base_value(),
-        0.0,
-        1.0,
-        "transform.opacity",
-    )
+fn validate_transform(
+    transform: &TransformAnimation,
+    seen_ids: &mut HashSet<u64>,
+    max_entity_id: &mut u64,
+) -> Result<(), ProjectValidationError> {
+    register_animated_ids(&transform.position, seen_ids, max_entity_id)?;
+    register_animated_ids(&transform.scale, seen_ids, max_entity_id)?;
+    register_animated_ids(&transform.rotation_degrees, seen_ids, max_entity_id)?;
+    register_animated_ids(&transform.anchor, seen_ids, max_entity_id)?;
+    register_animated_ids(&transform.opacity, seen_ids, max_entity_id)?;
+
+    validate_animated_finite(&transform.rotation_degrees, "transform.rotation_degrees")?;
+    validate_animated_range(&transform.opacity, 0.0, 1.0, "transform.opacity")
 }
 
-fn validate_rectangle(rectangle: &RectangleObject) -> Result<(), ProjectValidationError> {
-    validate_finite(
-        *rectangle.corner_radius.base_value(),
-        "rectangle.corner_radius",
-    )
+fn validate_rectangle(
+    rectangle: &RectangleObject,
+    seen_ids: &mut HashSet<u64>,
+    max_entity_id: &mut u64,
+) -> Result<(), ProjectValidationError> {
+    register_animated_ids(&rectangle.size, seen_ids, max_entity_id)?;
+    register_animated_ids(&rectangle.fill, seen_ids, max_entity_id)?;
+    register_animated_ids(&rectangle.corner_radius, seen_ids, max_entity_id)?;
+    validate_animated_finite(&rectangle.corner_radius, "rectangle.corner_radius")
 }
 
-fn validate_ellipse(_ellipse: &EllipseObject) -> Result<(), ProjectValidationError> {
-    Ok(())
+fn validate_ellipse(
+    ellipse: &EllipseObject,
+    seen_ids: &mut HashSet<u64>,
+    max_entity_id: &mut u64,
+) -> Result<(), ProjectValidationError> {
+    register_animated_ids(&ellipse.size, seen_ids, max_entity_id)?;
+    register_animated_ids(&ellipse.fill, seen_ids, max_entity_id)
 }
 
-fn validate_text(text: &TextObject) -> Result<(), ProjectValidationError> {
+fn validate_text(
+    text: &TextObject,
+    seen_ids: &mut HashSet<u64>,
+    max_entity_id: &mut u64,
+) -> Result<(), ProjectValidationError> {
+    register_animated_ids(&text.color, seen_ids, max_entity_id)?;
     validate_finite(text.font_size, "text.font_size")?;
     if text.font_size <= 0.0 {
         return Err(ProjectValidationError::ValueOutOfRange("text.font_size"));
@@ -204,29 +229,80 @@ fn validate_text(text: &TextObject) -> Result<(), ProjectValidationError> {
     Ok(())
 }
 
-fn validate_effect(effect: &EffectKind) -> Result<(), ProjectValidationError> {
+fn validate_effect(
+    effect: &EffectKind,
+    seen_ids: &mut HashSet<u64>,
+    max_entity_id: &mut u64,
+) -> Result<(), ProjectValidationError> {
     match effect {
         EffectKind::Blur(blur) => {
-            validate_range(*blur.radius_px.base_value(), 0.0, 128.0, "blur.radius_px")
+            register_animated_ids(&blur.radius_px, seen_ids, max_entity_id)?;
+            validate_animated_range(&blur.radius_px, 0.0, 128.0, "blur.radius_px")
         }
         EffectKind::Glow(glow) => {
-            validate_range(*glow.radius_px.base_value(), 0.0, 128.0, "glow.radius_px")?;
-            validate_range(*glow.intensity.base_value(), 0.0, 4.0, "glow.intensity")?;
-            validate_range(*glow.threshold.base_value(), 0.0, 1.0, "glow.threshold")
+            register_animated_ids(&glow.radius_px, seen_ids, max_entity_id)?;
+            register_animated_ids(&glow.intensity, seen_ids, max_entity_id)?;
+            register_animated_ids(&glow.threshold, seen_ids, max_entity_id)?;
+            register_animated_ids(&glow.color, seen_ids, max_entity_id)?;
+            validate_animated_range(&glow.radius_px, 0.0, 128.0, "glow.radius_px")?;
+            validate_animated_range(&glow.intensity, 0.0, 4.0, "glow.intensity")?;
+            validate_animated_range(&glow.threshold, 0.0, 1.0, "glow.threshold")
         }
         EffectKind::Tint(tint) => {
-            validate_range(*tint.amount.base_value(), 0.0, 1.0, "tint.amount")
+            register_animated_ids(&tint.color, seen_ids, max_entity_id)?;
+            register_animated_ids(&tint.amount, seen_ids, max_entity_id)?;
+            validate_animated_range(&tint.amount, 0.0, 1.0, "tint.amount")
         }
         EffectKind::Noise(noise) => {
-            validate_range(*noise.amount.base_value(), 0.0, 1.0, "noise.amount")?;
-            validate_range(*noise.size_px.base_value(), 1.0, 256.0, "noise.size_px")?;
-            validate_finite(*noise.evolution.base_value(), "noise.evolution")
+            register_animated_ids(&noise.amount, seen_ids, max_entity_id)?;
+            register_animated_ids(&noise.size_px, seen_ids, max_entity_id)?;
+            register_animated_ids(&noise.evolution, seen_ids, max_entity_id)?;
+            validate_animated_range(&noise.amount, 0.0, 1.0, "noise.amount")?;
+            validate_animated_range(&noise.size_px, 1.0, 256.0, "noise.size_px")?;
+            validate_animated_finite(&noise.evolution, "noise.evolution")
         }
         EffectKind::RgbSplit(split) => {
-            validate_range(*split.amount_px.base_value(), 0.0, 64.0, "rgb_split.amount_px")?;
-            validate_finite(*split.angle_degrees.base_value(), "rgb_split.angle_degrees")
+            register_animated_ids(&split.amount_px, seen_ids, max_entity_id)?;
+            register_animated_ids(&split.angle_degrees, seen_ids, max_entity_id)?;
+            validate_animated_range(&split.amount_px, 0.0, 64.0, "rgb_split.amount_px")?;
+            validate_animated_finite(&split.angle_degrees, "rgb_split.angle_degrees")
         }
     }
+}
+
+fn register_animated_ids<T>(
+    animated: &Animated<T>,
+    seen_ids: &mut HashSet<u64>,
+    max_entity_id: &mut u64,
+) -> Result<(), ProjectValidationError> {
+    for keyframe in animated.keyframes() {
+        register_entity_id(keyframe.id.get(), seen_ids, max_entity_id)?;
+    }
+    Ok(())
+}
+
+fn validate_animated_finite(
+    animated: &Animated<f32>,
+    field: &'static str,
+) -> Result<(), ProjectValidationError> {
+    validate_finite(*animated.base_value(), field)?;
+    for keyframe in animated.keyframes() {
+        validate_finite(keyframe.value, field)?;
+    }
+    Ok(())
+}
+
+fn validate_animated_range(
+    animated: &Animated<f32>,
+    min: f32,
+    max: f32,
+    field: &'static str,
+) -> Result<(), ProjectValidationError> {
+    validate_range(*animated.base_value(), min, max, field)?;
+    for keyframe in animated.keyframes() {
+        validate_range(keyframe.value, min, max, field)?;
+    }
+    Ok(())
 }
 
 fn validate_finite(value: f32, field: &'static str) -> Result<(), ProjectValidationError> {
@@ -641,6 +717,46 @@ mod tests {
             Err(ProjectValidationError::ValueOutOfRange(
                 "transform.opacity"
             ))
+        );
+    }
+
+    #[test]
+    fn validation_registers_keyframe_ids_and_values() {
+        let mut project = Project::new(
+            "Untitled",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut object = rectangle_object(1);
+        object.transform.opacity = Animated::with_keyframes(
+            1.0,
+            vec![crate::animation::Keyframe::new(
+                crate::ids::KeyframeId::new(2).expect("keyframe id"),
+                crate::time::MusicalTick::new(240),
+                0.5,
+                crate::animation::Interpolation::Linear,
+            )],
+        )
+        .expect("unique keyframe tick");
+        project.composition.objects.push(object);
+        project.next_entity_id = 3;
+
+        assert_eq!(project.validate(), Ok(()));
+
+        project.composition.objects[0].transform.opacity = Animated::with_keyframes(
+            1.0,
+            vec![crate::animation::Keyframe::new(
+                crate::ids::KeyframeId::new(2).expect("keyframe id"),
+                crate::time::MusicalTick::new(240),
+                f32::NAN,
+                crate::animation::Interpolation::Linear,
+            )],
+        )
+        .expect("unique keyframe tick");
+
+        assert_eq!(
+            project.validate(),
+            Err(ProjectValidationError::NonFiniteValue("transform.opacity"))
         );
     }
 
