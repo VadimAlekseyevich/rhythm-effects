@@ -1,33 +1,29 @@
 # Animation Engine
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> The animation engine evaluates user-authored musical keyframes into continuous visual values. It is independent from editor widgets, GPU state, and audio backend details.
+> The animation engine evaluates musical keyframes into continuous values. It is independent from editor widgets, GPU state, and audio backend details.
 
 ## 1. Responsibilities
 
-The animation engine owns:
+The engine owns:
 
-- animated property representation;
+- Animated value representation;
 - keyframe ordering and lookup;
-- interpolation/easing;
-- evaluation at arbitrary continuous time;
-- deterministic behavior used by preview and export.
+- interpolation and easing;
+- deterministic evaluation at arbitrary project time;
+- scene-value evaluation shared by preview and export.
 
-It does not own:
+It does not own playback, timeline UI, project mutation history, or GPU rendering.
 
-- playback;
-- timeline UI;
-- project mutation history;
-- GPU rendering.
-
----
-
-## 2. Canonical keyframe time
-
-Keyframes are stored at MusicalTick positions.
+## 2. Canonical property model
 
 ~~~rust
+struct Animated<T> {
+    base_value: T,
+    keyframes: Vec<Keyframe<T>>,
+}
+
 struct Keyframe<T> {
     id: KeyframeId,
     tick: MusicalTick,
@@ -36,103 +32,95 @@ struct Keyframe<T> {
 }
 ~~~
 
-Invariant:
+Invariants:
 
-- keyframes sorted by tick;
-- no duplicate tick per property;
-- tick is integer musical time;
-- no raw seconds stored as keyframe identity.
+- keyframes sorted by MusicalTick;
+- no duplicate tick within one property;
+- every keyframe has stable KeyframeId;
+- keyframe identity is integer musical time;
+- persisted values are finite and valid.
 
----
+## 3. Supported MVP value classes
 
-## 3. Animated property
-
-~~~rust
-struct Animated<T> {
-    base_value: T,
-    keyframes: Vec<Keyframe<T>>,
-}
-~~~
-
-MVP property types:
+Core interpolation support:
 
 - scalar f32;
 - Vec2;
-- Color;
-- possibly discrete enum/bool values with Hold semantics.
+- LinearRgba;
+- discrete values through Hold semantics.
 
-Do not create one animation system per object type.
-
----
+Object and effect properties compose these value classes.
 
 ## 4. Evaluation input
 
-Evaluation accepts continuous project time.
-
-Flow:
+Input is ProjectTimeNs.
 
 ~~~text
-ProjectTime
-→ TempoMap
-→ continuous musical tick position
-→ surrounding authored keyframes
-→ interpolation
-→ value
+ProjectTimeNs
+-> TempoMap
+-> continuous musical position
+-> surrounding keyframes
+-> segment interpolation
+-> value
 ~~~
 
-The evaluator may represent the continuous tick coordinate as f64 internally, but persisted keyframe positions remain integers.
-
----
+Persistent keyframe positions remain integer ticks.
 
 ## 5. Lookup
 
-For sorted keyframes:
+Evaluation behavior:
 
-- zero keys: return base_value;
-- one key: return key value according to before/after policy;
-- multiple keys: binary-search surrounding pair.
+- zero keyframes: base_value;
+- one keyframe: that keyframe value;
+- multiple keyframes: binary search surrounding segment.
 
-Use binary search rather than scanning from start every frame.
+Do not scan from the beginning every frame.
 
-Future optimization may cache last segment during forward playback, but correctness must not depend on monotonic time because scrubbing seeks arbitrarily.
+Playback-only segment caches are allowed later, but arbitrary seek order must always remain correct.
 
----
+## 6. Range behavior
 
-## 6. Before-first and after-last behavior
-
-MVP proposal:
-
-- before first keyframe: hold first keyframe value;
-- after last keyframe: hold last keyframe value;
-- no keyframes: use base_value.
-
-This is predictable and matches common animation expectations.
-
-Changing this later would affect project semantics, so finalize before Accepted status.
-
----
-
-## 7. Segment progress
-
-For keyframes A and B:
+Accepted behavior:
 
 ~~~text
-u = (current_musical_tick - A.tick) / (B.tick - A.tick)
+before first keyframe -> first keyframe value
+exactly on keyframe  -> exact stored value
+after last keyframe  -> last keyframe value
 ~~~
 
-Clamp u to 0..1 for segment evaluation.
+Once keyframes exist, base_value no longer defines out-of-range curve output.
 
-Important: progress is defined in **musical space**.
+## 7. Segment ownership
 
-This preserves the meaning of "halfway between beat 1 and beat 2" even if future tempo changes alter real-time duration.
+For adjacent keyframes A and B:
 
-At constant BPM, musical-space and absolute-time progress are equivalent.
+~~~text
+A.interpolation
+~~~
 
----
+defines the transition from A to B.
 
-## 8. Interpolation enum
+B.interpolation defines B to the next keyframe.
 
-Concept:
+The final keyframe may still store interpolation metadata even though it has no outgoing visible segment.
+
+## 8. Musical progress
+
+For A.tick < B.tick:
+
+~~~text
+u =
+    (continuous_tick - A.tick)
+    / (B.tick - A.tick)
+~~~
+
+Clamp u to [0,1].
+
+Progress is measured in musical space.
+
+This is intentional: future tempo changes preserve animation timing relative to beats rather than silently switching to absolute-time semantics.
+
+## 9. Interpolation types
 
 ~~~rust
 enum Interpolation {
@@ -142,303 +130,228 @@ enum Interpolation {
 }
 ~~~
 
-Preset easing is stored as canonical Bezier parameters or mapped to them.
+UI presets such as Ease In, Ease Out, and Ease In-Out resolve to canonical Bezier parameters.
 
-UI presets:
+## 10. Hold
 
-- Linear;
-- Ease In;
-- Ease Out;
-- Ease In-Out.
-
-Do not store preset names if they can be represented by stable curve parameters unless product semantics require preserving preset identity.
-
----
-
-## 9. Hold
-
-For A→B with Hold:
+For A to B:
 
 ~~~text
-value(t) = A.value for t < B.tick
-value(B.tick) = B.value
+time before B -> A.value
+time at B     -> B.value
 ~~~
 
-This is useful for beat-synchronized cuts/flashes.
+Hold is a first-class rhythm effect for cuts, flashes, and state changes.
 
----
-
-## 10. Linear
+## 11. Linear
 
 Scalar:
 
 ~~~text
-lerp(a, b, u)
+a + (b - a) * u
 ~~~
 
 Vec2:
 
+- interpolate each component.
+
+LinearRgba:
+
+- interpolate RGB components in linear-light representation;
+- interpolate alpha linearly.
+
+Do not interpolate user-facing sRGB bytes directly.
+
+## 12. Cubic Bezier timing
+
+Bezier changes timing progress, not spatial geometry.
+
+Control points:
+
 ~~~text
-lerp each component
+P0 = (0,0)
+P1 = (x1,y1)
+P2 = (x2,y2)
+P3 = (1,1)
 ~~~
 
-Color interpolation must use the project's defined working color representation, not UI color types.
+Input is linear progress u.
 
----
-
-## 11. Cubic Bezier easing
-
-Bezier easing maps linear segment progress u to eased progress e(u).
-
-The curve is a timing curve, not an arbitrary spatial value curve in MVP.
-
-Conceptual control points:
-
-~~~text
-(0,0), (x1,y1), (x2,y2), (1,1)
-~~~
-
-Need a robust solver for x→y mapping.
+The solver maps x progress to eased y progress e, then property interpolation uses e.
 
 Requirements:
 
 - deterministic;
-- bounded input;
-- no NaN;
-- handles degenerate but valid curves;
-- tested against known presets.
+- finite;
+- robust near 0 and 1;
+- tested against known presets;
+- no NaN output.
 
----
+For normal timing curves, x handles stay in [0,1].
 
-## 12. Rotation interpolation
+## 13. Rotation
 
-MVP simplest rule:
+Rotation is scalar degrees.
 
-- rotation stored as scalar degrees;
-- interpolate numeric value directly;
-- do not automatically choose shortest angular path.
-
-Reason: motion designers may intentionally animate multiple rotations (e.g. 0°→720°).
-
----
-
-## 13. Scale
-
-Recommended internal convention:
-
-~~~text
-1.0 = 100%
-~~~
-
-Inspector may display percent.
-
-Negative scale behavior should be either explicitly supported or clamped; decide before implementation.
-
----
-
-## 14. Opacity
-
-Internal convention:
-
-~~~text
-0.0 = transparent
-1.0 = opaque
-~~~
-
-Project mutation validates/clamps according to final UX policy.
-
-Renderer receives evaluated opacity.
-
----
-
-## 15. Colors
-
-Color animation should interpolate in one documented working space.
-
-For MVP, avoid complex perceptual interpolation modes.
-
-Renderer/color pipeline document determines exact space.
-
-The animation engine must not depend on wgpu texture formats.
-
----
-
-## 16. Discrete values
-
-Properties that should not interpolate use Hold/discrete semantics.
+No normalization and no automatic shortest path.
 
 Examples:
 
-- visibility if ever animated;
-- enum-like mode values.
+~~~text
+0 -> 360
+one complete turn
 
-Do not force every property through scalar interpolation.
-
----
-
-## 17. Evaluation result
-
-Renderer should not independently query keyframes.
-
-A scene evaluation stage resolves animation and produces render-facing values.
-
-Concept:
-
-~~~rust
-EvaluatedObject {
-    id,
-    transform,
-    content,
-    effects,
-}
+0 -> 720
+two complete turns
 ~~~
 
-This separates authoring model from render model.
+This preserves explicit motion-design intent.
 
----
+## 14. Scale
 
-## 18. Scene evaluation
+Scale follows DOMAIN_TYPES.md:
 
-Conceptual flow:
+- 1.0 = 100 percent;
+- negative values mirror;
+- interpolate component-wise.
+
+Crossing zero is valid.
+
+## 15. Opacity
+
+Opacity remains in [0,1].
+
+Project mutation and load validation reject invalid persisted values.
+
+## 16. Color
+
+Color is LinearRgba.
+
+Animation engine does not know about texture formats or UI color widgets.
+
+Boundary:
 
 ~~~text
-for visible object:
-    evaluate transform
-    evaluate content properties
-    evaluate effect properties
-    produce EvaluatedObject
+user-facing sRGB
+-> LinearRgba project value
+-> animation
+-> renderer
 ~~~
 
-At MVP scale, straightforward iteration is preferred.
+## 17. Discrete values
 
-Optimize only after profiling.
+Enum-like or boolean properties use Hold semantics.
 
----
+Do not force discrete data through scalar interpolation.
 
-## 19. Caching
+## 18. Identity vs position
 
-Potential safe caches:
-
-- last binary-search segment per property during monotonic playback;
-- precomputed Bezier curve coefficients;
-- static property detection.
-
-Rules:
-
-- cache is rebuildable;
-- scrubbing invalidates assumptions as needed;
-- cache never changes semantic output.
-
----
-
-## 20. Static properties
-
-An Animated<T> with zero keyframes is static.
-
-Renderer/evaluator may avoid repeated expensive processing for static content, especially:
-
-- text layout;
-- image fit geometry;
-- effect pipeline decisions.
-
-Do not prematurely create a generic reactive dependency graph.
-
----
-
-## 21. Keyframe IDs vs ticks
-
-KeyframeId is entity identity for selection/history.
+KeyframeId is entity identity.
 
 MusicalTick is temporal position.
 
-Do not use tick as unique entity ID because moving a keyframe would change its identity.
+Moving a keyframe changes its tick, not its ID.
 
----
+## 19. Collision invariant
 
-## 22. Editing collisions
+One Animated property cannot contain two keyframes at the same MusicalTick.
 
-Animation model enforces one keyframe per tick per property.
+Editor/command layer resolves collisions before a committed state reaches the evaluator.
 
-Collision policy belongs to editor/commands, but after any committed command the engine must see a valid sorted unique sequence.
+## 20. Scene evaluation
 
----
+Renderer does not query keyframes directly.
 
-## 23. Determinism
+~~~text
+Project + ProjectTimeNs
+-> evaluate transforms
+-> evaluate content properties
+-> evaluate effect parameters
+-> EvaluatedScene
+-> Renderer
+~~~
 
-Given:
+EvaluatedScene is derived runtime state and is never serialized.
 
-- same Project;
-- same evaluation ProjectTime;
-- same engine version/semantics;
+## 21. Determinism
 
-evaluation should return the same values independent of:
+Given the same Project, ProjectTimeNs, and engine semantics, output must be independent from:
 
 - editor FPS;
+- previous evaluation time;
 - playback history;
-- mouse position;
-- previous evaluation time.
+- mouse state;
+- whether playback is active.
 
-This is essential for export parity.
+This is required for scrubbing and export.
 
----
+## 22. Caching
 
-## 24. Precision
+Allowed optimizations:
 
-Use f64 for time-domain calculations.
+- last segment cursor;
+- precomputed Bezier coefficients;
+- static-property flags.
 
-Visual values can generally use f32.
+A cache must be rebuildable and must never change semantic output.
 
-Reason:
+## 23. Precision
 
-- long-duration time conversion benefits from f64;
-- GPU/render data naturally uses f32;
-- keyframe tick identity remains exact integer.
+- keyframe/time identity uses integer/fixed-point types;
+- interpolation progress may use f64;
+- visual values normally use f32;
+- never downcast project time to f32 before segment lookup.
 
-Do not convert project time to f32 early.
+## 24. Performance
 
----
+Normal evaluation should avoid:
 
-## 25. Error policy
+- heap allocation per property;
+- cloning keyframe arrays;
+- linear scans through long tracks;
+- full project validation every frame.
 
-Invalid project state should ideally be rejected before evaluation.
+Evaluation assumes the project has already passed validation.
 
-Evaluator should not panic on user-editable data.
+## 25. Required tests
 
-Examples:
+Lookup:
+- zero, one, multiple keyframes;
+- exact keyframe hit;
+- arbitrary seek order.
 
-- empty keys: valid;
-- duplicate ticks: validation error;
-- NaN property values: invalid project/edit state;
-- unknown future effect/object version: load/migration concern.
+Range:
+- before first;
+- after last.
 
----
+Interpolation:
+- Hold;
+- Linear scalar;
+- Vec2;
+- LinearRgba;
+- easing presets;
+- Bezier boundaries.
 
-## 26. Required tests
+Semantics:
+- outgoing key owns following segment;
+- 0 to 360 rotation spans full numeric range;
+- negative scale;
+- color midpoint in linear space;
+- duplicate tick is rejected before evaluation.
 
-- zero/one/multiple keyframes;
-- exact keyframe hit returns exact value;
-- before/after hold behavior;
-- linear interpolation midpoint;
-- musical-space interpolation;
-- Hold transition;
-- all easing presets;
-- Bezier edge cases;
-- rotation 0→720 preserves full rotation;
-- arbitrary seek order produces same results;
-- long tick ranges;
-- negative ticks if supported;
-- preview/export time inputs return identical evaluated scene.
+Determinism:
+- repeated same-time evaluation;
+- out-of-order evaluation;
+- preview/export callers receive identical scene values.
 
----
+## 26. Definition of Done
 
-## 27. Definition of Done
+The animation engine is implementation-ready when:
 
-MVP animation engine is ready when:
-
-- core types exist without UI/GPU dependencies;
-- keyframe lookup is tested;
-- Hold/Linear/preset easing work;
-- custom Bezier works if included;
-- scene evaluation handles all MVP object properties;
-- evaluation is deterministic;
-- renderer can consume evaluated values without reading editor state.
+- Animated and Keyframe types live in core;
+- sorting and uniqueness invariants are enforced;
+- range behavior is tested;
+- Hold, Linear, and Bezier timing work;
+- all MVP value classes work;
+- EvaluatedScene is produced without UI/GPU dependencies;
+- arbitrary seek evaluation is deterministic.
