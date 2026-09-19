@@ -14,7 +14,7 @@ Storing keyframes as arbitrary seconds and merely snapping the UI would make mus
 
 Persist keyframe position as integer MusicalTick.
 
-MVP PPQ proposal is 960 ticks per quarter note.
+MVP PPQ is 960 ticks per quarter note.
 
 Seconds, audio samples, and video frames are derived time domains.
 
