@@ -103,10 +103,10 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-080** — Implement HistoryEntry before/after payloads without whole-Project snapshots.
 - [x] **AI-081** — Implement undo/redo cursor and redo-branch truncation.
 - [x] **AI-082** — Implement begin/update/commit/cancel transaction support.
-- [ ] **AI-083** — Implement dirty/saved revision semantics.
-- [ ] **AI-084** — Implement the 500 logical history-entry capacity.
-- [ ] **AI-085** — Add tests proving one drag transaction becomes one undo entry.
-- [ ] **AI-086** — Add tests proving BPM and grid-offset edits preserve MusicalTick values.
+- [x] **AI-083** — Implement dirty/saved revision semantics.
+- [x] **AI-084** — Implement the 500 logical history-entry capacity.
+- [x] **AI-085** — Add tests proving one drag transaction becomes one undo entry.
+- [x] **AI-086** — Add tests proving BPM and grid-offset edits preserve MusicalTick values.
 
 ## M4 — Audio
 
