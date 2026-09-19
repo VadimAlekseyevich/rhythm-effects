@@ -158,6 +158,23 @@ impl TempoMap {
         self.segments.first().copied()
     }
 
+    pub fn continuous_tick_position(
+        &self,
+        project_time: ProjectTimeNs,
+    ) -> Result<f64, TimeConversionError> {
+        let segment = self
+            .initial_segment()
+            .ok_or(TimeConversionError::TempoUnavailable)?;
+
+        let delta_ns =
+            i128::from(project_time.get()) - i128::from(self.grid_offset.get());
+        let numerator =
+            delta_ns * i128::from(segment.bpm().get()) * i128::from(PPQ);
+        let denominator = 60_000_000_000_i128 * 1_000_000_i128;
+
+        Ok(numerator as f64 / denominator as f64)
+    }
+
     pub fn project_time_for_tick(
         &self,
         tick: MusicalTick,
@@ -366,6 +383,30 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn project_time_maps_to_continuous_tick_position_without_rounding() {
+        let bpm = BpmMicros::new(120_000_000).expect("valid BPM");
+        let map = super::TempoMap::with_initial_tempo(
+            GridOffsetNs::new(350_000_000),
+            bpm,
+            super::TimeSignature::default(),
+        );
+
+        let zero = map
+            .continuous_tick_position(ProjectTimeNs::new(350_000_000))
+            .expect("tempo available");
+        let beat = map
+            .continuous_tick_position(ProjectTimeNs::new(850_000_000))
+            .expect("tempo available");
+        let half_before = map
+            .continuous_tick_position(ProjectTimeNs::new(100_000_000))
+            .expect("tempo available");
+
+        assert_eq!(zero, 0.0);
+        assert_eq!(beat, 960.0);
+        assert_eq!(half_before, -480.0);
+    }
 
     #[test]
     fn tick_to_project_time_uses_exact_integer_math() {
