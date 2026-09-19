@@ -349,7 +349,10 @@ mod tests {
         assert_eq!(text.font.style, super::FontStyle::Italic);
         assert_eq!(text.font_size, 48.0);
         assert_eq!(text.alignment, super::TextAlignment::Center);
-        assert_eq!(*text.color.base_value(), crate::domain::LinearRgba::black_opaque());
+        assert_eq!(
+            *text.color.base_value(),
+            crate::domain::LinearRgba::black_opaque()
+        );
     }
 
     #[test]
@@ -403,7 +406,10 @@ mod tests {
         assert_eq!(settings.frame_rate.numerator(), 60);
         assert_eq!(settings.frame_rate.denominator(), 1);
         assert_eq!(settings.duration.get(), 10_000_000_000);
-        assert_eq!(settings.background, crate::domain::LinearRgba::black_opaque());
+        assert_eq!(
+            settings.background,
+            crate::domain::LinearRgba::black_opaque()
+        );
     }
 
     #[test]
