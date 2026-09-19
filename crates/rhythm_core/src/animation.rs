@@ -183,9 +183,7 @@ impl<T> Animated<T> {
         }
 
         self.keyframes
-            .binary_search_by(|keyframe| {
-                (keyframe.tick.get() as f64).total_cmp(&continuous_tick)
-            })
+            .binary_search_by(|keyframe| (keyframe.tick.get() as f64).total_cmp(&continuous_tick))
             .ok()
             .map(|index| &self.keyframes[index].value)
     }
@@ -245,9 +243,7 @@ pub fn interpolate_linear_vec2(from: Vec2, to: Vec2, progress: f64) -> Vec2 {
 
 fn cubic_bezier_coordinate(t: f64, p1: f64, p2: f64) -> f64 {
     let one_minus_t = 1.0 - t;
-    3.0 * one_minus_t * one_minus_t * t * p1
-        + 3.0 * one_minus_t * t * t * p2
-        + t * t * t
+    3.0 * one_minus_t * one_minus_t * t * p1 + 3.0 * one_minus_t * t * t * p2 + t * t * t
 }
 
 #[must_use]
@@ -274,8 +270,7 @@ pub fn evaluate_bezier_easing(easing: BezierEasing, progress: f64) -> f64 {
     }
 
     let t = (low + high) * 0.5;
-    cubic_bezier_coordinate(t, f64::from(easing.y1), f64::from(easing.y2))
-        .clamp(0.0, 1.0)
+    cubic_bezier_coordinate(t, f64::from(easing.y1), f64::from(easing.y2)).clamp(0.0, 1.0)
 }
 
 #[must_use]
