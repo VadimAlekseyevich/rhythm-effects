@@ -684,14 +684,7 @@ pub fn draw_timeline(
         draw_empty_state_label(ui, ruler_rect, "Set BPM to enable rhythm grid");
     }
     draw_playhead(ui, grid_rect, ruler_transform, session.playhead());
-    draw_timeline_rows(
-        ui,
-        session,
-        &rows,
-        project,
-        tempo_map,
-        ruler_transform,
-    );
+    draw_timeline_rows(ui, session, &rows, project, tempo_map, ruler_transform);
 }
 
 fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {

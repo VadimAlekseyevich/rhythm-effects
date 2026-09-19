@@ -1,8 +1,11 @@
 use std::collections::HashSet;
 
-use rhythm_core::{ids::KeyframeId, time::{
-    BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
-}};
+use rhythm_core::{
+    ids::KeyframeId,
+    time::{
+        BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
+    },
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreviewQuality {
