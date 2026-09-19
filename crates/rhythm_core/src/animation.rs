@@ -145,6 +145,11 @@ pub fn interpolate_linear_vec2(from: Vec2, to: Vec2, progress: f64) -> Vec2 {
 }
 
 #[must_use]
+pub fn interpolate_rotation_degrees(from: f32, to: f32, progress: f64) -> f32 {
+    interpolate_linear_f32(from, to, progress)
+}
+
+#[must_use]
 pub fn interpolate_linear_rgba(
     from: LinearRgba,
     to: LinearRgba,
@@ -180,6 +185,19 @@ mod tests {
             value,
             Interpolation::Linear,
         )
+    }
+
+    #[test]
+    fn rotation_interpolation_uses_direct_numeric_degrees() {
+        assert_eq!(super::interpolate_rotation_degrees(0.0, 360.0, 0.5), 180.0);
+        assert_eq!(
+            super::interpolate_rotation_degrees(350.0, 370.0, 0.5),
+            360.0
+        );
+        assert_eq!(
+            super::interpolate_rotation_degrees(10.0, -350.0, 0.5),
+            -170.0
+        );
     }
 
     #[test]

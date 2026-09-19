@@ -92,7 +92,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-069** — Implement Hold interpolation.
 - [x] **AI-070** — Implement Linear interpolation for f32 and Vec2.
 - [x] **AI-071** — Implement LinearRgba interpolation in linear-light values.
-- [ ] **AI-072** — Implement scalar degree rotation interpolation without shortest-path normalization.
+- [x] **AI-072** — Implement scalar degree rotation interpolation without shortest-path normalization.
 - [ ] **AI-073** — Implement CubicBezier easing representation with x/y handles constrained to 0..1 for MVP.
 - [ ] **AI-074** — Implement deterministic cubic-Bezier timing evaluation and endpoint tests.
 - [ ] **AI-075** — Implement before-first/exact-key/after-last animation behavior.
