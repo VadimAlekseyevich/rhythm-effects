@@ -768,13 +768,10 @@ fn draw_timeline_rows(
 
                         if let Some((start_tick, end_tick)) = visible_tick_range {
                             for keyframe in query_visible_keyframes(
-                                project,
-                                *object_id,
-                                *property,
-                                start_tick,
-                                end_tick,
+                                project, *object_id, *property, start_tick, end_tick,
                             ) {
-                                let Ok(project_time) = tempo_map.project_time_for_tick(keyframe.tick)
+                                let Ok(project_time) =
+                                    tempo_map.project_time_for_tick(keyframe.tick)
                                 else {
                                     continue;
                                 };
@@ -846,10 +843,7 @@ fn visible_tick_range(
         return None;
     }
 
-    Some((
-        MusicalTick::new(start as i64),
-        MusicalTick::new(end as i64),
-    ))
+    Some((MusicalTick::new(start as i64), MusicalTick::new(end as i64)))
 }
 
 fn keyframe_hit_rect(center: egui::Pos2) -> egui::Rect {

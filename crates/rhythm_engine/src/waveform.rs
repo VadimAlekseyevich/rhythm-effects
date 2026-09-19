@@ -251,10 +251,8 @@ mod tests {
         const DURATION_SECONDS: u64 = 10 * 60;
         const SOURCE_FRAMES: u64 = SAMPLE_RATE as u64 * DURATION_SECONDS;
 
-        let base_peak_count = usize::try_from(
-            SOURCE_FRAMES.div_ceil(BASE_BUCKET_FRAMES as u64),
-        )
-        .expect("10-minute fixture fits usize");
+        let base_peak_count = usize::try_from(SOURCE_FRAMES.div_ceil(BASE_BUCKET_FRAMES as u64))
+            .expect("10-minute fixture fits usize");
         let mut base = Vec::with_capacity(base_peak_count);
 
         for index in 0..base_peak_count {
@@ -352,8 +350,7 @@ mod tests {
                 iteration.saturating_mul(97_531) % max_start
             };
             let visible_end = visible_start.saturating_add(window_frames);
-            let level =
-                waveform.choose_level_for_view(visible_start, visible_end, 1_920.0);
+            let level = waveform.choose_level_for_view(visible_start, visible_end, 1_920.0);
             let slice = waveform
                 .visible_slice(level, visible_start, visible_end)
                 .expect("selected level exists");
