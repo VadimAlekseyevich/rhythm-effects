@@ -33,7 +33,11 @@ pub fn configure_theme(context: &egui::Context) {
     });
 }
 
-pub fn draw_editor_shell(ui: &mut egui::Ui, diagnostics: &DiagnosticsView) {
+pub fn draw_editor_shell(
+    ui: &mut egui::Ui,
+    diagnostics: &DiagnosticsView,
+    composition_texture_id: Option<egui::TextureId>,
+) {
     egui::Panel::top("transport_rhythm")
         .exact_size(54.0)
         .show(ui, |ui| {
@@ -92,7 +96,14 @@ pub fn draw_editor_shell(ui: &mut egui::Ui, diagnostics: &DiagnosticsView) {
         ui.heading("Viewport");
         ui.separator();
         ui.centered_and_justified(|ui| {
-            ui.label("1920 × 1080 composition");
+            if let Some(texture_id) = composition_texture_id {
+                ui.add(egui::Image::from_texture(egui::load::SizedTexture::new(
+                    texture_id,
+                    egui::vec2(640.0, 360.0),
+                )));
+            } else {
+                ui.label("Composition preview unavailable");
+            }
         });
     });
 }

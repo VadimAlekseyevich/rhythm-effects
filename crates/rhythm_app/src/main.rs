@@ -28,6 +28,7 @@ struct RhythmApp {
     egui_context: Option<egui::Context>,
     egui_state: Option<egui_winit::State>,
     egui_renderer: Option<egui_wgpu::Renderer>,
+    composition_texture_id: Option<egui::TextureId>,
     diagnostics: Option<DiagnosticsView>,
     last_frame_instant: Option<Instant>,
 }
@@ -51,6 +52,7 @@ impl ApplicationHandler for RhythmApp {
                     Ok(gpu) => {
                         let renderer = Renderer::new(&gpu.device);
                         renderer.clear_composition(&gpu.device, &gpu.queue);
+                        renderer.refresh_preview_display(&gpu.device, &gpu.queue);
 
                         let egui_context = egui::Context::default();
                         editor_ui::configure_theme(&egui_context);
@@ -63,11 +65,18 @@ impl ApplicationHandler for RhythmApp {
                             Some(gpu.device.limits().max_texture_dimension_2d as usize),
                         );
 
-                        let egui_renderer = gpu.surface_config.as_ref().map(|config| {
+                        let mut egui_renderer = gpu.surface_config.as_ref().map(|config| {
                             egui_wgpu::Renderer::new(
                                 &gpu.device,
                                 config.format,
                                 egui_wgpu::RendererOptions::default(),
+                            )
+                        });
+                        let composition_texture_id = egui_renderer.as_mut().map(|egui_renderer| {
+                            egui_renderer.register_native_texture(
+                                &gpu.device,
+                                renderer.preview_display_view(),
+                                wgpu::FilterMode::Linear,
                             )
                         });
 
@@ -98,6 +107,7 @@ impl ApplicationHandler for RhythmApp {
                         self.egui_context = Some(egui_context);
                         self.egui_state = Some(egui_state);
                         self.egui_renderer = egui_renderer;
+                        self.composition_texture_id = composition_texture_id;
                         self.renderer = Some(renderer);
                         self.gpu = Some(gpu);
                         window.request_redraw();
@@ -164,7 +174,11 @@ impl ApplicationHandler for RhythmApp {
                     let raw_input = egui_state.take_egui_input(window);
                     let full_output = egui_context.run_ui(raw_input, |root_ui| {
                         if let Some(diagnostics) = self.diagnostics.as_ref() {
-                            editor_ui::draw_editor_shell(root_ui, diagnostics);
+                            editor_ui::draw_editor_shell(
+                                root_ui,
+                                diagnostics,
+                                self.composition_texture_id,
+                            );
                         }
                     });
                     let paint_jobs =
@@ -278,11 +292,19 @@ impl ApplicationHandler for RhythmApp {
                             && self.egui_renderer.is_none()
                             && let Some(config) = gpu.surface_config.as_ref()
                         {
-                            self.egui_renderer = Some(egui_wgpu::Renderer::new(
+                            let mut egui_renderer = egui_wgpu::Renderer::new(
                                 &gpu.device,
                                 config.format,
                                 egui_wgpu::RendererOptions::default(),
-                            ));
+                            );
+                            self.composition_texture_id = self.renderer.as_ref().map(|renderer| {
+                                egui_renderer.register_native_texture(
+                                    &gpu.device,
+                                    renderer.preview_display_view(),
+                                    wgpu::FilterMode::Linear,
+                                )
+                            });
+                            self.egui_renderer = Some(egui_renderer);
                         }
 
                         info!(
