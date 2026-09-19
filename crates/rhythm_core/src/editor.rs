@@ -34,7 +34,7 @@ impl From<AnimationInvariantError> for EditError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     AddObject {
-        object: Object,
+        object: Box<Object>,
     },
     DeleteObject {
         object_id: ObjectId,
@@ -79,11 +79,11 @@ impl EditCommand {
 pub enum HistoryPayload {
     ObjectInserted {
         index: usize,
-        object: Object,
+        object: Box<Object>,
     },
     ObjectDeleted {
         index: usize,
-        object: Object,
+        object: Box<Object>,
     },
     ObjectRenamed {
         object_id: ObjectId,
@@ -455,7 +455,10 @@ impl ProjectEditor {
                 }
 
                 let index = self.project.composition.objects.len();
-                self.project.composition.objects.push(object.clone());
+                self.project
+                    .composition
+                    .objects
+                    .push(object.as_ref().clone());
                 if let Err(error) = self.project.validate() {
                     self.project.composition.objects.pop();
                     return Err(EditError::InvalidProject(error));
@@ -476,7 +479,10 @@ impl ProjectEditor {
 
                 Ok(Some(PendingHistoryEntry::new(
                     "Delete Object",
-                    HistoryPayload::ObjectDeleted { index, object },
+                    HistoryPayload::ObjectDeleted {
+                        index,
+                        object: Box::new(object),
+                    },
                 )))
             }
             EditCommand::RenameObject { object_id, name } => {
@@ -626,7 +632,7 @@ impl ProjectEditor {
                 self.project
                     .composition
                     .objects
-                    .insert(*index, object.clone());
+                    .insert(*index, object.as_ref().clone());
             }
             (
                 HistoryPayload::ObjectRenamed {
