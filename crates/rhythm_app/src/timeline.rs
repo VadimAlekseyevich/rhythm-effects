@@ -307,8 +307,14 @@ pub fn build_timeline_rows(project: &Project) -> Vec<TimelineRow<'_>> {
                 );
             }
             ObjectContent::Ellipse(ellipse) => {
-                push_property(TimelineProperty::EllipseSize, ellipse.size.keyframes().len());
-                push_property(TimelineProperty::EllipseFill, ellipse.fill.keyframes().len());
+                push_property(
+                    TimelineProperty::EllipseSize,
+                    ellipse.size.keyframes().len(),
+                );
+                push_property(
+                    TimelineProperty::EllipseFill,
+                    ellipse.fill.keyframes().len(),
+                );
             }
             ObjectContent::Image(_) => {}
             ObjectContent::Text(text) => {
