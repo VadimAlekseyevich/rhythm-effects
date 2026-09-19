@@ -1,6 +1,6 @@
 # ADR 0006 — Prototype Composition Text with cosmic-text + glyphon
 
-> **Status: Accepted for prototype**
+> **Status: Accepted for MVP**
 >
 > **Date: 2026-09-19**
 
