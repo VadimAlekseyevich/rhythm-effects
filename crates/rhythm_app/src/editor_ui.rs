@@ -1,4 +1,5 @@
 use crate::editor_session::{EditorSession, PreviewQuality};
+use rhythm_core::time::ProjectTimeNs;
 
 fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
     const COMPOSITION_ASPECT: f32 = 1920.0 / 1080.0;
@@ -63,6 +64,11 @@ pub fn draw_editor_shell(
                 ui.heading("Rhythm Effects");
                 ui.separator();
                 ui.label("Transport");
+                if ui.button("Start").clicked() {
+                    session.seek_paused(ProjectTimeNs::new(0));
+                }
+                let playhead_seconds = session.playhead().get() as f64 / 1_000_000_000.0;
+                ui.label(format!("Playhead {playhead_seconds:.3}s"));
                 ui.separator();
                 ui.label("BPM —");
                 ui.label("4/4");
