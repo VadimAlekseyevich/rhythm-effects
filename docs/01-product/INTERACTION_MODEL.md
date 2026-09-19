@@ -1,6 +1,6 @@
 # Interaction Model
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
 > This document defines editor-wide interaction rules. Individual panels may specialize them but should not contradict them without an explicit reason.
 
@@ -61,7 +61,7 @@ Select the clicked item and clear unrelated selection unless modifier is held.
 
 ### Add/remove selection
 
-Ctrl is the default candidate for toggling selection on Windows.
+Ctrl toggles items in selection on Windows.
 
 Exact modifier mapping will be finalized in KEYBOARD_SHORTCUTS.md.
 
@@ -200,7 +200,7 @@ Numeric properties support:
 
 Changing a property at a time where no keyframe exists must have explicit behavior.
 
-Default MVP proposal:
+Accepted MVP behavior:
 
 - unanimated property: edit base value;
 - animated property: edit current keyframe only if playhead is exactly on one;
@@ -348,7 +348,7 @@ Exact mappings go in KEYBOARD_SHORTCUTS.md.
 
 Viewport navigation must not conflict with object transforms.
 
-Preferred pattern:
+Accepted pattern:
 
 - wheel/pinch zoom;
 - middle-drag or temporary space-pan;
@@ -457,3 +457,34 @@ Before accepting a new interaction, ask:
 - Does it add a persistent mode?
 - Can it be done efficiently by keyboard?
 - Can it still be discovered by pointer?
+
+
+---
+
+## 26. Accepted property-edit behavior
+
+Keyframing is property-scoped rather than controlled by a global Auto-Key mode.
+
+For an unanimated property:
+
+- editing changes base_value;
+- the keyframe button creates the first keyframe at the nearest current grid position.
+
+For an animated property:
+
+- if the playhead is exactly on an existing keyframe, editing updates that keyframe;
+- otherwise the edit resolves the playhead to the nearest current authoring-grid position, creates/updates a keyframe there, and places the playhead on that position;
+- Escape cancels the edit/transaction;
+- one committed edit produces one history entry.
+
+This makes animated-property editing explicit and rhythm-native without a dangerous global Auto-Key state.
+
+## 27. Selection modifier
+
+Windows MVP uses Ctrl for additive/toggle selection and Shift where a contiguous-range concept exists. Alt is reserved primarily for movement/alternate interaction shortcuts.
+
+## 28. Space key
+
+Space is reserved for Play/Pause.
+
+Viewport panning does not use Space in MVP; middle-mouse drag is the canonical pan interaction. This removes tap-vs-hold ambiguity from the primary transport shortcut.
