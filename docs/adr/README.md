@@ -2,13 +2,6 @@
 
 ADRs capture decisions with meaningful alternatives or long-term consequences.
 
-## Naming
-
-~~~text
-0001-short-decision-name.md
-0002-another-decision.md
-~~~
-
 ## Status
 
 - Proposed
@@ -30,21 +23,8 @@ ADRs capture decisions with meaningful alternatives or long-term consequences.
 - [0010](0010-ffmpeg-process-boundary.md) — FFmpeg child-process boundary for MVP export.
 - [0011](0011-single-writer-project-state.md) — active Project has one canonical writer.
 - [0012](0012-linear-light-premultiplied-alpha-semantics.md) — renderer color/alpha semantic contract.
-
-## Template
-
-~~~markdown
-# ADR NNNN — Title
-
-> Status: Proposed | Accepted | Superseded
-> Date: YYYY-MM-DD
-
-## Context
-## Decision
-## Alternatives considered
-## Consequences
-## Constraints
-## Revisit condition
-~~~
+- [0013](0013-fixed-point-bpm-and-nanosecond-project-time.md) — deterministic BPM/project-time representation.
+- [0014](0014-mvp-beat-division-set-and-snap-ties.md) — grid divisions and snap rounding.
+- [0015](0015-transform-coordinate-conventions.md) — composition and transform conventions.
 
 If an ADR is superseded, keep it and link to the replacement. Do not rewrite history.

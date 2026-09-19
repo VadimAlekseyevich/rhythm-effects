@@ -1,274 +1,329 @@
 # Time Model
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> This is a critical project contract. Audio, timeline, animation, serialization, snapping, and export must use these definitions consistently.
+> Audio, timeline, animation, serialization, snapping, and export must use these definitions consistently.
 
-## 1. Core principle
+## 1. Core invariant
 
-Rhythm Effects has multiple time domains.
+Rhythm Effects has four distinct time domains:
 
-They must not be conflated.
+1. audio frame position;
+2. project time;
+3. musical time;
+4. video frame index.
 
-The most important authoring invariant is:
+The canonical authored keyframe coordinate is integer musical time.
 
-> **Authored keyframes are stored in integer musical time, never as arbitrary floating-point seconds.**
+> **A keyframe is identified by MusicalTick, never by floating-point seconds.**
 
-Animation evaluation may happen at any continuous time between keyframes.
+Continuous evaluation between keyframes is still required.
 
----
+## 2. Canonical types
 
-## 2. Time domains
+See DOMAIN_TYPES.md.
 
-### 2.1. Audio sample/frame position
-
-Represents progress through audio playback.
-
-Conceptually:
-
-~~~rust
-AudioFramePosition(u64)
-~~~
-
-One audio frame contains one sample per channel.
-
-Its conversion to seconds requires the relevant sample rate.
-
-### 2.2. Project time
-
-Continuous timeline time used to connect audio, musical time, and video time.
-
-Conceptually represented transiently as high-precision seconds:
-
-~~~rust
-ProjectTimeSeconds(f64)
-~~~
-
-This is an interchange/evaluation representation, not the persisted identity of a keyframe.
-
-Do not compare raw f64 values for keyframe identity.
-
-### 2.3. Musical time
-
-Canonical authoring coordinate.
+Core time types:
 
 ~~~rust
 MusicalTick(i64)
+ProjectTimeNs(i64)
+DurationNs(u64)
+GridOffsetNs(i64)
+BpmMicros(u64)
+AudioFramePosition(u64)
+
+FrameRate {
+    numerator: u32,
+    denominator: u32,
+}
 ~~~
 
-Tick 0 corresponds to the configured musical grid origin.
+PPQ:
 
-Negative ticks may be allowed so a track can contain pickup/pre-roll before the first downbeat.
-
-### 2.4. Video frame time
-
-Export coordinate.
-
-~~~rust
-FrameIndex(u64)
-FrameRate { numerator, denominator }
+~~~text
+960 ticks per quarter-note beat
 ~~~
 
-Frame timestamp is derived from integer frame index and rational frame rate.
+## 3. Project time origin
 
-Do not accumulate export time with repeated floating-point addition.
+Visible/export composition begins at:
 
----
+~~~text
+ProjectTimeNs(0)
+~~~
 
-## 3. PPQ
+Calculations may temporarily use signed values around zero.
 
-MVP proposal:
+## 4. Musical origin
 
-**PPQ = 960 ticks per quarter note.**
+GridOffsetNs means:
 
-Reasons:
+~~~text
+project time of MusicalTick(0)
+~~~
 
-- exact integer division for common powers-of-two subdivisions;
-- exact support for triplet subdivision;
-- enough resolution for fine rhythmic editing;
-- small integer values;
-- common concept in sequencer/MIDI-style timing.
-
-Examples at 4/4:
-
-| Musical duration | Ticks |
-|---|---:|
-| Quarter note | 960 |
-| Eighth | 480 |
-| Sixteenth | 240 |
-| Thirty-second | 120 |
-| Sixty-fourth | 60 |
-| Quarter-note triplet subdivision unit (1/3 beat) | 320 |
-| Eighth-note triplet unit (1/6 beat) | 160 |
-
-Terminology in UI must be made unambiguous because "1/4" can mean note value or beat subdivision depending on context.
-
-Internally, APIs should use explicit division ratios rather than ambiguous strings.
-
----
-
-## 4. Master musical lattice
-
-All keyframes live on the PPQ integer lattice.
-
-This is the permanent musical grid.
-
-The user's selected authoring subdivision is a subset of this lattice.
+This supports intro/pickup before the first downbeat.
 
 Example:
 
 ~~~text
-PPQ lattice:
-|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|.|
-
-authoring grid = 1/8:
-|.......|.......|.......|.......|
-
-existing fine-grid keyframes:
-|...◆...|.......|.◆.....|.......|
+audio begins at project time 0
+first downbeat occurs at 0.350 seconds
+GridOffsetNs = 350,000,000
+MusicalTick(0) = 0.350 seconds
 ~~~
 
-Changing the current authoring subdivision does not move, quantize, or invalidate existing keyframes.
+Negative MusicalTicks may represent musical positions before tick zero.
 
-They remain valid because they still occupy integer musical ticks.
+MVP should not normally author keyframes whose mapped project time is below 0.
 
----
+## 5. BPM
 
-## 5. Authoring grid
+Persist BPM as BpmMicros.
 
-A GridResolution defines valid positions for creation/movement during a given edit.
+Examples:
+
+~~~text
+120 BPM      -> 120,000,000
+128.5 BPM    -> 128,500,000
+174.1234 BPM -> 174,123,400
+~~~
+
+Core valid range:
+
+~~~text
+1 <= BPM <= 1000
+~~~
+
+No floating-point BPM is persisted.
+
+## 6. Constant-tempo conversion
+
+Given:
+
+~~~text
+B = BpmMicros
+P = 960
+T = MusicalTick
+O = GridOffsetNs
+~~~
 
 Conceptually:
 
-~~~rust
-struct GridResolution {
-    ticks_per_step: i64,
-}
+~~~text
+delta_ns =
+    T * 60,000,000,000 * 1,000,000
+    / (B * P)
+
+project_time_ns = O + rounded(delta_ns)
 ~~~
 
-Only resolutions that divide the PPQ lattice exactly should be exposed in MVP.
+Implementation uses wide integer intermediates and explicit rounding.
 
-Potential choices:
+Never accumulate time tick-by-tick.
 
-- beat;
-- 1/2 beat;
-- 1/4 beat;
-- 1/8 beat;
-- 1/16 beat;
-- 1/32 beat;
-- triplets;
-- other exact supported divisions.
+## 7. Inverse conversion
 
-The UI naming scheme is finalized in product/timeline docs.
+Project time maps to a continuous musical position.
 
----
-
-## 6. Keyframe invariant
-
-Persisted keyframe:
-
-~~~rust
-struct Keyframe<T> {
-    id: KeyframeId,
-    tick: MusicalTick,
-    value: T,
-    interpolation: Interpolation,
-}
-~~~
-
-No persisted keyframe timestamp in seconds is required for identity.
-
-Derived absolute time is recomputed from:
-
-- tick;
-- tempo map;
-- grid origin/offset.
-
----
-
-## 7. BPM representation
-
-MVP user-facing BPM may contain decimals.
-
-Core requirements:
-
-- finite;
-- positive;
-- bounded to a sensible product range;
-- parsed/validated once;
-- never allow NaN/Infinity into project state.
-
-Initial implementation may store validated BPM as f64 behind a dedicated newtype.
-
-A later fixed-point representation remains possible if tests reveal reproducibility problems.
-
-Do not expose raw f64 throughout the codebase.
-
-Concept:
-
-~~~rust
-struct Bpm(f64);
-~~~
-
-Construction goes through validation.
-
----
-
-## 8. Grid offset
-
-Grid offset defines where MusicalTick(0) lands in project/audio time.
-
-Concept:
+Conceptually:
 
 ~~~text
-project time of tick 0 = grid_offset
+tick_position =
+    (project_time_ns - offset_ns)
+    * B * PPQ
+    / (60e9 * 1e6)
 ~~~
 
-The exact persisted representation should be device-independent.
+Callers must explicitly choose whether they need:
 
-Preferred MVP representation:
+- continuous position;
+- floor tick;
+- ceil tick;
+- nearest tick;
+- grid snap.
 
-- signed integer microseconds or nanoseconds; or
-- another explicit fixed-resolution project-time integer.
+Do not hide rounding in generic conversion names.
 
-Do not store offset in output-device samples because the user's audio device/sample rate can change.
+## 8. Beat divisions
 
-Final fixed unit is decided during implementation spike; the API must hide it behind GridOffset.
+MVP divisions are:
 
----
-
-## 9. Single-tempo MVP
-
-MVP UI supports one BPM value.
-
-Core representation should still use a TempoMap abstraction:
-
-~~~rust
-TempoMap
-└─ TempoSegment {
-     start_tick,
-     bpm,
-     meter
-   }
+~~~text
+1/1
+1/2
+1/3
+1/4
+1/6
+1/8
+1/12
+1/16
+1/24
+1/32
 ~~~
 
-For MVP there is normally one segment beginning at tick 0.
+The denominator is parts per beat.
 
-Why abstract now:
+Ticks per step:
 
-- conversion API belongs behind one object;
-- future tempo changes should not require rewriting every caller;
-- minimal additional complexity.
+~~~text
+PPQ / parts_per_beat
+~~~
 
-Do not build tempo-change editing UI for MVP.
+Every MVP division is exact under PPQ 960.
 
----
+## 9. Permanent tick lattice vs current grid
 
-## 10. Time signature
+The permanent lattice is integer MusicalTick.
 
-MVP assumes 4/4 unless product scope later promotes meter editing.
+The current authoring grid is only a subset used for create/move operations.
 
-Still represent meter explicitly where bar/beat conversion needs it.
+Example:
+
+~~~text
+a key exists at tick 60 from 1/16 editing
+user switches to 1/4 where step = 240
+the key remains at tick 60
+~~~
+
+Changing grid never silently moves existing keyframes.
+
+## 10. Keyframe validity
+
+A persisted keyframe requires:
+
+- integer MusicalTick;
+- unique tick on its Animated property;
+- valid project range semantics.
+
+A keyframe does not need to lie on the currently selected authoring division.
+
+## 11. Snap algorithm
+
+For continuous tick position and step S:
+
+1. compute lower grid multiple using Euclidean division;
+2. upper = lower + S;
+3. choose nearest;
+4. exact half-step tie chooses upper/later point.
+
+Example S = 240:
+
+~~~text
++120 -> +240
+-120 -> 0
+~~~
+
+Tie always goes right/later on timeline.
+
+## 12. Keyboard movement
+
+Keyboard rhythm movement is exact integer arithmetic.
+
+~~~text
+new_tick = old_tick +/- ticks_per_step
+~~~
+
+Beat movement:
+
+~~~text
++/- 960 ticks
+~~~
+
+Bar movement uses time signature.
+
+No float round trip.
+
+## 13. Playhead
+
+Playhead is continuous ProjectTimeNs.
+
+It may exist between grid positions.
+
+This supports:
+
+- smooth scrub;
+- exact video frame preview;
+- audio playback observation;
+- arbitrary scene inspection.
+
+Creating/moving a keyframe resolves onto the authoring grid.
+
+## 14. Playback authority
+
+Paused/stopped:
+
+- EditorSession playhead is authoritative.
+
+On Play:
+
+1. editor resolves requested source position;
+2. audio engine starts;
+3. audio playback clock becomes authoritative.
+
+On Pause:
+
+1. editor samples resolved final playback time;
+2. stores paused playhead;
+3. editor becomes authority again.
+
+## 15. Audio-driven playback
+
+During playback:
+
+~~~text
+AudioFramePosition
+-> ProjectTimeNs
+-> continuous musical position
+-> animation evaluation
+~~~
+
+Never advance playback with editor frame delta.
+
+Dropped UI frames may reduce visual smoothness but cannot shift musical timing.
+
+## 16. Output latency
+
+Audio engine must distinguish producer position from audible position.
+
+The exposed playback clock should approximate the audible timeline position within a tested tolerance.
+
+Exact CPAL/device latency strategy belongs in AUDIO_ENGINE.md.
+
+## 17. Video frame time
+
+FrameRate is rational.
+
+For zero-based frame N:
+
+~~~text
+time_ns =
+    N * denominator * 1,000,000,000
+    / numerator
+~~~
+
+Use wide integer intermediates and explicit rounding.
+
+Every frame timestamp derives from N independently.
+
+Never accumulate frame duration.
+
+## 18. Composition duration
+
+Composition duration is project-time duration.
+
+Default after audio import may be source audio duration.
+
+The project may later extend duration for a visual tail.
+
+MVP editing should prevent accidental keyframe creation outside allowed composition time unless an explicit extension exists.
+
+## 19. Time signature
+
+MVP UX assumes 4/4 initially.
+
+Core representation remains explicit:
 
 ~~~rust
 TimeSignature {
@@ -277,294 +332,169 @@ TimeSignature {
 }
 ~~~
 
-Do not bake "four beats per bar" into generic tick math.
+Do not hardcode four beats per bar into generic conversion APIs.
 
----
+## 20. TempoMap abstraction
 
-## 11. Conversion formulas: constant tempo
+MVP normally has one tempo segment.
 
-For a 4/4-style quarter-note beat and PPQ ticks:
+All callers still go through TempoMap rather than embedding their own BPM formula.
 
-~~~text
-seconds_per_quarter = 60 / BPM
-seconds_per_tick = seconds_per_quarter / PPQ
+Concept:
 
-time_seconds(tick) =
-    grid_offset_seconds +
-    tick * seconds_per_tick
+~~~rust
+TempoMap {
+    ppq: 960,
+    grid_offset,
+    segments,
+}
 ~~~
 
-Inverse:
+Future tempo changes must preserve MusicalTick keyframe identity.
+
+## 21. Animation evaluation
+
+Given continuous project time:
+
+1. map to continuous musical position;
+2. locate surrounding integer-tick keyframes;
+3. derive interpolation progress;
+4. apply outgoing interpolation/easing;
+5. interpolate value.
+
+Exactly on a keyframe returns its exact stored value.
+
+## 22. Before/after policy
+
+Accepted MVP behavior:
+
+- zero keys: base_value;
+- before first key: first key value;
+- exactly on key: exact key value;
+- after last key: last key value.
+
+Once a property has keyframes, the curve clamps to first/last key outside its authored span.
+
+## 23. Collision policy
+
+One keyframe per property per MusicalTick.
+
+Accepted MVP behavior:
+
+- moved/pasted incoming key wins over occupied unselected key;
+- overwritten key is stored in undo history;
+- operation is fully reversible;
+- timeline should indicate replacement during preview where practical.
+
+No duplicate ambiguous keys are stored.
+
+## 24. BPM changes
+
+Changing BPM does not modify keyframe ticks.
+
+It changes their derived absolute project time.
+
+This is intentional:
 
 ~~~text
-tick_float =
-    (time_seconds - grid_offset_seconds)
-    / seconds_per_tick
+musical pattern remains attached to rhythm
+BPM changes
+animation retimes in seconds
 ~~~
 
-Converting continuous time to an authored tick requires an explicit rounding/snap policy.
+## 25. Grid-offset changes
 
-Never hide rounding inside generic conversion names.
+Changing GridOffsetNs does not modify keyframe ticks.
 
-Prefer APIs like:
+Their absolute project positions shift with musical grid.
 
-- time_to_tick_floor;
-- time_to_tick_nearest;
-- time_to_tick_for_grid_snap.
+Waveform/audio remain in project time.
 
----
+This enables BPM-grid alignment over a stationary waveform.
 
-## 12. Grid snapping
-
-Given continuous pointer/playhead-derived time:
-
-1. convert to continuous tick coordinate;
-2. divide by current grid step;
-3. apply explicit nearest/floor/ceil policy;
-4. multiply back by grid step;
-5. return MusicalTick.
-
-Default keyframe drag/create uses nearest valid grid step.
-
-Keyboard stepping uses exact integer addition and does not round.
-
----
-
-## 13. Keyframe movement
-
-Moving selected keyframes by one grid step:
-
-~~~text
-new_tick = old_tick + grid_step_ticks
-~~~
-
-For multi-selection, apply the same integer delta to every keyframe.
-
-This preserves rhythmic spacing exactly.
-
----
-
-## 14. Grid changes
-
-Changing current subdivision affects:
-
-- displayed minor grid;
-- keyframe creation;
-- keyframe drag snapping;
-- keyboard subdivision step.
-
-It does not affect:
-
-- existing keyframe ticks;
-- animation values;
-- BPM;
-- playback;
-- export.
-
-No silent quantization.
-
-Explicit quantize may be a future command.
-
----
-
-## 15. Playhead
-
-Playhead is not a keyframe.
-
-It may exist at arbitrary continuous project time.
-
-This allows:
-
-- smooth scrubbing;
-- frame-by-frame video evaluation;
-- accurate audio position display;
-- preview between musical grid points.
-
-The UI may offer "snap playhead to grid", but it is not a fundamental restriction.
-
----
-
-## 16. Playback clock
-
-During active audio playback:
-
-~~~text
-AudioFramePosition
-+ output/project sample-rate mapping
-→ ProjectTime
-→ musical position
-→ animation evaluation
-~~~
-
-Do not compute current playback time by:
-
-~~~text
-previous_time + frame_delta
-~~~
-
-The editor rendering loop is not authoritative.
-
----
-
-## 17. Paused editor time
-
-When not playing, editor owns a stable playhead ProjectTime.
-
-Timeline actions may set it continuously or by musical stepping.
-
-Starting playback begins audio from the resolved corresponding audio position and then audio becomes the authority.
-
-Stopping/pausing captures the resolved position back into editor playhead state.
-
----
-
-## 18. Export time
-
-For frame index n and rational FPS:
-
-~~~text
-time = n * fps_denominator / fps_numerator
-~~~
-
-Compute from n directly.
-
-Do not accumulate:
-
-~~~text
-time += 1.0 / fps
-~~~
-
-for thousands of frames.
-
-This prevents drift accumulation.
-
----
-
-## 19. Animation lookup
-
-Keyframes are sorted by MusicalTick.
-
-At evaluation time:
-
-1. convert ProjectTime to continuous musical tick coordinate;
-2. binary-search surrounding integer keyframes;
-3. calculate normalized interpolation fraction between their absolute musical positions under the tempo map;
-4. evaluate interpolation.
-
-For constant BPM this is straightforward.
-
-For future tempo changes, use TempoMap conversion rather than assuming tick distance maps linearly to seconds across a tempo boundary.
-
----
-
-## 20. Exact keyframe collision
-
-A single animated property cannot contain two independent keyframes with the same MusicalTick in MVP.
-
-When an edit would collide, policy must be explicit.
-
-Recommended MVP behavior:
-
-- moving/pasting onto an occupied tick replaces/merges according to one deterministic rule;
-- never leave duplicate ambiguous keyframes.
-
-Exact UX policy belongs in TIMELINE.md.
-
----
-
-## 21. Project boundaries
-
-Keyframes may not be moved past allowed project musical/time boundaries unless negative/pre-roll support explicitly permits it.
-
-Need explicit policy for:
-
-- negative ticks;
-- audio before grid origin;
-- composition duration;
-- keyframes after audio end.
-
-Recommended:
-
-- allow grid origin offset that places tick 0 after audio start;
-- permit negative musical ticks for pre-roll if necessary;
-- composition duration remains independent enough to include tail after audio.
-
-Finalize in PROJECT_MODEL/PRODUCT_SPEC.
-
----
-
-## 22. Display formatting
-
-Internal and display time are different.
-
-Possible displays:
-
-- bar:beat:subdivision;
-- bar:beat:tick;
-- seconds;
-- SMPTE-like frame time later.
-
-The primary editor display should emphasize musical position.
-
-Numeric formatting must not alter stored time.
-
----
-
-## 23. Serialization
+## 26. Serialization
 
 Persist:
 
-- PPQ/schema assumption;
-- tempo segments/BPM;
-- grid offset;
-- keyframe ticks;
-- time signature;
-- composition FPS/duration.
+- BpmMicros;
+- GridOffsetNs;
+- PPQ/schema semantics;
+- TimeSignature;
+- tempo segments;
+- MusicalTick keyframes;
+- rational FrameRate;
+- DurationNs.
 
-Do not serialize derived seconds for every keyframe.
+Do not serialize derived seconds per keyframe.
 
-Project migration must handle any future PPQ change explicitly. Prefer never changing project PPQ after format stabilization.
+## 27. Display formatting
 
----
+UI may show:
 
-## 24. Required tests
+- bar:beat:division;
+- bar:beat:tick;
+- seconds;
+- frame index.
 
-### Conversion
+Formatting never changes stored time.
 
-- tick 0 equals offset;
-- one quarter note at 120 BPM = 0.5 seconds;
-- negative ticks around offset;
-- decimal BPM;
-- large tick values.
+The primary editor display should emphasize musical position.
 
-### Grid
+## 28. Required tests
 
-- every exposed subdivision maps to integer ticks;
-- repeated keyboard stepping returns exact original tick;
-- changing grid resolution leaves keyframes untouched;
-- nearest snap boundaries deterministic.
+Fixed-point BPM:
 
-### Playback/export
+- 120;
+- 128.5;
+- 174.123456;
+- invalid range.
 
-- long-duration conversion does not accumulate frame drift;
-- frame n timestamp is stable;
-- audio sample position conversion stable across common rates.
+Tick/time:
 
-### Animation
+- tick zero equals offset;
+- plus/minus one beat at known BPM;
+- negative ticks;
+- large tick values;
+- round-trip under explicit rounding tolerance.
 
-- evaluating exactly on keyframe returns exact keyframe value;
-- interpolation before/after keyframes follows defined clamping policy.
+Grid:
 
----
+- every MVP division exact;
+- positive half-step tie goes later;
+- negative half-step tie goes later;
+- keyboard forward/back exact;
+- changing grid leaves key ticks untouched.
 
-## 25. Open decisions
+Video:
 
-- exact persisted unit/type for GridOffset;
-- exact BPM bounded range;
-- UI terminology for subdivision fractions;
-- whether negative ticks are fully exposed in MVP UI;
-- exact collision policy;
-- exact composition-duration relationship to audio duration;
-- future tempo-change interpolation semantics.
+- frame 0 equals time 0;
+- frame N derived independently;
+- long export does not accumulate drift.
 
-These must be resolved before serialization format becomes Accepted.
+Retiming:
+
+- BPM change preserves ticks;
+- offset change preserves ticks.
+
+## 29. Prohibited patterns
+
+Do not:
+
+- store keyframe seconds as authority;
+- store persisted BPM as arbitrary f64;
+- advance playback from render delta;
+- accumulate export timestamps;
+- let timeline implement separate time formulas;
+- silently quantize on grid change.
+
+## 30. Definition of Done
+
+Time model is implementation-ready when:
+
+- core time newtypes exist;
+- PPQ/division tests pass;
+- fixed-point BPM parse/format is tested;
+- TempoMap owns conversion;
+- snap tie behavior is tested;
+- audio/export use the same ProjectTimeNs semantics;
+- no subsystem requires raw persisted floating-point timestamp identity.
