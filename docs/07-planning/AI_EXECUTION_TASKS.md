@@ -38,7 +38,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 ## M2 — Render/UI shell
 
-- [ ] **AI-021** — Create a renderer module in rhythm_engine without exposing wgpu types to rhythm_core.
+- [x] **AI-021** — Create a renderer module in rhythm_engine without exposing wgpu types to rhythm_core.
 - [ ] **AI-022** — Initialize one wgpu Instance/Adapter/Device/Queue compatible with the application window.
 - [ ] **AI-023** — Create and configure the wgpu window surface and handle zero-size/minimized windows.
 - [ ] **AI-024** — Add resize handling that reconfigures the surface only for non-zero dimensions.

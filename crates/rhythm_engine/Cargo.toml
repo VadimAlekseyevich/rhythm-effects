@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+wgpu.workspace = true
 rhythm_core = { path = "../rhythm_core" }
 
 [lints]

@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod renderer;
+
 #[must_use]
 pub const fn status() -> &'static str {
     "engine scaffold ready"
