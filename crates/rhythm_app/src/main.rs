@@ -49,6 +49,7 @@ impl ApplicationHandler for RhythmApp {
                         renderer.clear_composition(&gpu.device, &gpu.queue);
 
                         let egui_context = egui::Context::default();
+                        editor_ui::configure_theme(&egui_context);
                         let egui_state = egui_winit::State::new(
                             egui_context.clone(),
                             egui::ViewportId::ROOT,

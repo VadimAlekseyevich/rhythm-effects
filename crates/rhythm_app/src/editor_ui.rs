@@ -1,3 +1,30 @@
+pub fn configure_theme(context: &egui::Context) {
+    context.set_theme(egui::Theme::Dark);
+    context.set_visuals(egui::Visuals::dark());
+
+    context.global_style_mut(|style| {
+        style.text_styles.insert(
+            egui::TextStyle::Body,
+            egui::FontId::new(15.0, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Button,
+            egui::FontId::new(15.0, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Heading,
+            egui::FontId::new(16.0, egui::FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Small,
+            egui::FontId::new(13.0, egui::FontFamily::Proportional),
+        );
+        style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+        style.spacing.interact_size = egui::vec2(32.0, 34.0);
+        style.spacing.button_padding = egui::vec2(12.0, 8.0);
+    });
+}
+
 pub fn draw_editor_shell(ui: &mut egui::Ui) {
     egui::Panel::top("transport_rhythm")
         .exact_size(54.0)
