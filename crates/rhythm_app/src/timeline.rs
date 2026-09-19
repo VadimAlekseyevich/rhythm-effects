@@ -1,6 +1,69 @@
+use rhythm_core::time::ProjectTimeNs;
 use rhythm_engine::waveform::{WaveformData, WaveformSlice};
 
 const WAVEFORM_ROW_HEIGHT: f32 = 64.0;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TimelineTransform {
+    rect: egui::Rect,
+    start_time: ProjectTimeNs,
+    end_time: ProjectTimeNs,
+}
+
+impl TimelineTransform {
+    #[must_use]
+    pub fn new(
+        rect: egui::Rect,
+        start_time: ProjectTimeNs,
+        end_time: ProjectTimeNs,
+    ) -> Option<Self> {
+        if rect.width() <= 0.0 || end_time <= start_time {
+            return None;
+        }
+
+        Some(Self {
+            rect,
+            start_time,
+            end_time,
+        })
+    }
+
+    #[must_use]
+    pub const fn start_time(self) -> ProjectTimeNs {
+        self.start_time
+    }
+
+    #[must_use]
+    pub const fn end_time(self) -> ProjectTimeNs {
+        self.end_time
+    }
+
+    #[must_use]
+    pub const fn rect(self) -> egui::Rect {
+        self.rect
+    }
+
+    #[must_use]
+    pub fn project_time_to_x(self, project_time: ProjectTimeNs) -> f32 {
+        let span_ns = (i128::from(self.end_time.get()) - i128::from(self.start_time.get())) as f64;
+        let offset_ns =
+            (i128::from(project_time.get()) - i128::from(self.start_time.get())) as f64;
+        let normalized = offset_ns / span_ns;
+        self.rect.left() + (normalized * f64::from(self.rect.width())) as f32
+    }
+
+    #[must_use]
+    pub fn x_to_project_time(self, x: f32) -> ProjectTimeNs {
+        let normalized =
+            ((x - self.rect.left()) / self.rect.width()).clamp(0.0, 1.0) as f64;
+        let start_ns = i128::from(self.start_time.get());
+        let span_ns = i128::from(self.end_time.get()) - start_ns;
+        let offset_ns = (span_ns as f64 * normalized).round() as i128;
+        let project_ns = (start_ns + offset_ns)
+            .clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
+        ProjectTimeNs::new(project_ns)
+    }
+}
 
 pub fn draw_timeline_waveform(ui: &mut egui::Ui, waveform: Option<&WaveformData>) {
     let desired_size = egui::vec2(ui.available_width(), WAVEFORM_ROW_HEIGHT);
@@ -14,35 +77,50 @@ pub fn draw_timeline_waveform(ui: &mut egui::Ui, waveform: Option<&WaveformData>
         return;
     }
 
+    let Some(end_time) =
+        project_time_for_source_frame(source_frames, waveform.pyramid.source_sample_rate)
+    else {
+        return;
+    };
+    let Some(transform) =
+        TimelineTransform::new(rect, ProjectTimeNs::new(0), end_time)
+    else {
+        return;
+    };
+
     let level_index = waveform.choose_level_for_view(0, source_frames, rect.width());
     let Some(slice) = waveform.visible_slice(level_index, 0, source_frames) else {
         return;
     };
 
     let color = ui.visuals().widgets.noninteractive.fg_stroke.color;
-    let mesh = build_waveform_mesh(rect, slice, 0, source_frames, color);
+    let mesh = build_waveform_mesh(
+        slice,
+        waveform.pyramid.source_sample_rate,
+        transform,
+        color,
+    );
     if !mesh.indices.is_empty() {
         ui.painter().add(egui::Shape::mesh(mesh));
     }
 }
 
 fn build_waveform_mesh(
-    rect: egui::Rect,
     slice: WaveformSlice<'_>,
-    visible_start_frame: u64,
-    visible_end_frame: u64,
+    source_sample_rate: u32,
+    transform: TimelineTransform,
     color: egui::Color32,
 ) -> egui::epaint::Mesh {
     let mut mesh = egui::epaint::Mesh::default();
+    let rect = transform.rect();
     if slice.peaks.is_empty()
-        || visible_end_frame <= visible_start_frame
+        || source_sample_rate == 0
         || rect.width() <= 0.0
         || rect.height() <= 0.0
     {
         return mesh;
     }
 
-    let visible_span = visible_end_frame - visible_start_frame;
     let center_y = rect.center().y;
     let half_height = rect.height() * 0.5;
 
@@ -54,14 +132,17 @@ fn build_waveform_mesh(
         let peak_start = peak_index.saturating_mul(slice.frames_per_peak);
         let peak_end = peak_start.saturating_add(slice.frames_per_peak);
 
-        let clipped_start = peak_start.max(visible_start_frame);
-        let clipped_end = peak_end.min(visible_end_frame);
-        if clipped_end <= clipped_start {
+        let Some(peak_start_time) =
+            project_time_for_source_frame(peak_start, source_sample_rate)
+        else {
             continue;
-        }
+        };
+        let Some(peak_end_time) = project_time_for_source_frame(peak_end, source_sample_rate) else {
+            continue;
+        };
 
-        let x0 = frame_to_x(clipped_start, visible_start_frame, visible_span, rect);
-        let mut x1 = frame_to_x(clipped_end, visible_start_frame, visible_span, rect);
+        let x0 = transform.project_time_to_x(peak_start_time).max(rect.left());
+        let mut x1 = transform.project_time_to_x(peak_end_time).min(rect.right());
         x1 = x1.max(x0 + 0.75).min(rect.right());
         if x1 <= x0 {
             continue;
@@ -88,16 +169,51 @@ fn build_waveform_mesh(
     mesh
 }
 
-fn frame_to_x(frame: u64, visible_start_frame: u64, visible_span: u64, rect: egui::Rect) -> f32 {
-    let relative = frame.saturating_sub(visible_start_frame);
-    let normalized = relative as f64 / visible_span as f64;
-    rect.left() + (normalized * f64::from(rect.width())) as f32
+fn project_time_for_source_frame(frame: u64, sample_rate: u32) -> Option<ProjectTimeNs> {
+    if sample_rate == 0 {
+        return None;
+    }
+
+    let nanos = u128::from(frame)
+        .checked_mul(1_000_000_000)?
+        .checked_div(u128::from(sample_rate))?;
+    Some(ProjectTimeNs::new(i64::try_from(nanos).ok()?))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::build_waveform_mesh;
+    use super::{TimelineTransform, build_waveform_mesh};
+    use rhythm_core::time::ProjectTimeNs;
     use rhythm_engine::waveform::{WavePeak, WaveformSlice};
+
+    #[test]
+    fn timeline_transform_round_trips_project_time_and_x() {
+        let rect =
+            egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
+        let transform = TimelineTransform::new(
+            rect,
+            ProjectTimeNs::new(1_000_000_000),
+            ProjectTimeNs::new(3_000_000_000),
+        )
+        .expect("valid transform");
+
+        assert_eq!(
+            transform.project_time_to_x(ProjectTimeNs::new(2_000_000_000)),
+            60.0
+        );
+        assert_eq!(
+            transform.x_to_project_time(60.0),
+            ProjectTimeNs::new(2_000_000_000)
+        );
+        assert_eq!(
+            transform.x_to_project_time(-100.0),
+            ProjectTimeNs::new(1_000_000_000)
+        );
+        assert_eq!(
+            transform.x_to_project_time(1_000.0),
+            ProjectTimeNs::new(3_000_000_000)
+        );
+    }
 
     #[test]
     fn waveform_uses_one_mesh_for_all_visible_peaks() {
@@ -118,8 +234,14 @@ mod tests {
             peaks: &peaks,
         };
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 64.0));
+        let transform = TimelineTransform::new(
+            rect,
+            ProjectTimeNs::new(0),
+            ProjectTimeNs::new(128_000_000),
+        )
+        .expect("valid transform");
 
-        let mesh = build_waveform_mesh(rect, slice, 0, 128, egui::Color32::WHITE);
+        let mesh = build_waveform_mesh(slice, 1_000, transform, egui::Color32::WHITE);
 
         assert_eq!(mesh.vertices.len(), 8);
         assert_eq!(mesh.indices.len(), 12);
@@ -138,8 +260,14 @@ mod tests {
             peaks: &peaks,
         };
         let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
+        let transform = TimelineTransform::new(
+            rect,
+            ProjectTimeNs::new(256_000_000),
+            ProjectTimeNs::new(512_000_000),
+        )
+        .expect("valid transform");
 
-        let mesh = build_waveform_mesh(rect, slice, 256, 512, egui::Color32::WHITE);
+        let mesh = build_waveform_mesh(slice, 1_000, transform, egui::Color32::WHITE);
         let min_x = mesh
             .vertices
             .iter()
