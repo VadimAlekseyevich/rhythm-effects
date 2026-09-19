@@ -79,9 +79,32 @@ pub enum TextAlignment {
     Right,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FontWeight {
+    Thin,
+    ExtraLight,
+    Light,
+    #[default]
+    Normal,
+    Medium,
+    SemiBold,
+    Bold,
+    ExtraBold,
+    Black,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FontStyle {
+    #[default]
+    Normal,
+    Italic,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontReference {
     pub family: String,
+    pub weight: FontWeight,
+    pub style: FontStyle,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -196,11 +219,19 @@ mod tests {
     use crate::{animation::Animated, domain::Vec2};
 
     #[test]
+    fn font_reference_defaults_to_normal_upright_style() {
+        assert_eq!(super::FontWeight::default(), super::FontWeight::Normal);
+        assert_eq!(super::FontStyle::default(), super::FontStyle::Normal);
+    }
+
+    #[test]
     fn text_object_separates_static_layout_from_animated_color() {
         let text = super::TextObject {
             text: "Привет, rhythm".to_owned(),
             font: super::FontReference {
                 family: "Inter".to_owned(),
+                weight: super::FontWeight::SemiBold,
+                style: super::FontStyle::Italic,
             },
             font_size: 48.0,
             color: Animated::new_static(crate::domain::LinearRgba::black_opaque()),
@@ -209,6 +240,8 @@ mod tests {
 
         assert_eq!(text.text, "Привет, rhythm");
         assert_eq!(text.font.family, "Inter");
+        assert_eq!(text.font.weight, super::FontWeight::SemiBold);
+        assert_eq!(text.font.style, super::FontStyle::Italic);
         assert_eq!(text.font_size, 48.0);
         assert_eq!(text.alignment, super::TextAlignment::Center);
         assert_eq!(*text.color.base_value(), crate::domain::LinearRgba::black_opaque());
