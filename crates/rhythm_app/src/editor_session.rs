@@ -123,11 +123,7 @@ impl EditorSession {
         }
     }
 
-    pub fn begin_timeline_box_selection(
-        &mut self,
-        start: [f32; 2],
-        ctrl_toggle: bool,
-    ) {
+    pub fn begin_timeline_box_selection(&mut self, start: [f32; 2], ctrl_toggle: bool) {
         self.timeline_box_selection = Some(TimelineBoxSelection {
             start,
             current: start,
@@ -147,9 +143,7 @@ impl EditorSession {
             .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
     }
 
-    pub fn take_timeline_box_selection(
-        &mut self,
-    ) -> Option<([f32; 2], [f32; 2], bool)> {
+    pub fn take_timeline_box_selection(&mut self) -> Option<([f32; 2], [f32; 2], bool)> {
         self.timeline_box_selection
             .take()
             .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))

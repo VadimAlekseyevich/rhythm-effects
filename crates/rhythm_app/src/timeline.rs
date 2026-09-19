@@ -852,10 +852,7 @@ fn draw_timeline_rows(
                     ui.painter().rect_stroke(
                         clipped,
                         0.0,
-                        egui::Stroke::new(
-                            1.0,
-                            ui.visuals().selection.stroke.color,
-                        ),
+                        egui::Stroke::new(1.0, ui.visuals().selection.stroke.color),
                         egui::StrokeKind::Inside,
                     );
                     ui.painter().rect_filled(
@@ -867,8 +864,7 @@ fn draw_timeline_rows(
             }
 
             if primary_released
-                && let Some((start, current, ctrl_toggle)) =
-                    session.take_timeline_box_selection()
+                && let Some((start, current, ctrl_toggle)) = session.take_timeline_box_selection()
             {
                 let selection_rect = egui::Rect::from_two_pos(
                     egui::pos2(start[0], start[1]),
@@ -918,10 +914,7 @@ struct VisibleKeyHit {
     rect: egui::Rect,
 }
 
-fn keyframe_ids_in_box(
-    selection: egui::Rect,
-    hits: &[VisibleKeyHit],
-) -> Vec<KeyframeId> {
+fn keyframe_ids_in_box(selection: egui::Rect, hits: &[VisibleKeyHit]) -> Vec<KeyframeId> {
     hits.iter()
         .filter(|hit| selection.contains(hit.rect.center()))
         .map(|hit| hit.id)
