@@ -93,6 +93,7 @@ pub fn probe_audio_file(path: &Path) -> Result<AudioProbe, AudioDecodeError> {
         .ok_or(AudioDecodeError::MissingSampleRate)?;
     let channel_count = codec_params
         .channels
+        .as_ref()
         .ok_or(AudioDecodeError::MissingChannelLayout)?
         .count();
     let channel_layout = match channel_count {
