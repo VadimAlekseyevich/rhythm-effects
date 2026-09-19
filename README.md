@@ -21,3 +21,7 @@ The original [MVP_PLAN.md](MVP_PLAN.md) is retained as historical planning conte
 **M0 — Architecture Contract: complete.**
 
 The repository is documentation-complete for the MVP architecture and ready to begin implementation milestones. Canonical specs are Accepted; implementation changes must update specs/ADRs rather than silently diverging.
+
+## Local Windows setup
+
+See [Windows Development Setup](docs/07-planning/WINDOWS_SETUP.md) for commands from a clean machine through `cargo run -p rhythm_app`.
