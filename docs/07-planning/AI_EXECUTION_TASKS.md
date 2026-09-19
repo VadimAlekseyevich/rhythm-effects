@@ -130,7 +130,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-104** — Publish CPAL playback timestamp plus ProjectTimeNs clock anchors from the callback.
 - [x] **AI-105** — Implement editor-side audible ProjectTimeNs estimation using the stream clock.
 - [x] **AI-106** — Implement documented output-frame/latency fallback when backend timestamps are unusable.
-- [ ] **AI-107** — Implement gain application with finite scalar validation.
+- [x] **AI-107** — Implement gain application with finite scalar validation.
 - [ ] **AI-108** — Handle audio-device/stream error by stopping playback without mutating Project.
 - [ ] **AI-109** — Add diagnostics for device/config/generation/clock/error count/memory.
 - [ ] **AI-110** — Run 44.1k source -> 48k output integration test.

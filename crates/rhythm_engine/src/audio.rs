@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, AtomicU64, Ordering},
     },
 };
 
@@ -204,6 +204,7 @@ impl PlaybackState {
 #[derive(Debug)]
 pub enum AudioStreamControlError {
     Cpal(String),
+    InvalidGain,
     InvalidState {
         expected: PlaybackState,
         actual: PlaybackState,
@@ -221,6 +222,7 @@ struct PlaybackControl {
     ended: AtomicBool,
     state: AtomicU8,
     stream_error_count: AtomicU64,
+    gain_bits: AtomicU32,
     next_generation: AtomicU64,
     active_generation: AtomicU64,
     pending_generation: AtomicU64,
@@ -235,6 +237,7 @@ impl Default for PlaybackControl {
             ended: AtomicBool::new(false),
             state: AtomicU8::new(PlaybackState::Ready as u8),
             stream_error_count: AtomicU64::new(0),
+            gain_bits: AtomicU32::new(1.0_f32.to_bits()),
             next_generation: AtomicU64::new(1),
             active_generation: AtomicU64::new(PlaybackGeneration::INITIAL.get()),
             pending_generation: AtomicU64::new(PlaybackGeneration::INITIAL.get()),
@@ -408,6 +411,22 @@ impl CpalPlaybackStream {
         self.control.stream_error_count.load(Ordering::Relaxed)
     }
 
+    #[must_use]
+    pub fn gain(&self) -> f32 {
+        f32::from_bits(self.control.gain_bits.load(Ordering::Relaxed))
+    }
+
+    pub fn set_gain(&self, gain: f32) -> Result<(), AudioStreamControlError> {
+        if !gain.is_finite() {
+            return Err(AudioStreamControlError::InvalidGain);
+        }
+
+        self.control
+            .gain_bits
+            .store(gain.to_bits(), Ordering::Release);
+        Ok(())
+    }
+
     pub fn stream(&self) -> &cpal::Stream {
         &self.stream
     }
@@ -553,7 +572,9 @@ where
                     }
                 }
 
-                write_playback_samples(&buffer, &mut cursor, output_channels, output);
+                let gain =
+                    f32::from_bits(callback_control.gain_bits.load(Ordering::Relaxed));
+                write_playback_samples(&buffer, &mut cursor, output_channels, gain, output);
 
                 callback_control
                     .frame_cursor
@@ -619,6 +640,7 @@ fn write_playback_samples<T>(
     buffer: &PlaybackBuffer,
     frame_cursor: &mut usize,
     output_channels: usize,
+    gain: f32,
     output: &mut [T],
 ) where
     T: SizedSample + FromSample<f32>,
@@ -636,8 +658,8 @@ fn write_playback_samples<T>(
         }
 
         let source_index = *frame_cursor * 2;
-        let left = buffer.interleaved_stereo_f32[source_index];
-        let right = buffer.interleaved_stereo_f32[source_index + 1];
+        let left = buffer.interleaved_stereo_f32[source_index] * gain;
+        let right = buffer.interleaved_stereo_f32[source_index + 1] * gain;
 
         match output_channels {
             1 => {
@@ -1168,6 +1190,38 @@ mod tests {
     }
 
     #[test]
+    fn callback_writer_applies_gain_without_allocating_state() {
+        let playback = super::prepare_playback_buffer(
+            DecodedAudio {
+                sample_rate: 48_000,
+                channel_layout: AudioChannelLayout::Stereo,
+                interleaved_f32: vec![0.5, -0.5],
+            },
+            48_000,
+        )
+        .expect("playback");
+
+        let mut cursor = 0;
+        let mut output = [0.0_f32; 2];
+        super::write_playback_samples(&playback, &mut cursor, 2, 0.25, &mut output);
+
+        assert_eq!(output, [0.125, -0.125]);
+    }
+
+    #[test]
+    fn gain_atomic_defaults_to_one_and_rejects_non_finite_values() {
+        let control = super::PlaybackControl::default();
+        assert_eq!(
+            f32::from_bits(control.gain_bits.load(std::sync::atomic::Ordering::Relaxed)),
+            1.0
+        );
+
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(!invalid.is_finite());
+        }
+    }
+
+    #[test]
     fn callback_writer_copies_stereo_and_emits_silence_at_end() {
         let playback = super::prepare_playback_buffer(
             DecodedAudio {
@@ -1181,7 +1235,7 @@ mod tests {
 
         let mut cursor = 0;
         let mut output = [9.0_f32; 6];
-        super::write_playback_samples(&playback, &mut cursor, 2, &mut output);
+        super::write_playback_samples(&playback, &mut cursor, 2, 1.0, &mut output);
 
         assert_eq!(cursor, 2);
         assert_eq!(output, [0.25, -0.25, 0.5, -0.5, 0.0, 0.0]);
@@ -1201,7 +1255,7 @@ mod tests {
 
         let mut cursor = 0;
         let mut output = [9.0_f32; 2];
-        super::write_playback_samples(&playback, &mut cursor, 1, &mut output);
+        super::write_playback_samples(&playback, &mut cursor, 1, 1.0, &mut output);
 
         assert_eq!(cursor, 2);
         assert_eq!(output, [0.0, 0.375]);
@@ -1221,7 +1275,7 @@ mod tests {
 
         let mut cursor = 0;
         let mut output = [9.0_f32; 4];
-        super::write_playback_samples(&playback, &mut cursor, 4, &mut output);
+        super::write_playback_samples(&playback, &mut cursor, 4, 1.0, &mut output);
 
         assert_eq!(cursor, 1);
         assert_eq!(output, [0.25, -0.25, 0.0, 0.0]);
