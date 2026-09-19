@@ -67,7 +67,7 @@ There is no global Auto-Key mode.
 Rectangle:
 - size;
 - fill;
-- corner radius if implemented from schema.
+- corner radius.
 
 Ellipse:
 - size;
@@ -211,7 +211,7 @@ MVP is local-first:
 - plugins;
 - nodes;
 - multiple audio tracks/mixing;
-- automatic BPM detection unless separately promoted;
+- tap tempo and automatic BPM detection unless separately promoted;
 - packed project/collect assets;
 - imported fonts;
 - SVG;
