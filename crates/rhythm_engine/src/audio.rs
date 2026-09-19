@@ -638,8 +638,7 @@ where
                     }
                 }
 
-                let gain =
-                    f32::from_bits(callback_control.gain_bits.load(Ordering::Relaxed));
+                let gain = f32::from_bits(callback_control.gain_bits.load(Ordering::Relaxed));
                 write_playback_samples(&buffer, &mut cursor, output_channels, gain, output);
 
                 callback_control
@@ -1247,7 +1246,12 @@ mod tests {
             control.active_generation(),
             super::PlaybackGeneration::INITIAL
         );
-        assert_eq!(control.stream_error_count.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(
+            control
+                .stream_error_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
     }
 
     #[test]
