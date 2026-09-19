@@ -3,10 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use rubato::{
-    Fft, FixedSync, Resampler,
-    audioadapter_buffers::owned::InterleavedOwned,
-};
+use rubato::{Fft, FixedSync, Resampler, audioadapter_buffers::owned::InterleavedOwned};
 use symphonia::core::{
     codecs::{AudioDecoderOptions, CodecParameters},
     errors::Error as SymphoniaError,
@@ -218,7 +215,11 @@ fn resample_decoded_audio(
     if audio.interleaved_f32.len() % channels != 0 {
         return Err(AudioDecodeError::InvalidPcmLength);
     }
-    if !audio.interleaved_f32.iter().all(|sample| sample.is_finite()) {
+    if !audio
+        .interleaved_f32
+        .iter()
+        .all(|sample| sample.is_finite())
+    {
         return Err(AudioDecodeError::NonFinitePcm);
     }
 
@@ -331,7 +332,12 @@ mod tests {
         assert_eq!(output.sample_rate, 48_000);
         assert_eq!(output.channel_layout, AudioChannelLayout::Mono);
         assert_eq!(output.frame_count(), 4_800);
-        assert!(output.interleaved_f32.iter().all(|sample| sample.is_finite()));
+        assert!(
+            output
+                .interleaved_f32
+                .iter()
+                .all(|sample| sample.is_finite())
+        );
     }
 
     #[test]
