@@ -20,6 +20,11 @@ impl BeatDivision {
     pub const fn parts_per_beat(self) -> u16 {
         self.parts_per_beat
     }
+
+    #[must_use]
+    pub const fn ticks_per_step(self) -> i64 {
+        PPQ / self.parts_per_beat as i64
+    }
 }
 
 macro_rules! signed_time_type {
@@ -157,6 +162,27 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn every_mvp_division_has_exact_tick_step() {
+        let cases = [
+            (1, 960),
+            (2, 480),
+            (3, 320),
+            (4, 240),
+            (6, 160),
+            (8, 120),
+            (12, 80),
+            (16, 60),
+            (24, 40),
+            (32, 30),
+        ];
+
+        for (parts, expected_ticks) in cases {
+            let division = super::BeatDivision::new(parts).expect("MVP beat division");
+            assert_eq!(division.ticks_per_step(), expected_ticks);
+        }
+    }
 
     #[test]
     fn beat_division_accepts_exactly_the_mvp_set() {
