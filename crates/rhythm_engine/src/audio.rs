@@ -303,6 +303,15 @@ impl PlaybackControl {
     fn accepts_generation(&self, generation: PlaybackGeneration) -> bool {
         generation != PlaybackGeneration::INITIAL && generation == self.active_generation()
     }
+
+    fn handle_stream_error(&self) {
+        self.stream_error_count.fetch_add(1, Ordering::Relaxed);
+        self.active_generation
+            .store(PlaybackGeneration::INITIAL.get(), Ordering::Release);
+        self.pending_generation
+            .store(PlaybackGeneration::INITIAL.get(), Ordering::Release);
+        self.set_state(PlaybackState::Error);
+    }
 }
 
 pub struct CpalPlaybackStream {
@@ -553,6 +562,11 @@ where
         .build_output_stream(
             config,
             move |output: &mut [T], info| {
+                if callback_control.state() == PlaybackState::Error {
+                    output.fill(T::from_sample(0.0_f32));
+                    return;
+                }
+
                 callback_control.apply_pending_seek_at_callback_boundary();
                 let mut cursor =
                     usize::try_from(callback_control.frame_cursor.load(Ordering::Acquire))
@@ -586,10 +600,7 @@ where
                 }
             },
             move |_| {
-                error_control
-                    .stream_error_count
-                    .fetch_add(1, Ordering::Relaxed);
-                error_control.set_state(PlaybackState::Error);
+                error_control.handle_stream_error();
             },
             None,
         )
@@ -1159,6 +1170,32 @@ mod tests {
         );
         assert_eq!(control.apply_pending_seek_at_callback_boundary(), None);
         assert_eq!(control.active_generation(), generation);
+    }
+
+    #[test]
+    fn stream_error_preserves_cursor_and_invalidates_generation() {
+        let control = super::PlaybackControl::default();
+        control
+            .frame_cursor
+            .store(321, std::sync::atomic::Ordering::Release);
+        let generation = control.request_seek(321);
+        control.apply_pending_seek_at_callback_boundary();
+        assert!(control.accepts_generation(generation));
+
+        control.handle_stream_error();
+
+        assert_eq!(control.state(), super::PlaybackState::Error);
+        assert_eq!(
+            control
+                .frame_cursor
+                .load(std::sync::atomic::Ordering::Acquire),
+            321
+        );
+        assert_eq!(
+            control.active_generation(),
+            super::PlaybackGeneration::INITIAL
+        );
+        assert_eq!(control.stream_error_count.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 
     #[test]
