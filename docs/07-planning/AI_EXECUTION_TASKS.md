@@ -72,7 +72,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-049** — Implement TempoMap V1 with one initial tempo segment and GridOffsetNs.
 - [x] **AI-050** — Implement MusicalTick to ProjectTimeNs conversion using i128 intermediates.
 - [x] **AI-051** — Implement ProjectTimeNs to continuous musical position conversion without hidden rounding.
-- [ ] **AI-052** — Implement nearest-grid snapping with exact half ties resolving later/right.
+- [x] **AI-052** — Implement nearest-grid snapping with exact half ties resolving later/right.
 - [ ] **AI-053** — Implement floor/ceil grid conversion helpers and negative-tick tests.
 - [ ] **AI-054** — Implement frame-index to ProjectTimeNs conversion derived independently from N.
 - [ ] **AI-055** — Implement LinearRgba with finite-value validation and normalized alpha.

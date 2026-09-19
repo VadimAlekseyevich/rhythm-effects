@@ -85,6 +85,7 @@ pub enum BpmError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimeConversionError {
     TempoUnavailable,
+    NonFiniteTickPosition,
     Overflow,
 }
 
@@ -189,6 +190,32 @@ impl TempoMap {
 
         Ok(ProjectTimeNs::new(project_ns))
     }
+}
+
+pub fn snap_tick_position_to_grid(
+    tick_position: f64,
+    division: BeatDivision,
+) -> Result<MusicalTick, TimeConversionError> {
+    if !tick_position.is_finite() {
+        return Err(TimeConversionError::NonFiniteTickPosition);
+    }
+
+    let step = division.ticks_per_step() as f64;
+    let lower = (tick_position / step).floor() * step;
+    let upper = lower + step;
+    let lower_distance = tick_position - lower;
+    let upper_distance = upper - tick_position;
+    let snapped = if lower_distance < upper_distance {
+        lower
+    } else {
+        upper
+    };
+
+    if snapped < i64::MIN as f64 || snapped > i64::MAX as f64 {
+        return Err(TimeConversionError::Overflow);
+    }
+
+    Ok(MusicalTick::new(snapped as i64))
 }
 
 fn div_round_nearest_ties_away_from_zero(numerator: i128, denominator: i128) -> i128 {
@@ -381,6 +408,49 @@ mod tests {
         AudioFramePosition, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
         SampleRate,
     };
+
+    #[test]
+    fn grid_snap_half_ties_choose_later_tick() {
+        let division = super::BeatDivision::new(4).expect("1/4 grid");
+
+        assert_eq!(
+            super::snap_tick_position_to_grid(120.0, division)
+                .expect("finite snap")
+                .get(),
+            240
+        );
+        assert_eq!(
+            super::snap_tick_position_to_grid(-120.0, division)
+                .expect("finite snap")
+                .get(),
+            0
+        );
+        assert_eq!(
+            super::snap_tick_position_to_grid(119.999, division)
+                .expect("finite snap")
+                .get(),
+            0
+        );
+        assert_eq!(
+            super::snap_tick_position_to_grid(120.001, division)
+                .expect("finite snap")
+                .get(),
+            240
+        );
+    }
+
+    #[test]
+    fn grid_snap_rejects_non_finite_positions() {
+        let division = super::BeatDivision::new(4).expect("1/4 grid");
+        assert_eq!(
+            super::snap_tick_position_to_grid(f64::NAN, division),
+            Err(super::TimeConversionError::NonFiniteTickPosition)
+        );
+        assert_eq!(
+            super::snap_tick_position_to_grid(f64::INFINITY, division),
+            Err(super::TimeConversionError::NonFiniteTickPosition)
+        );
+    }
 
     #[test]
     fn project_time_maps_to_continuous_tick_position_without_rounding() {
