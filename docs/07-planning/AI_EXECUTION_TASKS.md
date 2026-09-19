@@ -111,7 +111,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 ## M4 — Audio
 
 - [x] **AI-087** — Add Symphonia, CPAL and Rubato dependencies with only required features.
-- [ ] **AI-088** — Implement audio-file probing and decode result/error types in rhythm_engine.
+- [x] **AI-088** — Implement audio-file probing and decode result/error types in rhythm_engine.
 - [ ] **AI-089** — Implement WAV decode fixture support.
 - [ ] **AI-090** — Implement MP3 decode fixture support.
 - [ ] **AI-091** — Implement FLAC decode fixture support.

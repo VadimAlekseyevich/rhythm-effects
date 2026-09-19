@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod audio;
 pub mod renderer;
 pub mod scene_eval;
 
