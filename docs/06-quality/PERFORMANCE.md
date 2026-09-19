@@ -1,415 +1,303 @@
 # Performance
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> Performance includes runtime responsiveness, audio reliability, memory behavior, export throughput, startup time, and developer build/iteration speed.
+> Performance includes runtime responsiveness, audio reliability, memory behavior, export throughput, startup time, and developer iteration speed.
 
-## 1. Philosophy
+## 1. Performance philosophy
 
-Performance is not a post-MVP cleanup phase.
-
-The product promise depends on the editor feeling immediate while manipulating musical timing and visual state.
-
-At the same time, development speed matters because a UI-heavy product requires many small iterations.
-
-We optimize two loops:
+Rhythm Effects has two latency loops:
 
 ~~~text
-user loop:
-input → visual/audio feedback
+creator:
+input -> visual/audio feedback
 
-developer loop:
-edit code → compile → run → evaluate UX
+developer:
+edit -> compile -> run -> judge UX
 ~~~
 
-Both loops need explicit budgets.
+Both matter.
 
----
+Performance work is architectural, measured, and regression-controlled rather than postponed to a final optimization phase.
 
-## 2. Performance domains
+## 2. Reference project classes
 
-Track separately:
+### Small
 
-- application startup;
-- project open;
-- UI input latency;
-- preview frame time;
-- timeline frame time;
-- animation evaluation;
-- waveform interaction;
-- audio callback stability;
-- memory;
-- asset loading;
-- export throughput;
-- incremental compile time;
-- clean compile time;
-- link time;
-- test feedback time.
+- 10 objects;
+- 100 keyframes;
+- 1080p composition;
+- 0–2 effects per object;
+- one 3-minute audio track.
 
-Do not hide all of these behind a single "FPS" metric.
+### Medium — primary MVP performance gate
 
----
+- 100 objects;
+- 1,000 keyframes;
+- 1080p composition;
+- mixed shapes/images/text;
+- representative effects;
+- one 10-minute audio track.
+
+### Stress
+
+- 500 objects;
+- 10,000+ keyframes;
+- 4K composition;
+- heavy effect/text density.
+
+Stress exists to expose algorithmic failure. It is not the normal release smoothness promise.
 
 ## 3. Preview frame budget
 
-Target baseline:
-
-- 60 FPS minimum for normal MVP projects on supported hardware;
-- 120 FPS desirable for simple scenes where display refresh allows.
-
-Frame budget at 60 FPS:
+Primary release target on representative supported hardware:
 
 ~~~text
-16.67 ms total
+60 FPS
+16.67 ms/frame
 ~~~
 
-A healthy editor should not consume the whole budget on UI chrome.
+For the Medium fixture at 1080p/Auto preview:
 
-Suggested provisional budget breakdown for a normal project:
+- p95 frame time <= 16.67 ms;
+- p99 frame time <= 25 ms during non-loading steady editing;
+- no repeated >50 ms hitch during ordinary keyframe/viewport manipulation.
 
-- input/editor logic: < 2 ms typical;
-- timeline/UI: < 4 ms typical;
-- animation evaluation: < 1 ms typical;
-- composition rendering: < 8 ms typical;
-- margin/present/driver variability: remaining budget.
+Simple scenes may run at 120+ FPS, but 120 FPS is not an MVP release requirement.
 
-These are diagnostic targets, not hard architectural contracts until measured.
+## 4. Subsystem diagnostic budgets
 
----
+For Medium fixture, typical steady-state CPU targets:
 
-## 4. Input latency
+- input/editor command logic: <= 2 ms/frame;
+- timeline + UI layout/draw CPU: <= 4 ms/frame;
+- animation evaluation: <= 1 ms/frame;
+- renderer CPU command encoding: <= 3 ms/frame.
 
-User actions that should feel immediate:
+These are diagnostic budgets, not individually user-visible release gates. GPU time consumes the remainder of the 16.67 ms target.
 
-- selecting keyframe;
-- dragging keyframe;
-- moving object;
-- changing property;
-- play/pause;
-- moving playhead;
-- zooming timeline.
+## 5. Interaction latency
 
-Avoid any routine input path that waits for:
+No routine interaction may synchronously wait on:
 
-- file I/O;
-- audio decode;
+- disk I/O;
+- media decode;
+- waveform build;
+- project serialization;
 - GPU readback;
-- full project serialization;
-- full waveform rebuild;
-- expensive global layout.
+- FFmpeg;
+- full-project traversal not required by the operation.
 
----
+Target:
 
-## 5. Timeline scalability
+- pointer/keyboard edit should become visible by the next rendered frame under normal load.
 
-Timeline cost should depend primarily on visible content, not total project size.
+## 6. Timeline complexity
 
-Required strategy:
+Frame work depends primarily on visible content.
 
-- visible row culling;
-- visible time-range filtering;
-- binary/range lookup for keyframes;
-- no full-project scan per frame unless benchmark proves harmless;
-- cached text/layout where sensible.
+Required:
 
-### Benchmark fixtures
+- visible-row virtualization;
+- visible MusicalTick range query;
+- sorted keyframe range lookup;
+- no O(total keyframes) drawing/hit-test each frame;
+- no one-widget-per-invisible-keyframe architecture.
 
-Small:
-- 10 objects;
-- 100 keyframes.
+10,000-key stress fixture must remain navigable even if it does not sustain the Medium 60 FPS gate.
 
-Medium:
-- 100 objects;
-- 1,000 keyframes.
+## 7. Animation evaluation
 
-Stress:
-- 500 objects;
-- 10,000+ keyframes.
+Avoid per-frame:
 
-MVP performance acceptance is based mainly on Small/Medium.
+- heap allocation per property;
+- full keyframe scans;
+- cloning keyframe vectors;
+- full Project validation.
 
-Stress reveals algorithmic problems.
+Use binary/range lookup and rebuildable caches.
 
----
+## 8. Audio realtime gate
 
-## 6. Animation evaluation
+Normal playback callback:
 
-Evaluation should avoid:
+- zero heap allocation on normal path;
+- zero file I/O;
+- zero resampling/decode;
+- zero blocking project locks;
+- bounded work.
 
-- allocation per property;
-- linear search through all keyframes;
-- unnecessary cloning;
-- repeated time conversion work that can be shared.
+Release gate on reference wired/local output:
 
-Use sorted keyframes and binary search/range cursor strategies.
+- no known underruns in 30-minute stress playback under Medium editor interaction;
+- no cumulative A/V drift;
+- systematic steady sync error <= 25 ms, target <= 10 ms where timestamp backend is reliable.
 
-Measure actual scene evaluation cost independently from rendering.
+Bluetooth/wireless latency is best-effort and documented.
 
----
+## 9. Waveform
 
-## 7. Audio callback
+A 10-minute track:
 
-The audio callback has stricter requirements than UI.
+- preprocessing runs outside UI/audio callback;
+- timeline pan/zoom does not scan raw PCM;
+- visible waveform rendering remains within timeline budget.
 
-Callback rules:
-
-- no heap allocation on normal path;
-- no file I/O;
-- no blocking locks;
-- no logging per callback;
-- no project mutation;
-- bounded predictable work.
+## 10. Renderer
 
 Track:
 
-- underruns;
-- callback duration if observable;
-- buffer starvation;
-- device reconfiguration failures.
-
-Any audible glitch during normal editing is a serious bug.
-
----
-
-## 8. Waveform
-
-Waveform rendering must never process raw PCM proportional to whole song length every frame.
-
-Use:
-
-- precomputed min/max levels;
-- multiple resolutions;
-- visible-range slicing;
-- batched drawing.
-
-Zoom/pan should stay smooth on multi-minute tracks.
-
----
-
-## 9. Renderer
-
-Track:
-
+- render passes;
 - draw calls;
-- bind-group changes;
-- intermediate textures;
-- temporary allocations;
-- effect pass count;
-- GPU readback;
-- texture upload frequency.
+- isolated effect objects;
+- temporary target count;
+- texture uploads;
+- working-target memory;
+- CPU encode time;
+- GPU time where timestamps are available.
 
-Avoid optimizing draw calls blindly before measurement.
+No ordinary preview GPU readback.
 
-Correct batching/caching should naturally prevent pathological behavior.
+## 11. Effects
 
----
+Each effect benchmark records cost at:
 
-## 10. Effects
+- 1080p Full;
+- 4K Auto preview;
+- full-resolution export.
 
-Effects can multiply rendering cost.
+If an effect makes representative Medium editing miss the frame gate, optimize/isolate its quality cost before release rather than hiding the regression.
 
-MVP effect stack should remain bounded and observable.
+## 12. Text
 
-For each effect measure:
+Unchanged text must not reshape every frame.
 
-- added GPU passes;
-- intermediate texture allocation;
-- resolution dependence;
-- per-object vs shared costs.
+Text-heavy fixture:
 
-Potentially expensive effects should expose quality limits or be excluded from MVP rather than making normal preview unreliable.
+- 50 TextObjects;
+- Latin/Cyrillic mix;
+- several fonts;
+- animated transforms/colors.
 
----
+## 13. Asset loading
 
-## 11. Text rendering
+Decode/upload is progressive/background.
 
-Measure:
+Large image import may take time, but existing timeline/transport remain responsive.
 
-- shaping/layout;
-- glyph cache misses;
-- atlas updates;
-- per-frame text rebuild;
-- large text object counts.
+## 14. Memory
 
-Text content that has not changed should not be reshaped every frame unnecessarily.
+Track separately:
 
----
-
-## 12. Asset loading
-
-Import/decode may run in background.
-
-Do not block the main UI while:
-
-- decoding large image;
-- generating thumbnail;
-- building waveform.
-
-The editor should show progressive readiness where practical.
-
----
-
-## 13. Memory
-
-Track at minimum:
-
-- project semantic data;
-- decoded PCM;
-- waveform caches;
-- decoded images;
+- semantic Project/history;
+- prepared audio buffer;
+- waveform peaks;
+- image CPU staging;
 - GPU textures;
-- intermediate render targets;
-- text atlases;
-- history/undo;
-- export buffers.
+- Rgba16Float working/effect targets;
+- text atlas;
+- export readback buffers.
 
-Avoid hidden duplicate full-size images/PCM where one representation can be shared.
+Normal export memory is bounded with duration.
 
----
-
-## 14. Export
-
-Export throughput is measured separately from realtime preview.
-
-Correctness first.
-
-Track:
-
-- evaluation time/frame;
-- GPU render time;
-- GPU readback;
-- pixel conversion;
-- encoder throughput.
-
-Memory must remain bounded with project duration.
-
----
+After audio preparation, do not retain both full source PCM and output-rate PCM indefinitely.
 
 ## 15. Startup
 
-Product expectation:
+Release target on the project's recorded reference machine:
 
-the editor shell should appear quickly.
+- warm launch to interactive shell: <= 1.5 s;
+- cold launch target: <= 3 s.
 
-Provisional target on a typical development machine:
-
-- warm startup to usable shell: ideally < 1 second;
-- cold startup: keep comfortably low, exact target measured later.
-
-Do not eagerly initialize every codec/cache before the window appears if it can be lazy.
-
----
+Nonessential font/media caches may initialize lazily after shell appears.
 
 ## 16. Project open
 
-Separate:
+For a Medium .rhfx with local assets available:
 
-- parse/migrate;
-- semantic validation;
-- editor availability;
-- asset readiness.
+- semantic JSON parse/migrate/validate target <= 500 ms on reference machine;
+- editor may become interactive before every image thumbnail/runtime asset is ready.
 
-The project shell should become interactable before every nonessential thumbnail/cache is ready.
+Missing media must not stall indefinitely.
 
----
+## 17. Save/recovery
 
-## 17. Build-time performance
+Medium explicit Save:
 
-Build speed is a first-class metric.
+- target semantic serialization/snapshot <= 100 ms;
+- disk publication may continue through a safe short operation;
+- no audible playback interruption.
 
-Track on a known development machine:
+Autosave/recovery must not create a visible repeated hitch.
 
-### Incremental UI edit
-A small change in rhythm_app followed by debug build.
+## 18. Export
 
-### Core edit
-A small rhythm_core change.
+Correctness precedes realtime speed.
 
-### Shader change
-If runtime shader loading allows avoiding Rust rebuild, measure that workflow.
+Track:
 
-### Clean debug build
+- animation eval;
+- render;
+- readback;
+- FFmpeg throughput;
+- memory.
 
-### Clean release build
+No release requirement that export be realtime.
 
-Targets should be established after initial scaffold, then regression-tracked.
+A 1080p60 Basic Rhythm fixture should not exhibit pathological per-frame startup/allocation cost.
 
----
+## 19. Build-time performance
 
-## 18. Dependency budget
+Absolute Rust compile time depends heavily on CPU, linker, cache state, and filesystem.
 
-Before adding a significant dependency, evaluate:
+Therefore the first successful scaffold build establishes a version-controlled baseline file containing:
 
-- value;
-- transitive crate count;
-- compile time;
-- feature flags;
-- native dependencies;
-- duplicate functionality.
+- machine CPU/RAM/OS;
+- Rust toolchain;
+- clean debug build;
+- clean release build;
+- one-line rhythm_app incremental edit;
+- one-line rhythm_core incremental edit;
+- test-suite time.
 
-Prefer disabling default features when unused.
+Before that first measurement, architecture uses these guardrails:
 
-Do not add an async ecosystem, image formats, codec families, or serialization stacks merely "for later."
+- no new heavyweight dependency without justification;
+- avoid default feature bloat;
+- only three main crates initially;
+- no general async ecosystem;
+- shaders should not require Rust recompilation during normal shader-only iteration if hot/reload workflow is later added.
 
----
+## 20. Build regression gate
 
-## 19. Crate boundaries and compile speed
+After baseline exists:
 
-Initial small crate graph is intentional.
+- routine incremental build regression >20% requires investigation;
+- clean-build regression >15% from one dependency/architecture change requires explicit acceptance;
+- unit/core test loop should remain fast enough for frequent local execution.
 
-A core change that rebuilds wgpu/egui-heavy code too often may justify boundary refinement.
+Regression percentages are compared on the same benchmark machine with warm/cold conditions recorded consistently.
 
-Do not split crates based only on conceptual purity.
+## 21. Instrumentation
 
-Use build measurements.
+Debug build includes an opt-in diagnostics overlay showing at least:
 
----
+- FPS/frame ms rolling p50/p95;
+- UI/timeline CPU ms;
+- animation eval ms;
+- renderer CPU ms;
+- visible key count;
+- draw/pass count;
+- preview scale;
+- background queue/jobs;
+- audio errors/clock state;
+- approximate major memory buckets.
 
-## 20. Profiling
+Use tracing for subsystem spans/events.
 
-Provide easy opt-in instrumentation.
+## 22. Benchmark fixtures
 
-Candidate tools/approaches:
-
-- tracing spans;
-- custom frame timing overlay;
-- per-subsystem rolling averages;
-- GPU timestamp queries later if needed;
-- external profilers for deep investigations.
-
-A hidden debug overlay may show:
-
-- FPS/frame ms;
-- UI ms;
-- scene eval ms;
-- visible keyframes;
-- draw calls;
-- GPU texture memory estimate;
-- audio underruns;
-- background jobs.
-
----
-
-## 21. Regression policy
-
-A feature PR/commit that causes a clear performance regression on core interaction should not be accepted silently.
-
-Document:
-
-- before;
-- after;
-- reason;
-- whether regression is acceptable.
-
-Large regressions need explicit tradeoff decision.
-
----
-
-## 22. Performance test projects
-
-Keep version-controlled generated/fixture descriptions where practical.
-
-Fixtures:
+Version-controlled generated/redistributable fixtures:
 
 - Empty;
 - Basic Rhythm;
@@ -419,60 +307,29 @@ Fixtures:
 - Timeline Stress;
 - Long Audio.
 
-Do not require committing large copyrighted audio/video assets.
+No copyrighted test media is required.
 
-Use generated or redistributable test media.
+## 23. Regression policy
 
----
+A significant core-workflow performance regression is documented with:
 
-## 23. Debug vs release
+- fixture;
+- before;
+- after;
+- machine;
+- reason;
+- accepted mitigation/tradeoff.
 
-Debug Rust/wgpu performance may differ substantially.
+Do not silently move performance targets to accommodate a regression.
 
-Use:
+## 24. Definition of Done
 
-- debug for iteration correctness;
-- optimized/dev profile tuning if needed;
-- release for meaningful runtime acceptance.
+Performance is MVP-ready when:
 
-Do not dismiss catastrophic debug iteration performance either; it affects development UX.
-
----
-
-## 24. MVP performance gates
-
-Before MVP candidate:
-
-- no routine UI operation causes visible multi-second stalls;
-- medium timeline remains comfortably interactive;
-- audio playback has no known normal-workflow underruns;
-- 60 FPS preview achievable on representative scenes/hardware;
-- project save/autosave does not cause disruptive hitching;
-- export memory bounded;
-- startup acceptable;
-- build-time baseline documented.
-
----
-
-## 25. Open decisions
-
-- representative Windows hardware baseline;
-- exact startup target;
-- exact medium-scene frame budget;
-- target maximum project duration;
-- decoded PCM strategy/memory limits;
-- acceptable build-time budgets;
-- debug profile optimization settings.
-
----
-
-## 26. Definition of Done
-
-Performance documentation is actionable when:
-
-- benchmark fixtures exist;
-- debug timing overlay exists;
-- startup/frame/audio/build metrics can be recorded;
-- baseline numbers are checked into docs or CI artifacts;
-- no obvious O(total project size) timeline rendering path remains;
-- build-time regression is considered during dependency decisions.
+- benchmark environment/baselines are recorded;
+- Medium fixture passes frame gates;
+- 30-minute audio stress has no known underruns/drift growth;
+- startup/open/save targets are measured;
+- timeline stress proves visible-range architecture;
+- export memory is duration-bounded;
+- build-time regression tracking exists.

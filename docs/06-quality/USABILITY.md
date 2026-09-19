@@ -1,353 +1,208 @@
 # Usability
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> Interface comfort is a product requirement, not subjective polish. This document converts that principle into review criteria.
+> Interface comfort is a product requirement with measurable review criteria.
 
-## 1. Core usability goals
+## 1. Core goals
 
-The editor should be:
+The editor is:
 
 - readable;
 - shallow;
 - predictable;
 - forgiving;
-- fast with keyboard;
-- discoverable with pointer;
+- fast by keyboard;
+- discoverable by pointer;
 - comfortable for long sessions.
 
-A feature is not complete merely because it is technically reachable.
+A technically reachable feature is not necessarily usable.
 
----
-
-## 2. Primary workflow metric
-
-North-star task:
+## 2. North-star workflow
 
 ~~~text
 hear moment
-→ move to rhythm position
-→ add/select keyframe
-→ edit property
-→ preview
+-> move to rhythm position
+-> add/select keyframe
+-> edit property
+-> preview
 ~~~
 
-The number of unnecessary actions in this loop should stay extremely low.
+This loop receives the strongest usability attention.
 
----
+## 3. Readability gates
 
-## 3. Readability
+At Windows scaling 100%, 125%, and 150%:
 
-Requirements:
+- base UI text remains readable;
+- no ordinary UI text below DESIGN_SYSTEM minimum;
+- clipped labels have tooltip/space recovery rather than unreadable shrink;
+- numerical time/value readouts remain distinguishable;
+- critical state is not color-only.
 
-- default text comfortably readable at normal Windows scaling;
-- critical labels not compressed into tiny typography;
-- numeric values distinguishable;
-- sufficient contrast;
-- no critical meaning conveyed by subtle color only.
+## 4. Target gates
 
-Test at:
+- ordinary target >= 32×32 logical px where layout allows;
+- keyframe hit area >= 18×18;
+- splitters have forgiving >=8 px hit zone;
+- handles remain clickable independent of viewport zoom.
 
-- 100%;
-- 125%;
-- 150% Windows scaling.
-
----
-
-## 4. Hit targets
-
-Important tiny-looking visual elements receive larger interactive areas.
-
-Examples:
-
-- keyframes;
-- playhead handle;
-- curve handles;
-- visibility/lock icons;
-- panel splitters.
-
-Evaluate misclick rate during fast use.
-
----
+Measure misclick/frustration during fast timeline work.
 
 ## 5. Navigation depth
 
-Routine operations should remain in the main workspace.
+Core workflow should remain in the default workspace.
 
-Design smell thresholds:
+Release blockers include:
 
-- tabs inside tabs;
-- three or more disclosure levels;
-- repeated modal dialogs;
-- hidden secondary windows needed for common animation.
+- routine tabs inside tabs;
+- required modal dialogs for keyframing;
+- common actions hidden behind 3+ disclosure layers;
+- a new permanent panel that duplicates an existing context.
 
-Any new permanent navigation depth requires justification.
+## 6. Action-count baseline
 
----
-
-## 6. Panel count
-
-Default workspace should keep only high-value persistent regions.
-
-New functionality should first use:
-
-1. existing group;
-2. contextual inspector;
-3. collapsed advanced section;
-4. command search;
-5. new panel only when spatial persistence is necessary.
-
----
-
-## 7. Action-count review
-
-Record action counts for:
+Track these user tasks:
 
 - import audio;
-- align BPM;
-- create shape;
-- add position keyframe;
-- move one beat;
-- add second keyframe;
-- apply easing;
-- duplicate 4-beat pattern;
+- set/adjust BPM;
+- create rectangle;
+- create first Position key;
+- advance one beat;
+- create second key;
+- apply easing preset;
+- duplicate a four-beat pattern;
 - add effect;
 - export.
 
-A regression in common-task action count should be questioned.
+A change that adds avoidable steps to a high-frequency task requires justification.
 
----
+## 7. Focus tests
 
-## 8. Shortcut discoverability
-
-A new user should discover shortcuts through:
-
-- menus;
-- tooltips;
-- command search;
-- visible hints.
-
-Experienced users should not need menus for repeated work.
-
----
-
-## 9. Focus predictability
-
-Test repeatedly switching between:
+Repeatedly move between:
 
 - timeline;
 - viewport;
-- inspector numeric field;
-- text edit;
-- object list.
+- object list;
+- inspector numeric input;
+- text editing;
+- command search.
 
-The user should understand what Delete, arrows, and shortcuts will affect.
+The user should predict what arrows, Delete, P/S/R/O, K, and Space will do.
 
-Hidden focus is a severe usability problem.
+Hidden focus is a serious defect.
 
----
+## 8. Mode policy
 
-## 10. Mode minimization
+No global Auto-Key mode in MVP.
 
-Long-lived editing modes should be rare.
+Space always means Play/Pause outside text editing.
 
-Prefer temporary modifiers/direct manipulation.
+Temporary drag/modifier states are visible and Esc-cancellable.
 
-If a mode exists:
+Avoid long-lived invisible modes.
 
-- active mode is visible;
-- Escape exits;
-- cursor/controls reflect state;
-- entering mode cannot happen accidentally.
+## 9. Timeline comfort
 
----
+Explicitly test:
 
-## 11. Error recovery
+- grabbing one key;
+- dense selected keys;
+- 1/16 and 1/32 grids;
+- box selection;
+- collision preview;
+- pattern duplicate + move;
+- waveform/grid readability;
+- zoom anchor;
+- current division visibility.
 
-User mistakes should be easy to recover from:
+Timeline is the highest-priority UX surface.
 
-- strong undo;
-- Escape cancels drags;
-- delete reversible;
-- save failure non-destructive;
-- missing asset relinkable.
+## 10. First-use observation
 
-A user should feel safe experimenting.
+Recruit at least 3 people familiar with creative software but unfamiliar with Rhythm Effects before MVP candidate.
 
----
-
-## 12. Timeline comfort
-
-Evaluate:
-
-- ease of grabbing keyframes;
-- reading bar/beat hierarchy;
-- waveform/keyframe visual competition;
-- zoom anchor behavior;
-- panning;
-- box select;
-- multi-drag;
-- current subdivision visibility;
-- current position readability.
-
-The timeline is the most important usability surface.
-
----
-
-## 13. Long-session fatigue
-
-Avoid:
-
-- overly bright surfaces;
-- constant animations;
-- excessive contrast everywhere;
-- dense tiny controls;
-- repeated mouse travel across entire window;
-- modal interruptions;
-- fragile precise dragging.
-
-Test with sustained real editing, not only screenshots.
-
----
-
-## 14. Empty-state clarity
-
-A first-time user should know how to proceed when:
-
-- project empty;
-- no audio;
-- BPM unset;
-- no objects;
-- nothing selected.
-
-Use one obvious primary action rather than many equal buttons.
-
----
-
-## 15. Progressive disclosure
-
-Advanced features should not penalize basic workflow.
-
-When feature count grows:
-
-- defaults remain simple;
-- rarely used settings stay collapsed/searchable;
-- contextual controls appear only when meaningful.
-
-Measure default UI density over time.
-
----
-
-## 16. Terminology
-
-Use consistent words.
-
-Do not alternate casually between:
-
-- layer/object;
-- beat/grid point;
-- key/keyframe;
-- asset/media.
-
-Resolve terminology in GLOSSARY.md and product specs.
-
----
-
-## 17. Icons
-
-An icon-only action is acceptable only if broadly understood or strongly supported by tooltip/context.
-
-Ambiguous actions need text.
-
-Do not grow a private symbolic language users must memorize.
-
----
-
-## 18. First-use test
-
-Give the build to a person familiar with creative software but not Rhythm Effects.
-
-Without verbal instruction, observe whether they can:
+Without verbal instruction, observe:
 
 1. import audio;
 2. set BPM;
 3. create object;
-4. animate on grid;
+4. make two-key rhythm animation;
 5. play;
 6. save/export.
 
-Do not intervene until they become genuinely blocked.
+Record where they become confused.
 
-Record confusion, not only completion.
+Do not explain until the observation has captured the problem.
 
----
+## 11. Experienced workflow observation
 
-## 19. Experienced-user test
-
-After shortcuts are learned, measure speed for a repeated 8–16 beat animation pattern.
+After shortcuts are learned, test a repeated 8–16 beat animation pattern.
 
 Look for:
 
-- focus friction;
-- mouse travel;
-- repeated panel opening;
-- excessive clicks;
-- slow property access.
+- focus gymnastics;
+- excessive mouse travel;
+- repeated panel disclosure;
+- slow property access;
+- difficulty duplicating rhythms.
 
----
+## 12. Acceptance criteria
 
-## 20. Regression checklist
+Before MVP candidate:
 
-Every major UI feature review asks:
+- all 3 first-use testers complete the core two-keyframe animation with no blocking UI defect after normal self-discovery;
+- no repeated confusion appears in the same core step for a majority of testers without being addressed/documented;
+- experienced workflow can be completed predominantly with keyboard + direct manipulation;
+- 1280×720 layout remains functional;
+- 100/125/150% DPI remain usable.
 
-- Did text get smaller?
-- Did hit targets get smaller?
-- Did default panel density increase?
-- Did navigation become deeper?
-- Did a common action require more steps?
-- Did shortcut behavior become context-fragile?
-- Did new controls crowd timeline/viewport?
-- Can the feature be hidden contextually when unused?
+This is a small formative test, not statistical proof.
 
----
+## 13. Long-session review
 
-## 21. Quantitative targets
+Perform at least one 60-minute real editing session on a representative demo project.
 
-Exact pixel sizes should follow live prototype testing, but establish minimum tokens once UI exists:
+Record:
 
-- base font size;
-- secondary font size;
-- minimum target size;
-- row height;
-- spacing scale;
-- panel minimum widths.
+- eye strain/readability;
+- repeated clicks;
+- panel travel;
+- focus mistakes;
+- hotkey conflicts;
+- timeline fatigue;
+- accidental mode/state changes.
 
-These become design-system tokens, not per-widget improvisation.
+## 14. Terminology
 
----
+Use canonical Glossary terms consistently.
 
-## 22. Accessibility baseline
+Do not alternate layer/object/key/grid terminology arbitrarily.
 
-MVP should:
+## 15. Empty/error states
 
-- support Windows scaling;
-- preserve focus visibility;
-- avoid color-only critical states;
-- maintain reasonable contrast;
-- allow keyboard access to core workflows.
+A first-time user can identify the next action for:
 
-Formal accessibility certification is not MVP, but knowingly hostile patterns are rejected.
+- empty project;
+- no audio;
+- BPM unset;
+- no objects;
+- no selection;
+- missing asset/font;
+- lost audio device.
 
----
+## 16. Accessibility baseline
 
-## 23. Definition of Done
+MVP:
 
-Usability is MVP-ready when:
+- keyboard reaches core workflows;
+- focus is visible;
+- critical states are not color-only;
+- contrast is intentionally reviewed;
+- DPI scaling works.
 
-- core workflows have been observed with fresh users;
-- action-count baseline exists;
-- shortcut-heavy workflow tested;
-- text/hit targets work at common DPI settings;
-- no routine workflow requires deep nested navigation;
-- timeline editing is comfortable under realistic density;
-- UI regressions have a repeatable review checklist.
+Formal WCAG/certification is outside MVP, but obvious avoidable barriers are not accepted.
+
+## 17. Definition of Done
+
+Usability is MVP-ready when first-use and experienced observations are recorded, core focus/timeline issues are resolved, long-session review is complete, and design-system size/depth constraints hold.

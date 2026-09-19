@@ -1,419 +1,293 @@
 # Testing
 
-> **Status: Draft**
->
-> This document defines how Rhythm Effects proves correctness across time, animation, persistence, rendering, audio synchronization, interaction, and release behavior.
+> **Status: Accepted for MVP**
 
-## 1. Principles
+## 1. Testing layers
 
-Testing should focus strongest automation on deterministic core logic.
-
-UI feel still requires human review.
-
-Testing layers:
-
-1. unit tests;
-2. property/invariant tests;
-3. integration tests;
-4. renderer/reference tests where practical;
+1. fast unit tests;
+2. invariant/property tests;
+3. subsystem integration tests;
+4. deterministic scene/reference tests;
 5. end-to-end project fixtures;
-6. manual UX/release QA.
+6. manual hardware/usability QA.
 
----
+Core deterministic logic receives the strongest automation.
 
-## 2. Highest-risk correctness areas
+## 2. Required CI on every pull request
 
-Prioritize:
+- cargo fmt --check;
+- clippy with project-selected warning policy;
+- core/unit tests;
+- non-hardware integration tests;
+- debug/check build for workspace;
+- project-schema fixture tests;
+- WGSL/shader validation through the renderer test path where practical.
 
-- time conversion;
-- grid snapping;
-- keyframe ordering/collisions;
-- animation interpolation;
-- undo/redo;
-- save/load/migration;
-- audio playback position;
-- A/V export sync;
-- missing/corrupt assets;
-- renderer device/resize lifecycle.
+CI does not require a physical audio device.
 
----
+## 3. Time tests
 
-## 3. Core unit tests
+Required:
 
-rhythm_core should have fast tests for:
+- tick zero = GridOffsetNs;
+- exact PPQ divisions;
+- 120 BPM one beat = 0.5 s;
+- decimal/fixed BPM;
+- negative tick conversions;
+- snap half-tie positive/negative;
+- exact keyboard forward/back;
+- frame N direct timestamp;
+- long frame sequence has no accumulated drift.
 
-- ID allocation;
-- time conversion;
-- PPQ/grid resolution;
-- BPM validation;
-- tempo map;
-- project validation;
-- keyframe insert/delete/move;
-- interpolation;
-- command/history operations;
-- serialization semantic helpers.
+## 4. Animation tests
 
-These tests should run in seconds, not minutes.
+For scalar, Vec2, LinearRgba:
 
----
-
-## 4. Time-model tests
-
-Required examples:
-
-- tick zero equals grid offset;
-- 120 BPM quarter note = 0.5 s;
-- decimal BPM;
-- negative/pre-roll tick behavior;
-- exact common subdivision tick counts;
-- repeated step forward/back returns exact original tick;
-- frame timestamp derived from index does not accumulate error;
-- nearest snap boundary policy deterministic.
-
-Use table-driven tests.
-
----
-
-## 5. Animation tests
-
-For each supported animated type:
-
-- before first keyframe;
-- exactly first keyframe;
-- between keyframes;
-- exactly second keyframe;
-- after last keyframe;
+- zero keys;
+- one key;
+- before first;
+- exact key;
+- between;
+- after last;
 - Hold;
 - Linear;
-- easing presets;
-- cubic Bezier edge cases;
-- duplicate/collision prevention.
+- Bezier presets/custom;
+- outgoing-key ownership;
+- 0→360 rotation;
+- negative scale;
+- linear-light color midpoint;
+- arbitrary seek order.
 
-Preview and export evaluator call same tested implementation.
+## 5. Project/command/history tests
 
----
+- ID allocation;
+- validation;
+- add/delete/duplicate object;
+- nested fresh IDs;
+- key collision replace;
+- one drag = one history entry;
+- cancel restores before;
+- key-repeat coalescing;
+- redo truncation;
+- 500-entry cap;
+- save revision/dirty semantics;
+- BPM/offset undo without rewriting ticks;
+- compound Add Image from File.
 
-## 6. Command/history tests
+## 6. Serialization tests
 
-Test semantic sequences:
+Keep V1 and every future shipped historical schema fixture.
 
-~~~text
-edit → undo → original
-edit → undo → redo → edited
-~~~
+Test:
 
-Include:
-
-- property edit;
-- object create/delete;
-- keyframe move;
-- multi-keyframe move;
-- effect change;
-- BPM/offset change;
-- compound paste;
-- redo truncation after new edit;
-- drag transaction cancellation.
-
----
-
-## 7. Serialization tests
-
-Keep fixture files.
-
-Tests:
-
-- current schema round trip;
-- migration from every historical schema fixture;
+- round trip;
+- malformed JSON;
+- truncated file;
 - unknown future schema;
-- malformed syntax;
-- invalid semantic references;
 - duplicate IDs;
+- bad references;
+- NaN/invalid numeric representation;
+- safety limits;
+- relative/absolute assets;
 - missing assets;
-- safe-save behavior.
+- safe-save write/publish failures;
+- failed Open leaves current session unchanged.
 
-Never delete old migration fixtures casually.
+## 7. Recovery tests
 
----
+- unsaved project recovery;
+- dirty saved project recovery;
+- 30-second cadence logic;
+- transaction defer;
+- write coalescing;
+- current corrupt -> previous fallback;
+- explicit Save failure retains recovery;
+- Don't Save removal;
+- Restore opens dirty;
+- stale cleanup.
+
+At least one automated/integration test should simulate abnormal termination state through filesystem fixtures.
 
 ## 8. Waveform tests
 
-Given known PCM:
+Generated PCM:
 
-- min/max aggregation correct;
-- multilevel reduction correct;
-- final partial bucket correct;
-- stereo combine policy correct;
-- visible-range query boundaries correct.
+- min/max;
+- stereo envelope;
+- 64-frame base buckets;
+- partial bucket;
+- mip reduction;
+- visible query;
+- level selection;
+- short source;
+- sample-rate positioning.
 
-Waveform visual tests may use generated deterministic PCM.
+## 9. Audio pure tests
 
----
+Without device:
 
-## 9. Audio engine tests
+- supported decode fixtures;
+- mono/stereo preparation;
+- resampling length/timing;
+- project-time ↔ output-frame mapping;
+- seek clamping;
+- generation stale-anchor rejection;
+- end behavior.
 
-Pure audio logic can be automated:
+## 10. Audio manual/integration matrix
 
-- decode known short fixtures;
-- seek mapping;
-- resampling buffer behavior;
-- playback-position math.
+Before MVP:
 
-Device callback behavior requires integration/manual testing across devices.
+- Windows 10 and 11;
+- default built-in/wired output;
+- USB audio device where available;
+- Bluetooth as best-effort characterization;
+- 44.1 kHz and 48 kHz sources;
+- sample-rate mismatch;
+- device loss/default change;
+- rapid play/pause/seek;
+- 30-minute playback under editor load.
 
-Do not make CI depend on a physical audio output device.
+Record hardware/driver/backend for sync results.
 
----
+## 11. Renderer tests
 
-## 10. Renderer tests
+Semantic/unit:
 
-GPU tests can be fragile across drivers.
+- coordinate transforms;
+- anchor;
+- clockwise rotation;
+- preview scale parameter conversion.
 
-Prioritize deterministic logic separately from pixel output.
+GPU/reference:
 
-Useful renderer tests:
-
-- offscreen target creation;
-- coordinate conversion;
-- primitive scene render;
-- reference screenshots with tolerant comparison on controlled CI only if stable;
-- shader compilation;
-- resize/recreate paths.
-
-Do not require exact per-pixel equality across unrelated GPUs unless proven stable.
-
----
-
-## 11. Golden/reference scenes
-
-Maintain small deterministic scene descriptions:
-
-- one rectangle transform;
-- opacity;
-- image;
+- offscreen target;
+- rectangle;
+- ellipse;
+- sRGB image;
+- transparent premultiplied edge;
 - text;
-- easing;
-- blur/effect;
-- overlapping alpha.
+- each effect;
+- effect order;
+- Rgba16Float path;
+- export readback.
 
-For selected timestamps, store expected semantic evaluated values.
+Pixel/reference comparison uses tolerances where GPU differences make exact equality inappropriate.
 
-Pixel references can supplement but semantic references remain portable.
+## 12. Reference scenes
 
----
+Keep deterministic scenes:
 
-## 12. Export tests
+- Transform;
+- Alpha Overlap;
+- Image sRGB;
+- Text Cyrillic;
+- Easing;
+- Blur/Glow;
+- Five Effects;
+- Missing Asset;
+- Preview Scale.
 
-Automated:
+At chosen ProjectTimeNs, semantic evaluated values are exact expected data.
 
-- export short test project;
-- FFmpeg returns success;
-- probe output dimensions/FPS/duration/audio stream;
-- frame count reasonable;
-- cancellation cleanup.
+Pixel references supplement semantic tests.
 
-Timing fixture:
+## 13. Export tests
 
-- generated click audio;
-- visual flash aligned to known beat.
+Automated where environment has FFmpeg:
 
-Validate sync numerically using controlled media analysis where practical.
+- 1080p60 short;
+- 720p scale;
+- 30 FPS override;
+- video-only;
+- AAC audio;
+- cancellation;
+- FFmpeg failure;
+- output publication failure;
+- bounded readback count.
 
----
+Sync fixture:
 
-## 13. End-to-end project fixtures
-
-Create representative fixtures:
-
-### Basic Rhythm
-Small shape animation.
-
-### Mixed Assets
-Image + text + shape.
-
-### Easing
-Different interpolation types.
-
-### Effects
-Supported effect stack.
-
-### Long Timeline
-Many keyframes.
-
-### Missing Asset
-Intentional unresolved file.
-
-Fixtures should use redistributable/generated assets.
-
----
+- generated clicks;
+- exact visual flashes;
+- analyze multiple timestamps including long duration.
 
 ## 14. UI logic tests
 
-Where UI logic can be separated from rendering, test:
+Extract/test where reasonable:
 
-- selection semantics;
-- focus shortcut routing;
-- keyframe drag resolution;
-- viewport/timeline coordinate math;
-- box selection;
-- command enable/disable rules.
+- focus routing;
+- physical-key shortcut dispatch;
+- keyframe drag tick resolution;
+- box-selection math;
+- timeline range query;
+- viewport hit testing;
+- command enable/disable;
+- property keyframing behavior.
 
-Do not over-invest in brittle screenshot tests for every control.
+Avoid brittle screenshot tests for every ordinary control.
 
----
+## 15. Manual usability QA
 
-## 15. Manual interaction QA
+Check:
 
-Required checks:
+- 100/125/150% DPI;
+- 1280×720 constrained layout;
+- hit targets;
+- focus;
+- Russian/English keyboard layout;
+- Esc cancel;
+- numeric invalid intermediate input;
+- timeline zoom/pan;
+- direct animated transform;
+- missing font/asset;
+- long-session fatigue.
 
-- small target comfort;
-- high-DPI scaling;
-- keyboard focus;
-- Escape/cancel;
-- text-entry shortcut conflicts;
-- key repeat;
-- drag cancellation;
-- timeline zoom orientation;
-- selection coherence between panels.
+## 16. GPU matrix
 
-See USABILITY.md.
-
----
-
-## 16. Audio/manual device matrix
-
-Before MVP, test representative:
-
-- built-in motherboard/headphone output;
-- USB audio device if available;
-- Bluetooth output if supported/usable;
-- sample rates 44.1 kHz and 48 kHz;
-- device switching/error behavior.
-
-Document known limitations.
-
----
-
-## 17. GPU/manual matrix
-
-At least test:
+Before MVP, exercise normal workflow on available representatives of:
 
 - NVIDIA;
 - AMD;
-- Intel integrated graphics where accessible.
+- Intel integrated.
 
-Not every vendor needs perfect stress performance, but normal editor rendering must function.
+A vendor unavailable to the project cannot block development indefinitely, but broader public release requires collecting real reports before claiming support confidence.
 
----
+## 17. Fuzz/property testing
 
-## 18. Windows matrix
+High-value targets:
 
-MVP target:
+- time conversion/snap;
+- JSON/migration parser;
+- randomized valid command sequences preserving Project invariants.
 
-- Windows 10;
-- Windows 11;
-- common scaling such as 100%, 125%, 150%.
+Fuzzing may run scheduled/manual rather than every PR.
 
-Architecture may support other OSes later, but they are not MVP release gates.
+## 18. Regression rule
 
----
+Every deterministic core bug receives a regression test when practical.
 
-## 19. Fuzz/property testing
+A bug that cannot be automated should receive a reproducible fixture/manual case.
 
-Potential high-value targets:
+## 19. Release smoke test
 
-- serialized project parser/migrations;
-- time/grid conversions;
-- random command sequences preserving invariants.
-
-Introduce only where it adds value without slowing normal iteration.
-
----
-
-## 20. CI
-
-Minimum CI:
-
-- formatting;
-- clippy;
-- unit tests;
-- build.
-
-Later:
-
-- Windows release compile;
-- selected integration tests;
-- project migration fixtures;
-- shader validation.
-
-Heavy GPU/audio tests can remain scheduled/manual if CI environment is unreliable.
-
----
-
-## 21. Bug regression rule
-
-Every fixed deterministic core bug should receive a regression test when practical.
-
-Examples:
-
-- wrong snap at negative tick;
-- undo collision corruption;
-- migration drops effect;
-- export frame off by one.
-
----
-
-## 22. Release smoke test
-
-On clean installed/portable build:
+On a clean packaged Windows environment:
 
 1. launch;
 2. new project;
-3. import test audio;
-4. set BPM;
-5. create shape;
-6. create two keyframes;
-7. preview;
-8. save;
-9. reopen;
-10. undo/redo;
-11. add text/image;
-12. export;
-13. play result externally.
+3. import audio;
+4. set BPM/offset;
+5. create rectangle;
+6. animate Position;
+7. add image/text;
+8. add/ease/effect;
+9. save;
+10. close/reopen;
+11. undo/redo;
+12. force/check recovery flow in a separate run;
+13. export;
+14. play output externally.
 
----
+## 20. Definition of Done
 
-## 23. Failure testing
-
-Explicitly test:
-
-- invalid project file;
-- disk write denied;
-- missing audio/image;
-- FFmpeg unavailable/fails;
-- audio device fails;
-- window minimize/restore;
-- resize during playback;
-- export cancellation;
-- recovery restoration.
-
----
-
-## 24. Performance testing
-
-Testing includes performance regression checks from PERFORMANCE.md.
-
-Keep correctness and benchmark tests conceptually separate so timing noise does not fail ordinary unit CI unnecessarily.
-
----
-
-## 25. Definition of Done
-
-Testing strategy is MVP-ready when:
-
-- core deterministic systems have automated coverage;
-- schema migration fixtures exist;
-- representative E2E projects exist;
-- export smoke/timing tests exist;
-- release QA checklist is repeatable;
-- supported Windows/GPU/audio combinations have been manually exercised;
-- major bugs can be reproduced through tests or fixtures where practical.
+Testing is MVP-ready when deterministic core systems are automated, V1/recovery fixtures exist, hardware QA is recorded, export sync is verified, and the clean-package smoke test is repeatable.
