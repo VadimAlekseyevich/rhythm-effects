@@ -1,3 +1,9 @@
+> **Важно:** это первоначальный общий master-plan, сохранённый для истории и контекста.
+>
+> Актуальный русскоязычный обзор: FINAL_MVP_ARCHITECTURE_RU.md.
+> Canonical implementation contracts: ../README.md.
+> Старые «кандидаты/предварительные» решения ниже не являются текущим контрактом.
+
 # Rhythm Effects — MVP Master Plan
 
 > Статус: общий master-plan.
