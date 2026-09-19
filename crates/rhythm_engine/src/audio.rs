@@ -131,8 +131,7 @@ impl Default for AtomicClockAnchor {
 
 impl AtomicClockAnchor {
     fn publish(&self, anchor: PlaybackClockAnchor) -> bool {
-        let Ok(playback_stream_nanos) =
-            u64::try_from(anchor.playback_stream_instant.as_nanos())
+        let Ok(playback_stream_nanos) = u64::try_from(anchor.playback_stream_instant.as_nanos())
         else {
             return false;
         };
@@ -167,9 +166,7 @@ impl AtomicClockAnchor {
                 }
 
                 return Some(PlaybackClockAnchor {
-                    playback_stream_instant: cpal::StreamInstant::from_nanos(
-                        playback_stream_nanos,
-                    ),
+                    playback_stream_instant: cpal::StreamInstant::from_nanos(playback_stream_nanos),
                     project_time_of_first_frame: ProjectTimeNs::new(project_time_ns),
                     generation,
                 });
@@ -554,10 +551,7 @@ where
         .map_err(|error| AudioStreamBuildError::Build(error.to_string()))
 }
 
-fn project_time_for_frame(
-    frame: u64,
-    sample_rate: SampleRate,
-) -> Option<ProjectTimeNs> {
+fn project_time_for_frame(frame: u64, sample_rate: SampleRate) -> Option<ProjectTimeNs> {
     if sample_rate.get() == 0 {
         return None;
     }
@@ -1023,21 +1017,15 @@ mod tests {
     #[test]
     fn frame_to_project_time_is_direct_and_non_accumulating() {
         assert_eq!(
-            super::project_time_for_frame(
-                48_000,
-                rhythm_core::time::SampleRate::new(48_000),
-            )
-            .expect("time")
-            .get(),
+            super::project_time_for_frame(48_000, rhythm_core::time::SampleRate::new(48_000),)
+                .expect("time")
+                .get(),
             1_000_000_000
         );
         assert_eq!(
-            super::project_time_for_frame(
-                44_100,
-                rhythm_core::time::SampleRate::new(44_100),
-            )
-            .expect("time")
-            .get(),
+            super::project_time_for_frame(44_100, rhythm_core::time::SampleRate::new(44_100),)
+                .expect("time")
+                .get(),
             1_000_000_000
         );
     }
