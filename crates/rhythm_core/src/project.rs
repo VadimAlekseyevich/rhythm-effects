@@ -1,3 +1,113 @@
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectMetadata {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Project {
+    pub metadata: ProjectMetadata,
+    pub settings: ProjectSettings,
+    pub tempo_map: TempoMap,
+    pub audio_track: Option<AudioTrack>,
+    pub assets: Vec<AssetRecord>,
+    pub composition: Composition,
+    pub next_entity_id: u64,
+}
+
+impl Project {
+    #[must_use]
+    pub fn new(name: impl Into<String>, settings: ProjectSettings, tempo_map: TempoMap) -> Self {
+        Self {
+            metadata: ProjectMetadata { name: name.into() },
+            settings,
+            tempo_map,
+            audio_track: None,
+            assets: Vec::new(),
+            composition: Composition::default(),
+            next_entity_id: 1,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Composition {
+    pub objects: Vec<Object>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Object {
+    pub id: ObjectId,
+    pub name: String,
+    pub visible: bool,
+    pub locked: bool,
+    pub transform: TransformAnimation,
+    pub content: ObjectContent,
+    pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ObjectContent {
+    Rectangle(RectangleObject),
+    Ellipse(EllipseObject),
+    Image(ImageObject),
+    Text(TextObject),
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RectangleObject;
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct EllipseObject;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageObject {
+    pub asset: AssetId,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TextObject;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Effect {
+    pub id: EffectId,
+    pub enabled: bool,
+    pub kind: EffectKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum EffectKind {
+    Blur(BlurEffect),
+    Glow(GlowEffect),
+    Tint(TintEffect),
+    Noise(NoiseEffect),
+    RgbSplit(RgbSplitEffect),
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BlurEffect;
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GlowEffect;
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TintEffect;
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct NoiseEffect;
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RgbSplitEffect;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssetRecord {
+    pub id: AssetId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioTrack {
+    pub asset_id: AssetId,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectSettings {
     pub composition_width: u32,
@@ -22,7 +132,8 @@ impl Default for ProjectSettings {
 use crate::{
     animation::Animated,
     domain::{LinearRgba, Vec2},
-    time::{DurationNs, FrameRate},
+    ids::{AssetId, EffectId, ObjectId},
+    time::{DurationNs, FrameRate, TempoMap},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +168,21 @@ impl TransformAnimation {
 mod tests {
     use super::TransformAnimation;
     use crate::{animation::Animated, domain::Vec2};
+
+    #[test]
+    fn new_project_root_starts_with_empty_creative_collections() {
+        let project = super::Project::new(
+            "Untitled",
+            super::ProjectSettings::default(),
+            crate::time::TempoMap::unset(crate::time::GridOffsetNs::new(0)),
+        );
+
+        assert_eq!(project.metadata.name, "Untitled");
+        assert!(project.audio_track.is_none());
+        assert!(project.assets.is_empty());
+        assert!(project.composition.objects.is_empty());
+        assert_eq!(project.next_entity_id, 1);
+    }
 
     #[test]
     fn project_settings_match_mvp_defaults() {
