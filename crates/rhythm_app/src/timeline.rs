@@ -60,12 +60,7 @@ fn build_waveform_mesh(
             continue;
         }
 
-        let x0 = frame_to_x(
-            clipped_start,
-            visible_start_frame,
-            visible_span,
-            rect,
-        );
+        let x0 = frame_to_x(clipped_start, visible_start_frame, visible_span, rect);
         let mut x1 = frame_to_x(clipped_end, visible_start_frame, visible_span, rect);
         x1 = x1.max(x0 + 0.75).min(rect.right());
         if x1 <= x0 {
@@ -93,12 +88,7 @@ fn build_waveform_mesh(
     mesh
 }
 
-fn frame_to_x(
-    frame: u64,
-    visible_start_frame: u64,
-    visible_span: u64,
-    rect: egui::Rect,
-) -> f32 {
+fn frame_to_x(frame: u64, visible_start_frame: u64, visible_span: u64, rect: egui::Rect) -> f32 {
     let relative = frame.saturating_sub(visible_start_frame);
     let normalized = relative as f64 / visible_span as f64;
     rect.left() + (normalized * f64::from(rect.width())) as f32
@@ -127,18 +117,9 @@ mod tests {
             frames_per_peak: 64,
             peaks: &peaks,
         };
-        let rect = egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(128.0, 64.0),
-        );
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(128.0, 64.0));
 
-        let mesh = build_waveform_mesh(
-            rect,
-            slice,
-            0,
-            128,
-            egui::Color32::WHITE,
-        );
+        let mesh = build_waveform_mesh(rect, slice, 0, 128, egui::Color32::WHITE);
 
         assert_eq!(mesh.vertices.len(), 8);
         assert_eq!(mesh.indices.len(), 12);
@@ -156,18 +137,9 @@ mod tests {
             frames_per_peak: 256,
             peaks: &peaks,
         };
-        let rect = egui::Rect::from_min_size(
-            egui::pos2(10.0, 20.0),
-            egui::vec2(100.0, 64.0),
-        );
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(100.0, 64.0));
 
-        let mesh = build_waveform_mesh(
-            rect,
-            slice,
-            256,
-            512,
-            egui::Color32::WHITE,
-        );
+        let mesh = build_waveform_mesh(rect, slice, 256, 512, egui::Color32::WHITE);
         let min_x = mesh
             .vertices
             .iter()
