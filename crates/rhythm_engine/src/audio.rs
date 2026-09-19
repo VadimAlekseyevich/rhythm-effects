@@ -14,7 +14,7 @@ use cpal::{
 use rhythm_core::time::{DurationNs, SampleRate};
 use rubato::{Fft, FixedSync, Resampler, audioadapter_buffers::owned::InterleavedOwned};
 use symphonia::core::{
-    codecs::{AudioDecoderOptions, CodecParameters},
+    codecs::{CodecParameters, audio::AudioDecoderOptions},
     errors::Error as SymphoniaError,
     formats::{FormatOptions, TrackType, probe::Hint},
     io::MediaSourceStream,
