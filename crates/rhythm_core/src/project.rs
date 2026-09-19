@@ -1,6 +1,28 @@
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectSettings {
+    pub composition_width: u32,
+    pub composition_height: u32,
+    pub frame_rate: FrameRate,
+    pub duration: DurationNs,
+    pub background: LinearRgba,
+}
+
+impl Default for ProjectSettings {
+    fn default() -> Self {
+        Self {
+            composition_width: 1920,
+            composition_height: 1080,
+            frame_rate: FrameRate::new(60, 1).expect("60/1 is a valid frame rate"),
+            duration: DurationNs::new(10_000_000_000),
+            background: LinearRgba::black_opaque(),
+        }
+    }
+}
+
 use crate::{
     animation::Animated,
-    domain::Vec2,
+    domain::{LinearRgba, Vec2},
+    time::{DurationNs, FrameRate},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,6 +60,18 @@ mod tests {
         animation::Animated,
         domain::Vec2,
     };
+
+    #[test]
+    fn project_settings_match_mvp_defaults() {
+        let settings = super::ProjectSettings::default();
+
+        assert_eq!(settings.composition_width, 1920);
+        assert_eq!(settings.composition_height, 1080);
+        assert_eq!(settings.frame_rate.numerator(), 60);
+        assert_eq!(settings.frame_rate.denominator(), 1);
+        assert_eq!(settings.duration.get(), 10_000_000_000);
+        assert_eq!(settings.background, crate::domain::LinearRgba::black_opaque());
+    }
 
     #[test]
     fn transform_animation_exposes_the_accepted_semantic_fields() {
