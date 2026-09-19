@@ -15,26 +15,26 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 ## M1 — Foundation
 
-- [ ] **AI-001** — Create the root Cargo workspace manifest with resolver=3 and members rhythm_core, rhythm_engine, rhythm_app.
-- [ ] **AI-002** — Add rust-toolchain.toml pinned to Rust 1.98.1 with rustfmt and clippy components.
-- [ ] **AI-003** — Add a repository .gitignore for Cargo/Windows development artifacts.
-- [ ] **AI-004** — Create crates/rhythm_core as a library crate with workspace lint/package inheritance.
-- [ ] **AI-005** — Create crates/rhythm_engine as a library crate that depends only on rhythm_core.
-- [ ] **AI-006** — Create crates/rhythm_app as a binary crate that depends on rhythm_core and rhythm_engine.
-- [ ] **AI-007** — Add the accepted initial workspace dependency versions for winit, wgpu, egui, egui-winit, egui-wgpu and pollster to the root manifest.
-- [ ] **AI-008** — Add tracing and tracing-subscriber dependencies to rhythm_app.
-- [ ] **AI-009** — Implement tracing initialization with RUST_LOG/EnvFilter fallback to info.
-- [ ] **AI-010** — Implement a minimal winit 0.30 ApplicationHandler that creates one Rhythm Effects window on resume.
-- [ ] **AI-011** — Handle CloseRequested by exiting the winit event loop.
-- [ ] **AI-012** — Log window creation, resize and application shutdown events.
-- [ ] **AI-013** — Add one rhythm_core smoke unit test so cargo test proves the workspace test path.
-- [ ] **AI-014** — Add a Windows GitHub Actions workflow that runs fmt, clippy, test and workspace build.
-- [ ] **AI-015** — Run cargo metadata and fix all workspace-manifest errors.
-- [ ] **AI-016** — Run cargo fmt --check and fix formatting.
-- [ ] **AI-017** — Run cargo clippy --workspace --all-targets -- -D warnings and fix all warnings.
-- [ ] **AI-018** — Run cargo test --workspace and fix failures.
-- [ ] **AI-019** — Run cargo run -p rhythm_app and verify one native window opens/closes cleanly.
-- [ ] **AI-020** — Record the first local build baseline required by PERFORMANCE.md.
+- [x] **AI-001** — Create the root Cargo workspace manifest with resolver=3 and members rhythm_core, rhythm_engine, rhythm_app.
+- [x] **AI-002** — Add rust-toolchain.toml pinned to Rust 1.98.1 with rustfmt and clippy components.
+- [x] **AI-003** — Add a repository .gitignore for Cargo/Windows development artifacts.
+- [x] **AI-004** — Create crates/rhythm_core as a library crate with workspace lint/package inheritance.
+- [x] **AI-005** — Create crates/rhythm_engine as a library crate that depends only on rhythm_core.
+- [x] **AI-006** — Create crates/rhythm_app as a binary crate that depends on rhythm_core and rhythm_engine.
+- [x] **AI-007** — Add the accepted initial workspace dependency versions for winit, wgpu, egui, egui-winit, egui-wgpu and pollster to the root manifest.
+- [x] **AI-008** — Add tracing and tracing-subscriber dependencies to rhythm_app.
+- [x] **AI-009** — Implement tracing initialization with RUST_LOG/EnvFilter fallback to info.
+- [x] **AI-010** — Implement a minimal winit 0.30 ApplicationHandler that creates one Rhythm Effects window on resume.
+- [x] **AI-011** — Handle CloseRequested by exiting the winit event loop.
+- [x] **AI-012** — Log window creation, resize and application shutdown events.
+- [x] **AI-013** — Add one rhythm_core smoke unit test so cargo test proves the workspace test path.
+- [x] **AI-014** — Add a Windows GitHub Actions workflow that runs fmt, clippy, test and workspace build.
+- [x] **AI-015** — Run cargo metadata and fix all workspace-manifest errors.
+- [x] **AI-016** — Run cargo fmt --check and fix formatting.
+- [x] **AI-017** — Run cargo clippy --workspace --all-targets -- -D warnings and fix all warnings.
+- [x] **AI-018** — Run cargo test --workspace and fix failures.
+- [x] **AI-019** — Run cargo run -p rhythm_app and verify one native window opens/closes cleanly.
+- [ ] **AI-020** — Record the first local build baseline required by PERFORMANCE.md. **Blocked on local reference-machine measurement; run measure_build_baseline.bat.**
 
 ## M2 — Render/UI shell
 
