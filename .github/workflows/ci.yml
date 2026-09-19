@@ -16,6 +16,9 @@ jobs:
           toolchain: 1.98.1
           components: rustfmt, clippy
 
+      - name: Metadata
+        run: cargo metadata --format-version 1 --no-deps
+
       - name: Format
         run: cargo fmt --all -- --check
 
