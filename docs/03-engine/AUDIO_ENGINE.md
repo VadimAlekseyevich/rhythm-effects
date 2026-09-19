@@ -1,369 +1,355 @@
 # Audio Engine
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> Audio playback provides the authoritative clock while music is playing.
+> Audio playback is the timing authority during active playback. The MVP deliberately favors a simple fully prepared playback buffer over streaming complexity.
 
 ## 1. Responsibilities
 
-- decode supported audio;
-- provide playback PCM;
-- configure output stream;
+The audio subsystem owns:
+
+- probing/decoding supported music files;
+- preparing playback PCM;
+- output stream creation;
 - play/pause/seek;
-- expose playback position;
-- master/track gain;
-- provide decoded data to waveform preprocessing;
-- handle sample-rate mismatch;
-- surface recoverable errors.
+- audible-position clock publication;
+- gain;
+- device/runtime errors;
+- source PCM handoff for waveform preprocessing.
 
-Not responsible for:
+It does not own BPM detection, project mutation, timeline UI, audio effects, multi-track mixing, or export timing.
 
-- BPM detection in MVP;
-- DAW editing;
-- multi-track mixing;
-- VST;
-- animation evaluation.
-
----
-
-## 2. Proposed stack
+## 2. Accepted stack
 
 - Symphonia: decode/demux;
-- CPAL: output;
-- Rubato: candidate sample-rate conversion.
+- Rubato: background/offline sample-rate conversion;
+- CPAL: output stream.
 
-Rubato's current API provides preallocated processing paths intended for realtime scenarios, which fits the callback constraints.
+No resampling, decode, file I/O, or allocation-heavy work occurs in the realtime callback.
 
----
+## 3. MVP source formats
 
-## 3. Internal PCM
+Required:
 
-Recommended decoded representation:
-
-- f32;
-- known channels;
-- known source sample rate;
-- immutable clip after decode.
-
-Fully decoded PCM is the preferred MVP starting point because it simplifies exact seeking and waveform generation.
-
-Approximate stereo f32 memory:
-
-~~~text
-48,000 frames/sec × 2 × 4 bytes
-≈ 384 KB/sec
-≈ 23 MB/min
-≈ 115 MB/5 min
-~~~
-
-This is significant but reasonable for desktop MVP. Measure before introducing streaming complexity.
-
----
-
-## 4. Decode flow
-
-~~~text
-import
-→ probe
-→ decode on worker
-→ publish runtime AudioClip
-→ waveform preprocess
-~~~
-
-Never decode a full compressed track on UI thread.
-
----
-
-## 5. Target formats
-
-Validate:
-
-- WAV/PCM;
+- WAV;
 - MP3;
-- AAC/M4A;
 - FLAC;
-- OGG/Vorbis.
+- OGG/Vorbis;
+- AAC in M4A/MP4 where supported by the pinned Symphonia feature set.
 
-Only enable required codec/container features.
+MVP semantic channel layouts:
 
-Use fixture files from real encoders.
+- mono;
+- stereo.
 
----
+Files with unsupported multichannel layouts fail with a clear import error rather than using an undocumented downmix.
 
-## 6. Output policy
+Mono is duplicated to stereo semantics where needed.
 
-MVP default:
+## 4. Decode representation
 
-- system default output device;
-- compatible stream configuration;
-- device selector deferred unless testing shows it is required.
-
-Log device/config diagnostics.
-
----
-
-## 7. Sample-rate mismatch
-
-Must support cases such as 44.1 kHz audio on 48 kHz output.
-
-Candidate approach:
-
-- keep decoded source-rate PCM;
-- resample into preallocated output buffers;
-- preserve mapping between logical source position and device frames.
-
-Alternative:
-
-- preprocess to canonical internal rate, then adapt to device.
-
-Prototype both only if clock implementation demands it.
-
-The decision criterion is reliable sync and low glitch risk.
-
----
-
-## 8. Playback state
+Background decode produces finite f32 PCM at source sample rate.
 
 ~~~rust
-enum PlaybackState {
-    Stopped,
-    Paused,
-    Playing,
+DecodedAudio {
+    sample_rate: SampleRate,
+    channels: 1 | 2,
+    frames: Vec<f32>, // interleaved
+    duration: DurationNs,
 }
 ~~~
 
-Runtime state includes:
+Decoded source PCM is temporary preparation data used to build waveform peaks and prepare the output-rate playback buffer.
 
-- logical source position;
-- current stream generation;
-- resampler state;
-- output accounting;
-- gain.
+After both complete, the large source PCM may be released.
 
-Not serialized.
+The original source file remains the canonical audio asset.
 
----
+## 5. Playback buffer
 
-## 9. Clock contract
-
-During Playing:
-
-~~~text
-audio progression
-→ authoritative playback ProjectTime
-→ TempoMap
-→ animation evaluation
-~~~
-
-Public conceptual API:
+Before playback, prepare immutable PCM matching the selected output stream sample rate.
 
 ~~~rust
-fn playback_time(&self) -> ProjectTime
+PlaybackBuffer {
+    sample_rate,
+    interleaved_stereo_f32,
+    duration,
+}
 ~~~
 
-The caller should not know CPAL callback internals.
+Rubato performs fixed-ratio conversion on a background worker.
 
----
+The realtime callback reads already-prepared PCM.
 
-## 10. Clock implementation candidates
+No streaming decoder is required for MVP.
 
-Possible ingredients:
+This is intentionally optimized for typical music tracks rather than hour-long media.
 
-- consumed/produced frame counters;
-- CPAL stream timestamps where backend data is suitable;
-- known buffering/latency;
-- resampler delay correction;
-- seek anchor.
+## 6. Device policy
 
-Prototype and measure.
+MVP uses the current system default output device.
 
-Do not derive clock from render/UI frame delta.
+A custom audio-device picker is post-MVP.
 
----
+Initialization policy:
 
-## 11. Perceived output latency
+1. obtain a normal supported output configuration;
+2. prefer ordinary stereo output where supported;
+3. use the selected configuration sample rate;
+4. prepare PlaybackBuffer for that rate.
 
-Visual sync should consider device buffering.
+If the default device changes or becomes unavailable:
 
-We must distinguish:
+- stop playback safely;
+- keep Project/editor state;
+- show recoverable audio error;
+- allow reinitialize against the new default device.
 
-- logical stream position;
-- samples queued;
-- samples likely heard.
+## 7. Output sample conversion
 
-Windows/WASAPI behavior must be tested on multiple machines.
+Internal prepared audio is f32.
 
-If exact device latency cannot be robustly known everywhere, document tolerance and provide a consistent compensation model.
+The callback converts to the CPAL stream sample format when necessary using bounded per-sample conversion.
 
----
+No heap allocation occurs for this conversion.
 
-## 12. Callback rules
+For unusual output channel counts, adapter behavior is explicit and tested; creative source semantics remain mono/stereo.
 
-No callback:
+## 8. Callback rules
 
-- allocations on normal path;
-- blocking mutex;
-- file I/O;
+The output callback may:
+
+- copy prepared samples;
+- apply gain;
+- convert sample format;
+- advance local playback cursor;
+- publish clock-anchor atomics;
+- emit silence at end or on invalid generation.
+
+It must not:
+
+- lock Project;
 - decode;
-- GPU calls;
-- UI calls;
-- project mutation;
-- spam logging.
+- resample;
+- allocate on the normal path;
+- access filesystem;
+- call egui/wgpu;
+- format/log high-volume messages.
 
-Callback should fill output from prepared state and update narrow clock counters.
-
----
-
-## 13. Buffering
-
-Use preallocated buffers/ring structures.
-
-Balance:
-
-- enough data to avoid xruns;
-- low enough latency for responsive play/seek.
-
-Track underrun/xrun diagnostics where backend exposes them.
-
----
-
-## 14. Seek
-
-Seek must invalidate stale buffered state.
-
-Concept:
+## 9. Playback state
 
 ~~~text
-seek request
-→ new generation
-→ reset logical source position
-→ reset resampler/buffers
-→ update clock anchor
-→ resume/fill
+Unavailable
+Ready
+Playing
+Paused
+Ended
+Error
 ~~~
 
-Generation IDs prevent late work from old position being mistaken for current playback.
+Project data never depends on the runtime state machine being alive.
 
----
+## 10. Clock contract
 
-## 15. Pause/resume
+During Playing, animation follows estimated audible project time, not callback producer time and not UI frame delta.
 
-Pause captures logical playback position.
+CPAL output timestamps expose the callback instant and predicted playback instant for written data. The stream also exposes a monotonic now() in the same stream-clock domain.
 
-Resume begins from captured position.
+These timestamps are the primary clock source.
 
-No dependence on UI redraw timestamp.
+## 11. Clock anchor
 
----
+Each callback publishes a coherent anchor:
 
-## 16. End of clip
+~~~text
+playback_stream_instant
+project_time_of_first_frame_in_this_buffer
+playback_generation
+~~~
+
+Publication must be lock-free or realtime-safe.
+
+A sequence-counter/seqlock-style set of atomics is acceptable.
+
+The editor samples:
+
+~~~text
+stream.now()
+relative to playback_stream_instant
++ anchor project time
+~~~
+
+to estimate what project time is currently being heard.
+
+UI frame loss therefore does not create musical drift.
+
+## 12. Clock fallback
+
+If a backend cannot provide usable playback timestamps:
+
+- use output-frame cursor plus the best known buffer-latency estimate;
+- expose degraded-clock diagnostics;
+- keep the same ProjectTimeNs API.
+
+Fallback quality is tested on supported Windows configurations.
+
+## 13. Playback generation
+
+Every discontinuity increments a playback generation:
+
+- seek;
+- source replacement;
+- stream rebuild;
+- restart after device failure.
+
+Clock anchors from old generations are ignored.
+
+## 14. Play
+
+Play begins from EditorSession playhead.
+
+1. clamp/resolve desired project time into audio range;
+2. map to PlaybackBuffer frame;
+3. create a new playback generation;
+4. arm cursor;
+5. start stream;
+6. receive first valid clock anchor;
+7. audio clock becomes authoritative.
+
+## 15. Pause
+
+1. sample current audible clock;
+2. pause stream;
+3. store ProjectTimeNs into EditorSession playhead;
+4. editor playhead becomes authoritative.
+
+Do not derive pause position merely from frames produced ahead of the DAC.
+
+## 16. Seek while paused
+
+Silent and immediate:
+
+- update EditorSession playhead;
+- no audio callback work is required.
+
+## 17. Seek while playing
+
+Seek creates a new playback generation.
+
+The callback switches to the new PCM cursor at its next safe callback boundary.
+
+Already queued device audio may still be heard for the output-latency interval.
+
+The visual clock does not jump early to the target before the new generation becomes the audible anchor.
+
+## 18. Scrubbing
+
+MVP scrubbing is silent.
+
+Audible/jog scrubbing is post-MVP.
+
+## 19. End of audio
 
 At end:
 
-- fill required remainder with silence;
-- no out-of-bounds;
-- transition predictably;
-- editor playhead resolves to exact end.
+- emit silence for remaining requested output;
+- mark Ended;
+- resolve playhead to audio end/composition policy;
+- do not loop automatically.
 
-Loop is optional.
+## 20. Gain
 
----
+AudioTrack gain defaults to 1.0.
 
-## 17. Gain
+No compressor, limiter, mixer, or audio automation is in MVP.
 
-One master/track gain is enough for MVP.
+## 21. Waveform preparation
 
-No mixer graph.
+Waveform is generated from source-rate decoded PCM before that temporary buffer is discarded.
 
-Apply gain in prepared playback path.
+Playback buffer and waveform are independent derived representations of the same source asset.
 
----
+## 22. Memory policy
 
-## 18. Background replacement safety
+Normal steady state after import:
 
-If imported audio changes while decode is running:
+- immutable prepared playback buffer;
+- waveform peaks;
+- original source-file reference.
 
-- cancel if convenient;
-- otherwise ignore stale result using asset/job generation;
-- never attach old clip to new asset ID.
+Do not retain a second full decoded source PCM after preparation.
 
----
+A 10+ minute track is a performance fixture.
 
-## 19. Device errors
+Streaming is a post-MVP revision only if measurement proves memory unacceptable.
 
-On device/stream failure:
+## 23. Sync targets
 
-- stop playback safely;
-- preserve project;
-- preserve playhead as accurately as possible;
+Reference wired/local audio:
+
+- no cumulative drift over 10 minutes;
+- steady-state alignment target within 10 ms where timestamps are reliable;
+- release ceiling: no systematic drift beyond 25 ms on reference hardware.
+
+Bluetooth/wireless output is best-effort because device/OS latency reporting may vary.
+
+The key invariant is that error must not grow with duration.
+
+## 24. Diagnostics
+
+Expose:
+
+- output device description/id;
+- sample rate/channels/sample format;
+- callback buffer size;
+- playback generation;
+- audible ProjectTimeNs;
+- playback-latency estimate;
+- stream error count;
+- playback-buffer memory.
+
+## 25. Failure policy
+
+On stream/device failure:
+
+- Project remains untouched;
+- playback stops;
+- best-known playhead is retained;
 - show recoverable error;
-- allow reinitialize.
+- Retry/Reinitialize uses system default device.
 
----
+## 26. Required tests
 
-## 20. Thread communication
+Pure tests:
 
-Prefer narrow communication:
+- project time to output frame;
+- mono/stereo preparation;
+- source duration;
+- seek clamping;
+- stale generation rejection;
+- end-of-buffer behavior.
 
-- atomics for simple clock counters;
-- bounded command queue;
-- prepared immutable PCM;
-- error/result channel.
+Integration/manual:
 
-Never share Arc<Mutex<Project>> with callback.
-
----
-
-## 21. Sync diagnostics
-
-Developer overlay/log should expose:
-
-- logical time;
-- audio frame position;
-- bar/beat/tick;
-- source/device rate;
-- estimated output latency;
-- xrun/underrun count;
-- current buffer fill if available.
-
----
-
-## 22. Required drift tests
-
-- 60 sec;
-- 5 min;
-- 10+ min;
-- 44.1→48;
-- 48→48;
-- repeated seek;
+- 44.1 kHz source on 48 kHz output;
+- 48 kHz source;
 - rapid play/pause;
-- low UI FPS;
+- repeated seek;
+- seek while playing;
+- 1, 5, and 10 minute drift;
 - heavy renderer load;
-- different output buffer sizes.
+- low UI FPS;
+- device loss/reinitialize.
 
----
+## 27. Definition of Done
 
-## 23. Standalone spike
+Audio is MVP-ready when:
 
-Before editor integration:
-
-1. decode fixtures;
-2. play through CPAL;
-3. seek;
-4. expose clock;
-5. resample;
-6. compare long-duration drift;
-7. throttle visual observer;
-8. verify audio remains authority.
-
----
-
-## 24. Definition of Done
-
-- required formats decode;
-- play/pause/seek stable;
-- sample-rate mismatch works;
-- callback avoids blocking/allocation by design;
-- clock drives animation;
-- drift tolerance documented and met;
-- device failure does not threaten project data.
+- required formats import;
+- mono/stereo work;
+- playback buffer is prepared outside callback;
+- callback has no decode/resample/file I/O;
+- CPAL timestamp clock drives animation;
+- seek-generation semantics are correct;
+- 10-minute drift gate passes;
+- device failure cannot threaten Project data.

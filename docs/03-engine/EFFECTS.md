@@ -1,22 +1,20 @@
 # Effects
 
-> **Status: Draft**
->
-> Effects are a small MVP feature set proving that visual parameters can be animated on the BPM grid.
+> **Status: Accepted for MVP**
 
-## 1. Principles
+## 1. Final effect set
 
-- small high-value set;
-- parameters use Animated<T>;
-- deterministic stack order;
-- GPU-first;
-- bounded cost;
-- no plugin API;
-- no node graph.
+Schema V1 contains exactly:
 
----
+1. Blur
+2. Glow
+3. Tint
+4. Noise
+5. RGB Split
 
-## 2. Data model
+Additional effects are post-MVP.
+
+## 2. Model
 
 ~~~rust
 Effect {
@@ -26,212 +24,131 @@ Effect {
 }
 ~~~
 
-Typed MVP variants are preferred over stringly-typed parameter maps.
+Typed enum variants only.
 
----
+Effect order is semantic and deterministic.
 
-## 3. Candidate MVP priority
+## 3. Units
 
-1. Blur;
-2. Glow;
-3. Tint/Color;
-4. RGB Split;
-5. Noise.
+Spatial parameters are composition pixels.
 
-Schedule cut order should preserve at least:
+Renderer compensates for preview-resolution scale.
 
-- one multi-pass effect;
-- one single-pass effect;
-- animation of effect parameter.
+All numeric values are finite and validated.
 
----
+## 4. Blur
 
-## 4. Animation
-
-Example:
-
-~~~rust
-BlurEffect {
-    radius: Animated<f32>,
-}
+~~~text
+radius_px: Animated<f32>, 0..128
 ~~~
 
-No effect-specific timeline engine.
+Use separable horizontal/vertical Gaussian-like blur.
 
----
+Radius zero is identity.
 
-## 5. Stack order
+Implementation may optimize kernel/downsample behavior without changing radius semantics.
+
+## 5. Glow
+
+~~~text
+radius_px: Animated<f32>, 0..128
+intensity: Animated<f32>, 0..4
+threshold: Animated<f32>, 0..1
+color: Animated<LinearRgba>
+~~~
+
+Concept:
 
 ~~~text
 source
-→ effect 1
-→ effect 2
-→ ...
-→ composite
+-> threshold mask
+-> blur
+-> color/intensity
+-> additive composite over source
 ~~~
 
-UI order equals render order.
-
-Disabled effect skips work where possible.
-
----
-
-## 6. Isolation
-
-Direct-render objects when no effect requires isolation.
-
-Only create object-local target when effect chain needs it.
-
-This avoids paying offscreen cost for every object.
-
----
-
-## 7. Blur
-
-MVP:
-
-- radius.
-
-Implementation candidate:
-
-- horizontal pass;
-- vertical pass.
-
-Bound maximum radius.
-
-Downsample optimization only after profiling.
-
----
-
-## 8. Glow
-
-Candidate parameters:
-
-- radius;
-- intensity;
-- color;
-- optional threshold.
-
-Reuse blur where practical.
-
-Keep inspector controls compact.
-
----
-
-## 9. Tint/Color
-
-Simple single-pass transformation.
-
-Do not build a full grading system.
-
----
-
-## 10. RGB Split
-
-Candidate:
-
-- amount;
-- optional angle/direction.
-
-Useful rhythm effect with limited UI.
-
----
-
-## 11. Noise
-
-Noise must be deterministic.
-
-If time-varying:
+## 6. Tint
 
 ~~~text
-noise = f(project/effect seed, evaluation time)
+color: Animated<LinearRgba>
+amount: Animated<f32>, 0..1
 ~~~
 
-Do not call uncontrolled RNG every frame.
+Amount zero is identity.
 
-Preview/export must agree semantically.
+Shader behavior is covered by visual reference tests.
 
----
+## 7. Noise
 
-## 12. Parameter bounds
+~~~text
+amount: Animated<f32>, 0..1
+size_px: Animated<f32>, 1..256
+evolution: Animated<f32>
+seed: u32
+~~~
 
-Every parameter has validated range.
+Noise is deterministic and depends only on semantic inputs, never wall clock or mutable RNG state.
 
-This protects:
+## 8. RGB Split
 
-- usability;
-- GPU cost;
-- numerical stability.
+~~~text
+amount_px: Animated<f32>, 0..64
+angle_degrees: Animated<f32>
+~~~
 
----
+Channels sample deterministic signed offsets along the angle.
 
-## 13. Shader source
+Alpha behavior is stable and tested to avoid colored transparent fringes.
 
-Built-in WGSL stored with source tree and embedded/loaded predictably.
+## 9. Isolation
 
-No release dependency on editable external shader files.
+Blur/Glow require isolated targets.
 
-Developer hot reload optional later.
+Tint/Noise/RGB Split may be single pass but still obey stack order.
 
----
+Compatible-pass fusion is only a later optimization.
 
-## 14. Pipeline cache
-
-One pipeline per implementation/configuration, reused across effect instances.
-
-Per-instance data lives in uniform/storage data.
-
----
-
-## 15. Temporary textures
+## 10. Temporary resources
 
 Use renderer texture pool.
 
-Measure transient memory in effect-heavy scene.
+No per-frame texture create/destroy on normal path.
 
----
+## 11. Animation
 
-## 16. Effect bounds optimization
+All animated effect parameters use the same Animated<T> and timeline system as transforms.
 
-Rendering only affected object region + padding can reduce cost.
+No effect-specific animation model exists.
 
-Defer until full-frame/object target approach is measured.
+## 12. Inspector
 
-Correctness first.
+Each effect is one shallow group:
 
----
-
-## 17. Inspector UX
-
-Each effect exposes:
-
+- title;
 - enabled;
-- compact parameters;
-- animation controls;
 - reorder;
-- remove.
+- remove;
+- parameters.
 
 No nested tabs.
 
----
+## 13. Determinism
 
-## 18. Tests
+Effects do not depend on editor FPS, wall clock, prior frame, or global random state.
 
-- serialization;
-- stack ordering;
-- disabled bypass;
-- parameter animation;
+Feedback/temporal effects are post-MVP.
+
+## 14. Tests
+
+- identity at zero where defined;
 - bounds;
-- deterministic noise;
-- render-reference tests for key effects where practical.
+- order;
+- preview-scale parity;
+- deterministic Noise;
+- alpha edges;
+- linear-light blur/glow;
+- preview/export parity.
 
----
+## 15. Definition of Done
 
-## 19. Definition of Done
-
-- MVP effect list fixed;
-- parameters use core animation;
-- unnecessary isolation avoided;
-- stack order deterministic;
-- multi-pass textures reused;
-- effect-heavy benchmark exists.
+All five effects render, animate, preserve order, reuse intermediates, remain deterministic, and meet representative performance gates.

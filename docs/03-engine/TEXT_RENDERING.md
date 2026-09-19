@@ -1,284 +1,165 @@
 # Text Rendering
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> Composition text is a high-risk subsystem: shaping, fonts, fallback, layout, caching, and GPU rendering must work without coupling creative content to editor UI text.
+> Composition text is separate from egui UI text.
 
-## 1. MVP requirements
+## 1. Stack
 
-- Latin;
-- Cyrillic;
-- multiline;
-- font family selection;
-- font size;
-- text color;
-- basic alignment;
-- transform/opacity animation;
-- reliable preview/export.
+- cosmic-text: shaping/layout/font database;
+- glyphon: wgpu rendering.
 
-Advanced typography is not MVP.
+## 2. MVP features
 
----
+Supported:
 
-## 2. Preferred prototype stack
+- Unicode;
+- Latin and Cyrillic;
+- explicit multiline via newlines;
+- installed/system font selection;
+- normal/italic;
+- practical font weights;
+- static font size;
+- left/center/right alignment;
+- animated LinearRgba text color;
+- transform/opacity animation.
 
-Evaluated 2026-09-19:
+Post-MVP:
 
-- cosmic-text 0.19.x;
-- glyphon 0.12.x;
-- wgpu 30.x.
+- text on path;
+- per-character animation;
+- rich spans;
+- automatic paragraph wrapping boxes;
+- variable-font axis UI;
+- imported/embedded fonts;
+- guaranteed color emoji.
 
-Current glyphon release targets wgpu 30 and uses cosmic-text for text handling.
-
-This alignment is valuable because it avoids a second graphics backend.
-
----
-
-## 3. Why separate from egui text
-
-egui text belongs to application chrome.
-
-Creative text requires:
-
-- project font references;
-- composition coordinate space;
-- export consistency;
-- object transforms;
-- composition clipping;
-- runtime layout caching.
-
-Do not serialize or depend on egui font identifiers.
-
----
-
-## 4. Font system lifetime
-
-Maintain shared runtime font system.
-
-Do not rebuild system font database per object/frame.
-
-Potentially initialize lazily if startup scan is measurable.
-
----
-
-## 5. Font reference
-
-Persist semantic reference:
+## 3. FontReference
 
 ~~~rust
 FontReference {
-    family,
-    weight/style,
+    family: String,
+    weight: FontWeight,
+    style: FontStyle,
 }
 ~~~
 
-Exact schema TBD.
+Never persist an internal cosmic-text font ID.
 
-Runtime resolves to face.
+## 4. Fallback
 
-Do not persist ephemeral font database index.
+Bundle Inter as deterministic fallback.
 
----
+When requested font is missing:
 
-## 6. Missing fonts
+- project still opens;
+- text renders with Inter;
+- editor visibly marks missing requested font;
+- export uses the same fallback.
 
-Project remains editable.
+No silent invisible substitution.
 
-Behavior:
+## 5. Font system lifetime
 
-- render fallback;
-- mark missing requested font in inspector;
-- offer replacement;
-- do not silently rewrite saved font choice just because fallback rendered.
+Use one long-lived font system/database.
 
----
+System enumeration may be cached for the font picker.
 
-## 7. Shaping
+No per-object/per-frame font database creation.
 
-Use full shaping for composition text.
+## 6. Content and size
 
-Validate:
+Text String is static in MVP.
 
-- Latin;
-- Cyrillic;
-- combining marks;
-- punctuation;
-- common Unicode.
+Font size is static f32 in composition pixels.
 
-RTL support can be inherited from stack, but full RTL editing UX is not required for MVP unless explicitly promoted.
+Visual size animation uses Transform Scale.
 
----
+This avoids reshaping every frame.
 
-## 8. Layout cache
+## 7. Color
 
-Cache shaped layout by semantic inputs:
+Color is Animated<LinearRgba>.
+
+UI sRGB controls convert at the project boundary.
+
+## 8. Layout
+
+Explicit newline controls line breaks.
+
+No automatic wrap box is stored.
+
+Alignment:
+
+- Left;
+- Center;
+- Right.
+
+Use a sensible line-height default; advanced typography controls are post-MVP.
+
+## 9. Bounds
+
+Text subsystem produces deterministic local bounds for anchor, selection, hit testing, and viewport outline.
+
+Layout invalidates on text/font/size/alignment changes.
+
+Transform, opacity, and color do not require reshaping.
+
+## 10. Cache
+
+Cache identity includes:
 
 - text;
-- font;
-- size;
-- wrap width;
+- FontReference;
+- font size;
 - alignment;
-- other layout attributes.
+- shaping settings.
 
-Object position/rotation/opacity changes must not trigger reshape.
+Glyph atlas is shared runtime state and never serialized.
 
----
+## 11. DPI
 
-## 9. Glyph cache
+Font size is composition-space pixels.
 
-Reuse glyph atlas/raster cache.
+Editor DPI/zoom changes only presentation.
 
-Do not rasterize/upload same glyphs every frame.
+Preview/export use the same composition layout.
 
-Need bounded/growing atlas strategy appropriate for long editor sessions.
+## 12. Editing UX
 
----
+Double click selected text or use inspector edit action.
 
-## 10. Object bounds
+MVP may use inspector text editing instead of a rich inline canvas editor.
 
-Text subsystem provides layout bounds for:
+## 13. Missing glyphs / emoji
 
-- selection;
-- hit test;
-- anchor;
-- alignment.
+Missing glyph behavior must not crash.
 
-Viewport and renderer must use the same bounds semantics.
+Color emoji is not a release requirement.
 
----
+## 14. Performance fixture
 
-## 11. Font-size animation
+At least:
 
-Font-size animation is expensive because it can reshape/rasterize repeatedly.
+- 50 text objects;
+- Latin/Cyrillic mix;
+- several installed fonts;
+- animated transforms/colors.
 
-Recommended MVP:
+Unchanged text is not reshaped every frame.
 
-- font size static;
-- animate apparent size using object Scale.
+## 15. Tests
 
-This keeps motion fast and cache-friendly.
+- Cyrillic;
+- Latin;
+- mixed text;
+- multiline;
+- alignment;
+- missing font -> Inter;
+- bounds/anchor;
+- preview/export parity;
+- DPI independence.
 
-If font-size animation is promoted later, profile it explicitly.
+## 16. Definition of Done
 
----
-
-## 12. Text content animation
-
-Not MVP.
-
-Text content is static property.
-
-Transform, opacity, and optionally color animate.
-
----
-
-## 13. Color
-
-Text fill color may be Animated<Color>.
-
-Stroke/shadow are not dedicated typography features in MVP.
-
-Use generic effects such as Glow where possible.
-
----
-
-## 14. Alignment
-
-Minimum:
-
-- left;
-- center;
-- right.
-
-Need decide model:
-
-- point text;
-- bounded text box.
-
-Prototype both interaction implications before locking data schema.
-
----
-
-## 15. Composition vs UI DPI
-
-Composition text layout uses composition space.
-
-Editor DPI scaling only changes how the already-rendered composition is displayed.
-
-Export uses same composition layout.
-
----
-
-## 16. Startup
-
-If system font discovery is slow:
-
-- show app shell first;
-- initialize font system lazily/background where architecture permits;
-- project containing text may show loading placeholder briefly rather than blocking startup excessively.
-
-Measure before adding complexity.
-
----
-
-## 17. Build-time cost
-
-Text stack is substantial.
-
-Measure:
-
-- clean compile;
-- incremental compile;
-- transitive dependencies;
-- binary contribution.
-
-Ensure glyphon/cosmic-text/wgpu versions do not cause duplicate major wgpu builds.
-
----
-
-## 18. Prototype checklist
-
-1. Latin + Cyrillic;
-2. system font lookup;
-3. fallback;
-4. multiline;
-5. alignment;
-6. 100+ objects;
-7. transform animation without reshape;
-8. text edit invalidation;
-9. offscreen render;
-10. export/readback;
-11. compile-time impact.
-
----
-
-## 19. Tests
-
-- Cyrillic fixture;
-- multiline bounds;
-- missing font;
-- cache invalidation;
-- no reshape on transform-only change;
-- semantic font reference serialization.
-
----
-
-## 20. Open decisions
-
-- exact font schema;
-- custom imported fonts in MVP;
-- point vs box text;
-- exact stack features;
-- bundled test font licensing;
-- whether text color is animated in MVP.
-
----
-
-## 21. Definition of Done
-
-- Latin/Cyrillic correct;
-- separate from egui font system;
-- missing font recoverable;
-- layout/glyph cache effective;
-- preview/export layout matches;
-- build/runtime costs accepted.
+System fonts work, fallback is deterministic and visible, shaping is cached, Cyrillic is reliable, and preview/export match.

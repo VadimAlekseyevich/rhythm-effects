@@ -1,468 +1,295 @@
 # Renderer
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
 >
-> Renderer converts evaluated scene state into pixels. It uses wgpu and is shared conceptually by realtime preview and offline export.
+> Renderer converts EvaluatedScene into pixels. Preview and export use the same creative rendering semantics.
 
 ## 1. Goals
 
-- stable realtime preview;
-- predictable GPU resource ownership;
-- offscreen composition rendering;
-- effect support;
+- stable 60 FPS target for normal 1080p scenes;
+- linear-light compositing;
+- predictable resource ownership;
+- effects without per-frame allocation storms;
 - preview/export parity;
-- low CPU↔GPU synchronization;
-- simple MVP architecture;
-- future portability through wgpu.
-
----
+- no GPU readback in normal preview;
+- composition independent from editor window/DPI.
 
 ## 2. Non-goals
 
-MVP renderer is not:
+MVP renderer is not 3D, HDR/wide-gamut, a generic vector engine, node compositor, plugin renderer, or video compositor.
 
-- a 3D engine;
-- a generic game engine;
-- HDR pipeline;
-- node-based compositor;
-- arbitrary plugin renderer;
-- full vector graphics engine.
+## 3. Device ownership
 
----
+One normal wgpu Device/Queue pair is used by composition rendering, glyphon composition text, and egui rendering.
 
-## 3. Main rendering model
+rhythm_app orchestrates window/surface lifecycle.
 
-Render composition to an offscreen texture.
+rhythm_engine owns renderer resources and creative rendering abstractions.
+
+Do not create one wgpu device per subsystem.
+
+## 4. Render target model
 
 ~~~text
 EvaluatedScene
-→ Scene Pass
-→ optional Effect Passes
-→ Composition Texture
-→ editor viewport display
+-> linear premultiplied working target
+-> optional object/effect passes
+-> composition texture
+-> viewport presentation
+
+Export:
+same semantics
+-> full-resolution output conversion
+-> readback
+-> encoder
 ~~~
 
-The application window is not the composition target.
+The swapchain is never the creative composition itself.
 
-This allows:
+## 5. Working format
 
-- composition resolution independent from window size;
-- viewport zoom/pan;
-- export reuse;
-- effects;
-- clean editor chrome separation.
-
----
-
-## 4. Device ownership
-
-rhythm_engine renderer owns or receives long-lived:
-
-- wgpu Instance;
-- Adapter;
-- Device;
-- Queue;
-- render pipelines;
-- bind group layouts;
-- samplers;
-- reusable buffers/textures.
-
-rhythm_app owns window/event integration.
-
-Exact initialization ownership may evolve, but avoid duplicated wgpu devices for normal preview.
-
----
-
-## 5. Composition target
-
-Target resolution follows project composition dimensions, subject to preview optimization decisions.
-
-Two possible preview modes:
-
-1. full composition resolution;
-2. scaled preview target when window/view is much smaller.
-
-MVP can begin with full resolution if performance is acceptable.
-
-Never let viewport UI pixel size redefine composition pixels.
-
----
-
-## 6. Color pipeline
-
-MVP output is SDR.
-
-Principles:
-
-- sampled sRGB images should use correct sRGB semantics;
-- blending/effect math should happen in a documented linear working representation where practical;
-- final display/export converts to expected sRGB output;
-- do not accidentally perform blur/glow in gamma space.
-
-Exact intermediate formats require a GPU spike.
-
-Preferred approach:
-
-- standard 8-bit targets where sufficient;
-- float intermediate targets only where effect quality requires them;
-- avoid defaulting every pass to high-bandwidth float textures without measurement.
-
----
-
-## 7. Alpha
-
-Use one documented alpha convention.
-
-Preferred renderer convention:
-
-- premultiplied alpha for compositing passes if it simplifies consistent blending;
-- asset decode may begin straight-alpha but converts at boundary.
-
-Do not mix conventions silently.
-
----
-
-## 8. Coordinate systems
-
-Project composition must define:
-
-- origin;
-- x direction;
-- y direction;
-- transform units.
-
-Recommended editor-friendly default:
+Accepted working format:
 
 ~~~text
-origin: top-left
-x: right
-y: down
+Rgba16Float
 ~~~
 
-Anchor/transform math can still use object-local centered geometry.
+Semantic RGB is linear-light and alpha is premultiplied.
 
-Do not expose GPU clip space to project model.
+This provides effect headroom and avoids severe 8-bit intermediate banding.
 
----
+Final display/export converts to standard SDR sRGB-compatible output.
 
-## 9. Transform order
+## 6. Asset texture semantics
 
-Proposed 2D object transform:
+Ordinary color images use correct sRGB sampling semantics.
 
 ~~~text
-local geometry
-→ subtract anchor
-→ scale
-→ rotate
-→ translate position
+sRGB source bytes
+-> linear sample
+-> premultiplied working composition
 ~~~
 
-Exact matrix convention must match viewport gizmos.
+Never treat gamma-encoded sRGB bytes as linear values.
 
----
+## 7. Preview quality
 
-## 10. Primitive rendering
-
-MVP primitives:
-
-- solid rectangle;
-- ellipse;
-- textured image quad;
-- text;
-- optional rounded rectangle.
-
-Prefer batching where simple, but do not build a universal batching framework before profiling.
-
----
-
-## 11. Rectangle
-
-Use reusable unit quad + transform.
-
-Rounded corners may be fragment-shader based if included.
-
-Avoid rebuilding unique CPU mesh per simple rectangle.
-
----
-
-## 12. Ellipse
-
-Candidate:
-
-- transformed quad;
-- fragment shader ellipse coverage test.
-
-Need test antialiasing at small/large scale.
-
----
-
-## 13. Images
-
-Runtime asset manager provides GPU texture + metadata.
-
-Renderer handles:
-
-- sampler;
-- transform;
-- opacity;
-- fit/crop if supported;
-- alpha/color semantics.
-
-Never reupload unchanged images each frame.
-
----
-
-## 14. Text
-
-Composition text delegates shaping/layout/raster responsibilities to text subsystem.
-
-Preferred prototype:
-
-- cosmic-text;
-- glyphon;
-- shared wgpu device.
-
-See TEXT_RENDERING.md.
-
----
-
-## 15. Render ordering
-
-2D painter order:
+PreviewQuality is EditorSession state:
 
 ~~~text
-back
-→ first object
-→ ...
-→ last object
-→ front
+Auto
+Full
+Half
+Quarter
 ~~~
 
-Object vector order defines draw order for MVP.
+Default: Auto.
 
-Depth buffer is unnecessary unless a later technique requires it.
-
----
-
-## 16. Effects
-
-Objects requiring isolated multi-pass effects render through object-local temporary targets.
-
-~~~text
-content
-→ temporary object target
-→ effect chain
-→ composite into scene
-~~~
-
-Objects without isolation-requiring effects take a direct path.
-
----
-
-## 17. Temporary texture pool
-
-Do not allocate effect textures every frame.
-
-Pool keyed by:
-
-- dimensions;
-- format;
-- usage.
-
-Transient resources return to pool after frame/pass lifetime.
-
----
-
-## 18. Blur
-
-MVP strategy:
-
-~~~text
-horizontal blur
-→ vertical blur
-~~~
-
-Clamp maximum radius.
-
-Large-radius downsample optimization may be added after measurement.
-
----
-
-## 19. Glow
-
-Basic glow can reuse blur.
-
-~~~text
-source
-→ optional bright extraction
-→ blur
-→ composite/add
-~~~
-
-Keep parameter set small.
-
----
-
-## 20. Single-pass effects
-
-Prefer one pass for effects such as:
-
-- tint;
-- simple color adjustments;
-- RGB split where feasible;
-- noise.
-
----
-
-## 21. Pipeline caching
-
-Create and reuse pipelines.
-
-Never create render pipeline per object/frame.
-
-Embedded WGSL shaders are release default.
-
-Developer hot reload can come later.
-
----
-
-## 22. Per-frame data
-
-Start straightforward:
-
-- shared quad buffers;
-- small uniform buffers;
-- explicit draw calls.
-
-If profiling finds CPU submission bottleneck, consider:
-
-- instancing;
-- storage buffers;
-- batched object classes.
-
-Do not prematurely turn the renderer into a generic ECS/batcher.
-
----
-
-## 23. Frame lifecycle
-
-Concept:
-
-1. ensure composition target;
-2. receive EvaluatedScene;
-3. acquire temporary targets;
-4. encode scene/effects;
-5. submit;
-6. make composition texture available to viewport;
-7. encode editor UI;
-8. present.
-
-No GPU readback in realtime preview.
-
----
-
-## 24. Viewport overlays
-
-Editor overlays are not composition content.
+Auto chooses 1.0, 0.5, or 0.25 and keeps large compositions near or below a 1920×1080 working target.
 
 Examples:
 
-- selection outline;
-- gizmos;
-- guides;
-- anchor marker.
-
-They may be drawn through egui/custom overlay renderer after composition texture display.
-
-They are never exported.
-
----
-
-## 25. Export
-
-Offline export reuses scene rendering semantics but renders exact frame timestamps.
-
-Likely MVP path:
-
 ~~~text
-offscreen GPU texture
-→ staging buffer readback
-→ FFmpeg input
+1920×1080 -> Full
+3840×2160 -> Half
+7680×4320 -> Quarter
 ~~~
 
-Zero-copy hardware encoder interop is post-MVP unless necessary.
+The user may force Full.
 
----
+## 8. Preview scaling invariant
 
-## 26. Surface/device errors
+Reduced preview resolution never changes project units.
 
-Window surface failure must not affect project state.
+Spatial shader parameters are scaled internally so creative semantics remain stable:
 
-Handle:
+- blur radius;
+- glow radius;
+- RGB displacement;
+- other spatial effects.
 
-- minimized zero-size window;
-- resize;
-- outdated/lost surface;
-- recoverable adapter/device errors.
+Export always uses requested full output resolution.
 
----
+## 9. Coordinates
 
-## 27. DPI
+Project coordinates follow COORDINATE_SYSTEMS.md.
 
-DPI affects editor rendering and input mapping.
+Renderer owns only conversion into GPU clip/NDC space.
 
-It must not mutate composition resolution or object coordinates.
+## 10. Transform
 
----
+~~~text
+local geometry
+-> subtract anchor
+-> scale
+-> clockwise user rotation
+-> translate Position
+~~~
 
-## 28. Performance rules
+Visible semantics must match viewport/hit testing exactly.
 
-- no preview readback;
-- no unchanged texture reupload;
-- no per-frame shader compilation;
-- no unnecessary effect pass for disabled effect;
-- cull invisible objects where cheap;
-- track draw/pass/transient-resource count.
+## 11. Primitive paths
 
----
+MVP:
 
-## 29. Developer diagnostics
+- rectangle;
+- ellipse;
+- image quad;
+- text.
 
-Expose/log:
+Use reusable geometry/shader approaches rather than unique CPU mesh creation for every simple object.
 
-- GPU adapter;
-- backend;
-- limits/features used;
-- composition resolution;
-- object count;
-- draw calls;
-- render passes;
-- temporary texture count;
-- frame CPU timing;
-- optional GPU timing.
+## 12. Antialiasing
 
----
+No global MSAA by default.
 
-## 30. Required spikes
+Shapes use analytic/fragment edge antialiasing where practical.
 
-1. winit + wgpu + egui shared integration;
-2. offscreen rectangle shown inside egui;
-3. hundreds of simple objects;
-4. resize/DPI;
-5. two-pass blur;
-6. text;
-7. image alpha/color reference;
-8. export-frame readback.
+Text uses text-stack antialiasing.
 
----
+Revisit MSAA only if reference testing shows a concrete quality gap.
 
-## 31. Definition of Done
+## 13. Images
+
+Runtime asset manager provides immutable GPU texture and intrinsic dimensions.
+
+Renderer does not reupload unchanged images every frame.
+
+MVP has no crop/fit mode.
+
+## 14. Text
+
+Composition text uses cosmic-text + glyphon on the same device.
+
+See TEXT_RENDERING.md.
+
+## 15. Painter order
+
+Object Vec order is back-to-front painter order.
+
+No creative depth buffer is required.
+
+## 16. Isolation and effects
+
+Objects without isolation-requiring effects can render directly.
+
+Objects with multipass effects render:
+
+~~~text
+object content
+-> isolated target
+-> ordered effect chain
+-> composite into scene
+~~~
+
+Correct effect ordering is semantic.
+
+## 17. Temporary texture pool
+
+Temporary targets are pooled by:
+
+- dimensions;
+- format;
+- usage class.
+
+Normal effects do not create/destroy textures every frame.
+
+## 18. Pipelines/shaders
+
+- WGSL packaged with app;
+- pipelines cached;
+- no per-frame compilation;
+- development hot reload is post-MVP.
+
+## 19. Per-frame CPU data
+
+Begin with reusable unit geometry, explicit draws, and reusable uniform/storage buffers.
+
+Do not build a generic batch/ECS system without profiling evidence.
+
+## 20. Frame lifecycle
+
+1. resolve preview scale;
+2. ensure composition target;
+3. obtain EvaluatedScene;
+4. encode direct/isolated objects;
+5. run effect passes;
+6. finalize composition texture;
+7. present in viewport;
+8. render editor overlays/UI;
+9. submit/present.
+
+No preview readback.
+
+## 21. Editor overlays
+
+Selection, gizmos, guides, anchor markers, and hover outlines are editor overlays and never exported.
+
+## 22. Clipping/culling
+
+Creative output clips to composition bounds.
+
+Objects may exist outside bounds.
+
+Cheap broad culling is allowed; semantic transforms remain unchanged.
+
+## 23. Export
+
+Export uses full-resolution offscreen targets.
+
+A final GPU conversion generates standard SDR RGBA/BGRA encoder input, then staging-buffer readback feeds FFmpeg.
+
+Readback buffering may be pipelined later, but total memory remains bounded.
+
+## 24. Device/surface failure
+
+Handle zero-size/minimized, resize, and recoverable surface loss.
+
+On device loss:
+
+- attempt one renderer reinitialization where practical;
+- rebuild runtime resources;
+- never mutate Project;
+- if recovery fails, surface fatal runtime error while project recovery remains available.
+
+## 25. Diagnostics
+
+Expose:
+
+- adapter/backend;
+- preview dimensions/scale;
+- objects;
+- isolated objects;
+- passes/draw calls;
+- temporary textures;
+- CPU encode time;
+- optional GPU timing;
+- estimated GPU texture memory.
+
+## 26. Required spikes/tests
+
+- offscreen rectangle in egui;
+- sRGB image reference;
+- transparent premultiplied edge reference;
+- clockwise rotation;
+- ellipse quality;
+- Rgba16Float support on target adapters;
+- Half/Quarter effect-size parity;
+- two-pass blur;
+- text;
+- hundreds of simple objects;
+- export readback.
+
+If a supported adapter cannot use the working format, add an explicit tested fallback rather than silently changing semantics.
+
+## 27. Definition of Done
+
+Renderer is MVP-ready when:
 
 - all MVP objects render;
-- transform semantics match viewport;
-- selected effects work;
-- text supports target scripts;
-- offscreen texture feeds viewport;
-- preview avoids GPU readback;
-- deterministic export frame path works;
-- benchmark targets are met.
+- Rgba16Float linear-premultiplied contract holds;
+- preview scale preserves creative units;
+- no preview readback occurs;
+- temporary resources are reused;
+- effects/text match export;
+- representative 1080p scene meets PERFORMANCE.md.

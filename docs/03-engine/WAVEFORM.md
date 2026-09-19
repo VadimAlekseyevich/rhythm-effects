@@ -1,232 +1,121 @@
 # Waveform Pipeline
 
-> **Status: Draft**
+> **Status: Accepted for MVP**
+>
+> Waveform is derived navigation data, not a playback clock. It uses time-domain min/max aggregation, never FFT.
 
-## 1. Goal
+## 1. Input
 
-Render a long audio waveform smoothly at arbitrary timeline zoom without processing raw samples every frame.
+Use decoded source PCM before temporary full decode memory is released.
 
-Waveform is navigation data, not playback state.
+Stereo is displayed as one envelope:
 
----
+~~~text
+bucket_min = minimum across samples/channels
+bucket_max = maximum across samples/channels
+~~~
 
-## 2. Input
-
-Decoded PCM.
-
-For MVP multichannel display, channels can be combined into one envelope if that keeps UI clearer.
-
----
-
-## 3. Data representation
-
-Store bucket extrema:
+## 2. Representation
 
 ~~~rust
-struct WavePeak {
+WavePeak {
     min: f32,
     max: f32,
 }
 ~~~
 
-Min/max preserves waveform envelope better than absolute magnitude only.
+## 3. Base resolution
 
----
+Level 0 aggregates 64 source audio frames per peak bucket.
 
-## 4. Multi-resolution preprocessing
+At 48 kHz this is roughly 1.33 ms per bucket.
 
-~~~text
-PCM
-→ base peak buckets
-→ level 1 aggregate
-→ level 2 aggregate
-→ level 3 ...
-~~~
+## 4. Mip levels
 
-Higher levels summarize larger windows.
-
-This behaves like mip levels for timeline zoom.
-
----
-
-## 5. Base bucket
-
-Do not store one point per raw sample.
-
-Choose base samples-per-bucket based on maximum useful timeline zoom and memory target.
-
-Benchmark before fixing value.
-
----
-
-## 6. Aggregation
-
-If level N summarizes K source frames, level N+1 combines adjacent entries:
+Every next level combines pairs:
 
 ~~~text
-min = min(child mins)
-max = max(child maxes)
+next.min = min(a.min, b.min)
+next.max = max(a.max, b.max)
 ~~~
 
-Deterministic bucket boundaries are important for stable zoom appearance.
+Continue until high levels represent the whole clip compactly.
 
----
+## 5. Worker
 
-## 7. Worker thread
+Waveform generation runs outside main/audio callback paths.
 
-Preprocess off UI thread.
+Timeline can become usable before preprocessing completes.
 
-Job result is keyed to the current audio asset identity/generation.
+Completed peak data is immutable.
 
-Old job result is discarded if audio changed.
+## 6. Cache
 
----
+Project JSON never stores waveform peaks.
 
-## 8. Cache semantics
+MVP may persist them in app cache.
 
-Waveform is rebuildable runtime cache.
+If disk caching is implemented, validity key includes:
 
-The core project does not depend on waveform cache bytes.
+- normalized source path;
+- file size;
+- last modified time;
+- waveform cache format version.
 
-A disk sidecar cache may be added later if startup measurements justify it.
+Any mismatch or cache error rebuilds safely.
 
----
+A manual/developer rebuild path exists.
 
-## 9. Timeline query
+## 7. Timeline query
 
-Timeline provides:
+For visible range:
 
-~~~text
-visible start time
-visible end time
-pixel width
-~~~
+1. map to source/project time;
+2. choose level near screen pixel density;
+3. slice only visible buckets plus margin;
+4. draw a batched mesh/shape.
 
-Waveform layer chooses a level and returns only visible buckets.
+No full-song scan per frame.
 
-No full-song traversal per frame.
+## 8. Visual hierarchy
 
----
+Waveform stays behind keyframes, playhead, and major rhythm lines.
 
-## 10. Level selection
+## 9. Zoom stability
 
-Choose level so roughly one or a small number of peak samples map to each horizontal screen pixel.
+All peak positions derive from source frame/project time.
 
-Too fine:
+Changing mip level never changes horizontal timing.
 
-- wasted CPU/GPU.
+## 10. Memory
 
-Too coarse:
+Total mip peaks remain under roughly twice the base-level count.
 
-- waveform loses detail.
+This is much smaller than PCM.
 
-Selection can include hysteresis if rapid level switching causes visual instability.
+## 11. Edge cases
 
----
+- final partial bucket is included;
+- very short non-empty clip produces at least one peak;
+- empty decode is handled safely.
 
-## 11. Drawing
+## 12. Tests
 
-Initial implementation:
+- extrema;
+- stereo combination;
+- partial bucket;
+- mip reduction;
+- range query;
+- level selection;
+- short clip;
+- 44.1/48 kHz positioning.
 
-- CPU selects visible peaks;
-- generate compact line/triangle vertices;
-- draw clipped to waveform row.
+## 13. Benchmarks
 
-At typical widths only thousands of vertices are needed.
+Use 3-minute and 10-minute generated fixtures plus rapid zoom/pan.
 
-No compute shader required.
+Waveform work must not disrupt audio or interaction.
 
----
+## 14. Definition of Done
 
-## 12. Grid alignment
-
-Waveform and BPM grid use the same timeline coordinate transform.
-
-Waveform does not maintain a separate pixel/time model.
-
-This avoids subtle drift between visual transient and grid line.
-
----
-
-## 13. Zoom stability
-
-Because all levels derive from the same extrema hierarchy, amplitude envelope should remain stable as zoom changes.
-
-Test level boundaries visually.
-
----
-
-## 14. Memory
-
-Total mip hierarchy is a bounded multiple of base level.
-
-Use f32 first.
-
-Do not introduce quantization unless memory profiling shows need.
-
----
-
-## 15. No FFT
-
-Waveform generation is time-domain min/max aggregation.
-
-FFT is not required.
-
-Do not add rustfft solely for waveform.
-
-FFT can be introduced later for spectrum/BPM analysis features.
-
----
-
-## 16. Empty/short files
-
-Handle:
-
-- zero frames;
-- one frame;
-- file shorter than one base bucket;
-- final partial bucket.
-
-No division-by-zero or empty-buffer panic.
-
----
-
-## 17. Performance benchmark
-
-Reference:
-
-- 3–5 min stereo track;
-- 1920–3840 px timeline;
-- rapid zoom/pan.
-
-Measure:
-
-- preprocess time;
-- cache memory;
-- visible query cost;
-- vertex generation;
-- allocations/frame.
-
----
-
-## 18. Tests
-
-- min/max extraction;
-- channel combination;
-- level aggregation;
-- partial final bucket;
-- empty file;
-- visible-range slicing;
-- level choice;
-- duration mapping.
-
----
-
-## 19. Definition of Done
-
-- preprocessing off main UI path;
-- multi-resolution cache works;
-- visible-range query is bounded by screen density;
-- zoom/pan smooth;
-- memory documented;
-- no FFT dependency for waveform.
+Background preprocessing, correct mips, visible-range query, stable zoom, responsive long tracks, and cache-rebuild safety all pass.
