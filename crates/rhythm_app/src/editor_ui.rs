@@ -111,13 +111,7 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.heading("Timeline");
             ui.separator();
-            draw_timeline(
-                ui,
-                session,
-                &project.tempo_map,
-                project.settings.duration,
-                waveform,
-            );
+            draw_timeline(ui, session, project, waveform);
             ui.take_available_space();
         });
 

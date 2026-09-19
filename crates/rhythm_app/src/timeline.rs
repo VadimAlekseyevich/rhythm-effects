@@ -1,6 +1,7 @@
 use crate::editor_session::EditorSession;
 use rhythm_core::{
-    ids::{EffectId, ObjectId},
+    animation::Animated,
+    ids::{EffectId, KeyframeId, ObjectId},
     project::{EffectKind, ObjectContent, Project},
     time::{
         BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
@@ -162,6 +163,90 @@ impl TimelineRow<'_> {
             Self::Object { .. } => 30.0,
             Self::Property { .. } => 28.0,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimelineRowLayout {
+    offsets: Vec<f32>,
+}
+
+impl TimelineRowLayout {
+    #[must_use]
+    pub fn new(rows: &[TimelineRow<'_>]) -> Self {
+        let mut offsets = Vec::with_capacity(rows.len() + 1);
+        offsets.push(0.0);
+        let mut y = 0.0;
+        for row in rows {
+            y += row.height();
+            offsets.push(y);
+        }
+        Self { offsets }
+    }
+
+    #[must_use]
+    pub fn total_height(&self) -> f32 {
+        self.offsets.last().copied().unwrap_or(0.0)
+    }
+
+    #[must_use]
+    pub fn row_top(&self, index: usize) -> f32 {
+        self.offsets
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| self.total_height())
+    }
+
+    #[must_use]
+    pub fn visible_range(
+        &self,
+        scroll_top: f32,
+        viewport_height: f32,
+    ) -> std::ops::Range<usize> {
+        let row_count = self.offsets.len().saturating_sub(1);
+        if row_count == 0 || !scroll_top.is_finite() || !viewport_height.is_finite() {
+            return 0..0;
+        }
+
+        let top = scroll_top.max(0.0);
+        let bottom = (top + viewport_height.max(0.0)).max(top);
+        let first = self
+            .offsets
+            .partition_point(|offset| *offset <= top)
+            .saturating_sub(1)
+            .min(row_count);
+        let end = self
+            .offsets
+            .partition_point(|offset| *offset < bottom)
+            .min(row_count);
+
+        if first >= end {
+            row_count..row_count
+        } else {
+            first..end
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimelineKeyframeRef {
+    pub id: KeyframeId,
+    pub tick: MusicalTick,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimelineEmptyStates {
+    pub no_audio: bool,
+    pub no_bpm: bool,
+    pub no_objects: bool,
+}
+
+#[must_use]
+pub fn timeline_empty_states(project: &Project) -> TimelineEmptyStates {
+    TimelineEmptyStates {
+        no_audio: project.audio_track.is_none(),
+        no_bpm: project.tempo_map.initial_segment().is_none(),
+        no_objects: project.composition.objects.is_empty(),
     }
 }
 
@@ -342,6 +427,150 @@ pub fn build_timeline_rows(project: &Project) -> Vec<TimelineRow<'_>> {
     rows
 }
 
+#[must_use]
+pub fn query_visible_keyframes(
+    project: &Project,
+    object_id: ObjectId,
+    property: TimelineProperty,
+    start_tick: MusicalTick,
+    end_tick: MusicalTick,
+) -> Vec<TimelineKeyframeRef> {
+    if end_tick < start_tick {
+        return Vec::new();
+    }
+
+    let Some(object) = project
+        .composition
+        .objects
+        .iter()
+        .find(|object| object.id == object_id)
+    else {
+        return Vec::new();
+    };
+
+    match property {
+        TimelineProperty::Position => {
+            visible_keyframes_from_animated(&object.transform.position, start_tick, end_tick)
+        }
+        TimelineProperty::Scale => {
+            visible_keyframes_from_animated(&object.transform.scale, start_tick, end_tick)
+        }
+        TimelineProperty::Rotation => visible_keyframes_from_animated(
+            &object.transform.rotation_degrees,
+            start_tick,
+            end_tick,
+        ),
+        TimelineProperty::Anchor => {
+            visible_keyframes_from_animated(&object.transform.anchor, start_tick, end_tick)
+        }
+        TimelineProperty::Opacity => {
+            visible_keyframes_from_animated(&object.transform.opacity, start_tick, end_tick)
+        }
+        TimelineProperty::RectangleSize => match &object.content {
+            ObjectContent::Rectangle(rectangle) => {
+                visible_keyframes_from_animated(&rectangle.size, start_tick, end_tick)
+            }
+            _ => Vec::new(),
+        },
+        TimelineProperty::RectangleFill => match &object.content {
+            ObjectContent::Rectangle(rectangle) => {
+                visible_keyframes_from_animated(&rectangle.fill, start_tick, end_tick)
+            }
+            _ => Vec::new(),
+        },
+        TimelineProperty::RectangleCornerRadius => match &object.content {
+            ObjectContent::Rectangle(rectangle) => {
+                visible_keyframes_from_animated(&rectangle.corner_radius, start_tick, end_tick)
+            }
+            _ => Vec::new(),
+        },
+        TimelineProperty::EllipseSize => match &object.content {
+            ObjectContent::Ellipse(ellipse) => {
+                visible_keyframes_from_animated(&ellipse.size, start_tick, end_tick)
+            }
+            _ => Vec::new(),
+        },
+        TimelineProperty::EllipseFill => match &object.content {
+            ObjectContent::Ellipse(ellipse) => {
+                visible_keyframes_from_animated(&ellipse.fill, start_tick, end_tick)
+            }
+            _ => Vec::new(),
+        },
+        TimelineProperty::TextColor => match &object.content {
+            ObjectContent::Text(text) => {
+                visible_keyframes_from_animated(&text.color, start_tick, end_tick)
+            }
+            _ => Vec::new(),
+        },
+        TimelineProperty::Effect {
+            effect_id,
+            property,
+        } => {
+            let Some(effect) = object.effects.iter().find(|effect| effect.id == effect_id) else {
+                return Vec::new();
+            };
+
+            match (&effect.kind, property) {
+                (EffectKind::Blur(blur), TimelineEffectProperty::BlurRadius) => {
+                    visible_keyframes_from_animated(&blur.radius_px, start_tick, end_tick)
+                }
+                (EffectKind::Glow(glow), TimelineEffectProperty::GlowRadius) => {
+                    visible_keyframes_from_animated(&glow.radius_px, start_tick, end_tick)
+                }
+                (EffectKind::Glow(glow), TimelineEffectProperty::GlowIntensity) => {
+                    visible_keyframes_from_animated(&glow.intensity, start_tick, end_tick)
+                }
+                (EffectKind::Glow(glow), TimelineEffectProperty::GlowThreshold) => {
+                    visible_keyframes_from_animated(&glow.threshold, start_tick, end_tick)
+                }
+                (EffectKind::Glow(glow), TimelineEffectProperty::GlowColor) => {
+                    visible_keyframes_from_animated(&glow.color, start_tick, end_tick)
+                }
+                (EffectKind::Tint(tint), TimelineEffectProperty::TintColor) => {
+                    visible_keyframes_from_animated(&tint.color, start_tick, end_tick)
+                }
+                (EffectKind::Tint(tint), TimelineEffectProperty::TintAmount) => {
+                    visible_keyframes_from_animated(&tint.amount, start_tick, end_tick)
+                }
+                (EffectKind::Noise(noise), TimelineEffectProperty::NoiseAmount) => {
+                    visible_keyframes_from_animated(&noise.amount, start_tick, end_tick)
+                }
+                (EffectKind::Noise(noise), TimelineEffectProperty::NoiseSize) => {
+                    visible_keyframes_from_animated(&noise.size_px, start_tick, end_tick)
+                }
+                (EffectKind::Noise(noise), TimelineEffectProperty::NoiseEvolution) => {
+                    visible_keyframes_from_animated(&noise.evolution, start_tick, end_tick)
+                }
+                (EffectKind::RgbSplit(split), TimelineEffectProperty::RgbSplitAmount) => {
+                    visible_keyframes_from_animated(&split.amount_px, start_tick, end_tick)
+                }
+                (EffectKind::RgbSplit(split), TimelineEffectProperty::RgbSplitAngle) => {
+                    visible_keyframes_from_animated(&split.angle_degrees, start_tick, end_tick)
+                }
+                _ => Vec::new(),
+            }
+        }
+    }
+}
+
+fn visible_keyframes_from_animated<T>(
+    animated: &Animated<T>,
+    start_tick: MusicalTick,
+    end_tick: MusicalTick,
+) -> Vec<TimelineKeyframeRef> {
+    let keyframes = animated.keyframes();
+    let start_index = keyframes.partition_point(|keyframe| keyframe.tick < start_tick);
+    let end_index = keyframes.partition_point(|keyframe| keyframe.tick <= end_tick);
+
+    keyframes[start_index..end_index]
+        .iter()
+        .map(|keyframe| TimelineKeyframeRef {
+            id: keyframe.id,
+            tick: keyframe.tick,
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MusicalGridLineKind {
     Bar,
@@ -358,10 +587,13 @@ struct MusicalGridLine {
 pub fn draw_timeline(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
-    tempo_map: &TempoMap,
-    project_duration: DurationNs,
+    project: &Project,
     waveform: Option<&WaveformData>,
 ) {
+    let tempo_map = &project.tempo_map;
+    let project_duration = project.settings.duration;
+    let empty_states = timeline_empty_states(project);
+    let rows = build_timeline_rows(project);
     let (mut start_time, mut end_time) = session.timeline_range(project_duration);
 
     let (ruler_rect, ruler_response) = ui.allocate_exact_size(
@@ -434,6 +666,10 @@ pub fn draw_timeline(
 
     draw_waveform(ui, waveform_rect, waveform_transform, waveform);
 
+    if empty_states.no_audio {
+        draw_empty_state_label(ui, waveform_rect, "Import audio to show waveform");
+    }
+
     draw_musical_grid(
         ui,
         grid_rect,
@@ -442,7 +678,92 @@ pub fn draw_timeline(
         session.authoring_division(),
     );
     draw_time_ruler(ui, ruler_rect, ruler_transform);
+    if empty_states.no_bpm {
+        draw_empty_state_label(ui, ruler_rect, "Set BPM to enable rhythm grid");
+    }
     draw_playhead(ui, grid_rect, ruler_transform, session.playhead());
+    draw_timeline_rows(ui, &rows);
+}
+
+fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        egui::FontId::proportional(12.0),
+        ui.visuals().weak_text_color(),
+    );
+}
+
+fn draw_timeline_rows(ui: &mut egui::Ui, rows: &[TimelineRow<'_>]) {
+    let available_height = ui.available_height().max(0.0);
+    if available_height <= 0.0 {
+        return;
+    }
+
+    if rows.is_empty() {
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), available_height),
+            egui::Sense::hover(),
+        );
+        draw_empty_state_label(ui, rect, "Add an object to animate");
+        return;
+    }
+
+    let layout = TimelineRowLayout::new(rows);
+    egui::ScrollArea::vertical()
+        .id_salt("timeline_rows_scroll")
+        .auto_shrink([false, false])
+        .max_height(available_height)
+        .show_viewport(ui, |ui, viewport| {
+            let visible = layout.visible_range(viewport.top(), viewport.height());
+            ui.add_space(layout.row_top(visible.start));
+
+            for row in &rows[visible.clone()] {
+                let height = row.height();
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), height),
+                    egui::Sense::hover(),
+                );
+                let color = ui.visuals().widgets.noninteractive.fg_stroke.color;
+                match row {
+                    TimelineRow::Object { name, .. } => {
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 6.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            *name,
+                            egui::FontId::proportional(13.0),
+                            color,
+                        );
+                    }
+                    TimelineRow::Property {
+                        property,
+                        keyframe_count,
+                        ..
+                    } => {
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 18.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            property.label(),
+                            egui::FontId::proportional(12.0),
+                            color.gamma_multiply(0.85),
+                        );
+                        if *keyframe_count > 0 {
+                            ui.painter().text(
+                                egui::pos2(rect.right() - 6.0, rect.center().y),
+                                egui::Align2::RIGHT_CENTER,
+                                keyframe_count.to_string(),
+                                egui::FontId::monospace(11.0),
+                                color.gamma_multiply(0.65),
+                            );
+                        }
+                    }
+                }
+            }
+
+            let rendered_bottom = layout.row_top(visible.end);
+            ui.add_space((layout.total_height() - rendered_bottom).max(0.0));
+        });
 }
 
 fn draw_playhead(
@@ -808,12 +1129,44 @@ fn source_frame_for_project_time(project_time: ProjectTimeNs, sample_rate: u32) 
 #[cfg(test)]
 mod tests {
     use super::{
-        MusicalGridLineKind, TimelineTransform, build_waveform_mesh, collect_musical_grid_lines,
+        MusicalGridLineKind, TimelineRow, TimelineRowLayout, TimelineTransform,
+        build_waveform_mesh, collect_musical_grid_lines, query_visible_keyframes,
+        timeline_empty_states,
     };
     use rhythm_core::time::{
         BeatDivision, BpmMicros, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
     };
     use rhythm_engine::waveform::{WavePeak, WaveformSlice};
+
+    #[test]
+    fn row_layout_virtualizes_mixed_height_rows() {
+        let object_id = rhythm_core::ids::ObjectId::new(1).expect("object id");
+        let rows = [
+            TimelineRow::Object {
+                object_id,
+                name: "Object",
+                visible: true,
+                locked: false,
+            },
+            TimelineRow::Property {
+                object_id,
+                property: super::TimelineProperty::Position,
+                keyframe_count: 0,
+            },
+            TimelineRow::Property {
+                object_id,
+                property: super::TimelineProperty::Opacity,
+                keyframe_count: 0,
+            },
+        ];
+        let layout = TimelineRowLayout::new(&rows);
+
+        assert_eq!(layout.total_height(), 86.0);
+        assert_eq!(layout.visible_range(0.0, 29.0), 0..1);
+        assert_eq!(layout.visible_range(30.0, 28.0), 1..2);
+        assert_eq!(layout.visible_range(57.0, 29.0), 1..3);
+        assert_eq!(layout.visible_range(100.0, 20.0), 3..3);
+    }
 
     #[test]
     fn timeline_rows_include_object_transform_content_and_effect_properties() {
@@ -887,6 +1240,92 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn visible_keyframe_query_binary_searches_musical_tick_range() {
+        use rhythm_core::{
+            animation::{Animated, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            ids::{KeyframeId, ObjectId},
+            project::{Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation},
+            time::{GridOffsetNs, MusicalTick, TempoMap},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = Project::new(
+            "Keys",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id: object_id,
+            name: "Rect".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(Vec2::new(0.0, 0.0).expect("position")),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::with_keyframes(
+                    1.0,
+                    vec![
+                        Keyframe::new(
+                            KeyframeId::new(2).expect("key id"),
+                            MusicalTick::new(0),
+                            0.0,
+                            Interpolation::Linear,
+                        ),
+                        Keyframe::new(
+                            KeyframeId::new(3).expect("key id"),
+                            MusicalTick::new(240),
+                            0.5,
+                            Interpolation::Linear,
+                        ),
+                        Keyframe::new(
+                            KeyframeId::new(4).expect("key id"),
+                            MusicalTick::new(480),
+                            1.0,
+                            Interpolation::Linear,
+                        ),
+                    ],
+                )
+                .expect("sorted unique keys"),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(100.0, 50.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+
+        let visible = query_visible_keyframes(
+            &project,
+            object_id,
+            super::TimelineProperty::Opacity,
+            MusicalTick::new(100),
+            MusicalTick::new(300),
+        );
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].id.get(), 3);
+        assert_eq!(visible[0].tick, MusicalTick::new(240));
+    }
+
+    #[test]
+    fn default_project_reports_all_timeline_empty_states() {
+        let project = rhythm_core::project::Project::new(
+            "Empty",
+            rhythm_core::project::ProjectSettings::default(),
+            rhythm_core::time::TempoMap::unset(rhythm_core::time::GridOffsetNs::new(0)),
+        );
+
+        let states = timeline_empty_states(&project);
+        assert!(states.no_audio);
+        assert!(states.no_bpm);
+        assert!(states.no_objects);
     }
 
     #[test]
