@@ -166,10 +166,8 @@ impl TempoMap {
             .initial_segment()
             .ok_or(TimeConversionError::TempoUnavailable)?;
 
-        let delta_ns =
-            i128::from(project_time.get()) - i128::from(self.grid_offset.get());
-        let numerator =
-            delta_ns * i128::from(segment.bpm().get()) * i128::from(PPQ);
+        let delta_ns = i128::from(project_time.get()) - i128::from(self.grid_offset.get());
+        let numerator = delta_ns * i128::from(segment.bpm().get()) * i128::from(PPQ);
         let denominator = 60_000_000_000_i128 * 1_000_000_i128;
 
         Ok(numerator as f64 / denominator as f64)
