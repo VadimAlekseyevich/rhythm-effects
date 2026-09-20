@@ -1307,6 +1307,112 @@ impl ProjectEditor {
                     HistoryPayload::PropertyKeyframesMoved { records },
                 )))
             }
+            EditCommand::SetPropertyKeyframeInterpolations {
+                keyframe_ids,
+                interpolation,
+            } => {
+                let mut unique_ids = HashSet::with_capacity(keyframe_ids.len());
+                let mut records = Vec::with_capacity(keyframe_ids.len());
+
+                for keyframe_id in keyframe_ids {
+                    if !unique_ids.insert(keyframe_id) {
+                        continue;
+                    }
+
+                    let located = locate_property_keyframe(&self.project, keyframe_id)
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                    if located.keyframe.interpolation == interpolation {
+                        continue;
+                    }
+
+                    records.push(PropertyKeyframeInterpolationRecord {
+                        object_id: located.object_id,
+                        property: located.property,
+                        keyframe_id,
+                        before: located.keyframe.interpolation,
+                        after: interpolation,
+                    });
+                }
+
+                if records.is_empty() {
+                    return Ok(None);
+                }
+
+                for (index, record) in records.iter().enumerate() {
+                    match set_property_keyframe_interpolation(
+                        &mut self.project,
+                        record.object_id,
+                        record.property,
+                        record.keyframe_id,
+                        record.after,
+                    ) {
+                        Ok(Some(before)) if before == record.before => {}
+                        Ok(Some(before)) => {
+                            let _ = set_property_keyframe_interpolation(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.keyframe_id,
+                                before,
+                            );
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::HistoryInvariant(
+                                "keyframe interpolation source mismatch",
+                            ));
+                        }
+                        Ok(None) => {
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::KeyframeNotFound(record.keyframe_id));
+                        }
+                        Err(error) => {
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::PropertyAccess(error));
+                        }
+                    }
+                }
+
+                if let Err(error) = self.project.validate() {
+                    for record in records.iter().rev() {
+                        let _ = set_property_keyframe_interpolation(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.keyframe_id,
+                            record.before,
+                        );
+                    }
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Change Keyframe Easing",
+                    HistoryPayload::PropertyKeyframeInterpolationsChanged { records },
+                )))
+            }
             EditCommand::SetTempoMap { tempo_map } => {
                 let before = self.project.tempo_map.clone();
                 if before == tempo_map {
