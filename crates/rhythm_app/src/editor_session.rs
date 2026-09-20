@@ -323,10 +323,8 @@ impl EditorSession {
             return false;
         }
 
-        let available_width =
-            (viewport_width - FRAME_SELECTION_PADDING_POINTS * 2.0).max(1.0);
-        let available_height =
-            (viewport_height - FRAME_SELECTION_PADDING_POINTS * 2.0).max(1.0);
+        let available_width = (viewport_width - FRAME_SELECTION_PADDING_POINTS * 2.0).max(1.0);
+        let available_height = (viewport_height - FRAME_SELECTION_PADDING_POINTS * 2.0).max(1.0);
         let bounds_width_points = bounds.size.x() * preview_width / composition_width;
         let bounds_height_points = bounds.size.y() * preview_height / composition_height;
 
@@ -1426,12 +1424,8 @@ mod tests {
         let composition_center_x = composition_size[0] * 0.5;
         let composition_center_y = composition_size[1] * 0.5;
 
-        assert!(
-            (pan[0] + (selection_center_x - composition_center_x) * scale_x).abs() < 0.001
-        );
-        assert!(
-            (pan[1] + (selection_center_y - composition_center_y) * scale_y).abs() < 0.001
-        );
+        assert!((pan[0] + (selection_center_x - composition_center_x) * scale_x).abs() < 0.001);
+        assert!((pan[1] + (selection_center_y - composition_center_y) * scale_y).abs() < 0.001);
         assert!(bounds.size.x() * scale_x <= viewport_size[0] - 64.0 + 0.001);
         assert!(bounds.size.y() * scale_y <= viewport_size[1] - 64.0 + 0.001);
     }
