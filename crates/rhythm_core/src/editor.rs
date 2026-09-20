@@ -248,6 +248,10 @@ pub enum HistoryPayload {
         base_changes: Vec<(ObjectId, Vec2, Vec2)>,
         keyframe_changes: Vec<PropertyKeyframeValueRecord>,
     },
+    PropertyValuesChanged {
+        base_changes: Vec<PropertyBaseChange>,
+        keyframe_changes: Vec<PropertyKeyframeValueRecord>,
+    },
     ScaleBaseChanged {
         object_id: ObjectId,
         before: Vec2,
@@ -760,6 +764,120 @@ impl ProjectEditor {
         set_property_keyframe_value(&mut self.project, object_id, property, keyframe_id, value)?
             .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
         Ok(())
+    }
+
+    pub fn set_property_values_at_tick(
+        &mut self,
+        property: AnimatableProperty,
+        tick: MusicalTick,
+        values: Vec<(ObjectId, PropertyValue)>,
+    ) -> Result<bool, EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant(
+                "cannot edit properties while transaction is active",
+            ));
+        }
+        if values.is_empty() {
+            return Ok(false);
+        }
+
+        let project_before = self.project.clone();
+        let mut seen = HashSet::with_capacity(values.len());
+        let mut base_changes = Vec::new();
+        let mut keyframe_changes = Vec::new();
+
+        let apply_result = (|| -> Result<(), EditError> {
+            for (object_id, value) in values {
+                if !seen.insert(object_id) {
+                    return Err(EditError::HistoryInvariant(
+                        "duplicate object in compound property edit",
+                    ));
+                }
+
+                if property_keyframe_count(&self.project, object_id, property)? == 0 {
+                    let before = property_base_value(&self.project, object_id, property)?;
+                    if before == value {
+                        continue;
+                    }
+
+                    set_property_base_value(&mut self.project, object_id, property, value)?;
+                    base_changes.push(PropertyBaseChange {
+                        object_id,
+                        property,
+                        before,
+                        after: value,
+                    });
+                    continue;
+                }
+
+                let before =
+                    crate::property::property_keyframe_at_tick(&self.project, object_id, property, tick)?;
+                if let Some(existing) = before {
+                    if existing.value == value {
+                        continue;
+                    }
+
+                    set_property_keyframe_value(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        existing.id,
+                        value,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(existing.id))?;
+                    let after =
+                        property_keyframe_by_id(&self.project, object_id, property, existing.id)?
+                            .ok_or(EditError::KeyframeNotFound(existing.id))?;
+                    keyframe_changes.push(PropertyKeyframeValueRecord {
+                        object_id,
+                        property,
+                        before: Some(existing),
+                        after,
+                    });
+                } else {
+                    let keyframe_id = self.next_keyframe_id()?;
+                    let keyframe = PropertyKeyframe {
+                        id: keyframe_id,
+                        tick,
+                        value,
+                        interpolation: Interpolation::Linear,
+                    };
+                    insert_property_keyframe(&mut self.project, object_id, property, keyframe)?;
+                    self.project.next_entity_id = self
+                        .project
+                        .next_entity_id
+                        .checked_add(1)
+                        .ok_or(EditError::IdAllocation(IdAllocationError::Exhausted))?;
+                    keyframe_changes.push(PropertyKeyframeValueRecord {
+                        object_id,
+                        property,
+                        before: None,
+                        after: keyframe,
+                    });
+                }
+            }
+
+            self.project.validate().map_err(EditError::InvalidProject)
+        })();
+
+        if let Err(error) = apply_result {
+            self.project = project_before;
+            return Err(error);
+        }
+
+        if base_changes.is_empty() && keyframe_changes.is_empty() {
+            return Ok(false);
+        }
+
+        let count = base_changes.len() + keyframe_changes.len();
+        self.history.push(PendingHistoryEntry::new(
+            &format!("Edit {count} Objects"),
+            HistoryPayload::PropertyValuesChanged {
+                base_changes,
+                keyframe_changes,
+            },
+        ));
+        Ok(true)
     }
 
     pub fn begin_position_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
@@ -2373,6 +2491,64 @@ impl ProjectEditor {
                 }
             }
             (
+                HistoryPayload::PropertyValuesChanged {
+                    base_changes,
+                    keyframe_changes,
+                },
+                direction,
+            ) => {
+                for change in base_changes {
+                    set_property_base_value(
+                        &mut self.project,
+                        change.object_id,
+                        change.property,
+                        *direction.pick(&change.before, &change.after),
+                    )?;
+                }
+
+                for record in keyframe_changes {
+                    match (&record.before, direction) {
+                        (Some(before), HistoryDirection::Undo) => {
+                            set_property_keyframe_value(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                before.id,
+                                before.value,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(before.id))?;
+                        }
+                        (Some(_), HistoryDirection::Redo) => {
+                            set_property_keyframe_value(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.after.id,
+                                record.after.value,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(record.after.id))?;
+                        }
+                        (None, HistoryDirection::Undo) => {
+                            remove_property_keyframe_by_id(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.after.id,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(record.after.id))?;
+                        }
+                        (None, HistoryDirection::Redo) => {
+                            insert_property_keyframe(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.after,
+                            )?;
+                        }
+                    }
+                }
+            }
+            (
                 HistoryPayload::ScaleBaseChanged {
                     object_id,
                     before,
@@ -2798,6 +2974,102 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn compound_property_edit_mixes_static_and_animated_targets_in_one_history_entry() {
+        let mut project = editor_with_object().into_project();
+        let first_id = ObjectId::new(1).expect("first object");
+        let second_id = ObjectId::new(2).expect("second object");
+        let mut second = object(2, "B");
+        second.transform.scale = Animated::with_keyframes(
+            Vec2::new(1.0, 1.0).expect("base scale"),
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(3).expect("keyframe"),
+                    MusicalTick::new(0),
+                    Vec2::new(1.0, 1.0).expect("scale"),
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(4).expect("keyframe"),
+                    MusicalTick::new(480),
+                    Vec2::new(3.0, 1.0).expect("scale"),
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("animated scale");
+        project.composition.objects.push(second);
+        project.next_entity_id = 5;
+
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        assert_eq!(
+            editor.set_property_values_at_tick(
+                AnimatableProperty::Scale,
+                MusicalTick::new(240),
+                vec![
+                    (
+                        first_id,
+                        PropertyValue::Vec2(Vec2::new(2.0, 1.0).expect("first scale")),
+                    ),
+                    (
+                        second_id,
+                        PropertyValue::Vec2(Vec2::new(2.5, 1.0).expect("second scale")),
+                    ),
+                ],
+            ),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            property_base_value(editor.project(), first_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(
+                Vec2::new(2.0, 1.0).expect("edited base scale")
+            ))
+        );
+        let inserted = crate::property::property_keyframe_at_tick(
+            editor.project(),
+            second_id,
+            AnimatableProperty::Scale,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("inserted key");
+        assert_eq!(
+            inserted.value,
+            PropertyValue::Vec2(Vec2::new(2.5, 1.0).expect("animated scale"))
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            property_base_value(editor.project(), first_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(
+                Vec2::new(1.0, 1.0).expect("restored base scale")
+            ))
+        );
+        assert!(
+            crate::property::property_keyframe_at_tick(
+                editor.project(),
+                second_id,
+                AnimatableProperty::Scale,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_none()
+        );
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert!(
+            crate::property::property_keyframe_at_tick(
+                editor.project(),
+                second_id,
+                AnimatableProperty::Scale,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_some()
+        );
     }
 
     #[test]
