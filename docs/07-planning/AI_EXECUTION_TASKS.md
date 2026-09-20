@@ -212,7 +212,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-177** — Implement Rotation handle around Anchor.
 - [x] **AI-178** — Implement Shift 15-degree Rotation snapping.
 - [x] **AI-179** — Implement multi-object move by shared composition-space delta.
-- [ ] **AI-180** — Implement animated direct-transform edits using the accepted property-keyframing behavior.
+- [x] **AI-180** — Implement animated direct-transform edits using the accepted property-keyframing behavior.
 - [ ] **AI-181** — Implement the Object list with visible/locked/name state.
 - [ ] **AI-182** — Synchronize Object list, Viewport and Inspector selection.
 - [ ] **AI-183** — Implement standard Inspector animatable property row.
