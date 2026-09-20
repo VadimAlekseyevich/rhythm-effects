@@ -3604,6 +3604,97 @@ mod tests {
     }
 
     #[test]
+    fn inspector_text_actions_commit_buffered_and_enum_edits() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::LinearRgba,
+            project::{
+                FontReference, FontStyle, FontWeight, ObjectContent, TextAlignment, TextObject,
+            },
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.composition.objects[0].content = ObjectContent::Text(TextObject {
+            text: "Hello".to_owned(),
+            font: FontReference {
+                family: "Inter".to_owned(),
+                weight: FontWeight::Normal,
+                style: FontStyle::Normal,
+            },
+            font_size: 48.0,
+            color: Animated::new_static(LinearRgba::black_opaque()),
+            alignment: TextAlignment::Left,
+        });
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+
+        let content_target = super::InspectorTextTarget {
+            object_id,
+            field: super::InspectorTextField::Content,
+        };
+        session.begin_inspector_text_edit(content_target, "Hello".to_owned());
+        assert!(session.update_inspector_text_edit_buffer(
+            content_target,
+            "Привет\nRhythm".to_owned(),
+        ));
+        assert!(session.commit_inspector_text_edit(content_target));
+
+        let family_target = super::InspectorTextTarget {
+            object_id,
+            field: super::InspectorTextField::FontFamily,
+        };
+        session.begin_inspector_text_edit(family_target, "Inter".to_owned());
+        assert!(session.update_inspector_text_edit_buffer(
+            family_target,
+            "Noto Sans".to_owned(),
+        ));
+        assert!(session.commit_inspector_text_edit(family_target));
+
+        let size_target = super::InspectorTextTarget {
+            object_id,
+            field: super::InspectorTextField::FontSize,
+        };
+        session.begin_inspector_text_edit(size_target, "48".to_owned());
+        assert!(session.update_inspector_text_edit_buffer(
+            size_target,
+            "64".to_owned(),
+        ));
+        assert!(session.commit_inspector_text_edit(size_target));
+
+        session.queue_text_font_weight(object_id, FontWeight::Bold);
+        session.queue_text_font_style(object_id, FontStyle::Italic);
+        session.queue_text_alignment(object_id, TextAlignment::Center);
+
+        assert_eq!(
+            session.commit_pending_text_inspector_actions(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 6);
+
+        let ObjectContent::Text(text) = &editor.project().composition.objects[0].content else {
+            panic!("object should be text");
+        };
+        assert_eq!(text.text, "Привет\nRhythm");
+        assert_eq!(text.font.family, "Noto Sans");
+        assert_eq!(text.font.weight, FontWeight::Bold);
+        assert_eq!(text.font.style, FontStyle::Italic);
+        assert_eq!(text.font_size, 64.0);
+        assert_eq!(text.alignment, TextAlignment::Center);
+
+        session.begin_inspector_text_edit(content_target, text.text.clone());
+        assert!(session.update_inspector_text_edit_buffer(
+            content_target,
+            "discard me".to_owned(),
+        ));
+        assert!(session.cancel_inspector_text_edit(content_target));
+        assert_eq!(
+            session.commit_pending_text_inspector_actions(&mut editor),
+            Ok(false)
+        );
+    }
+
+    #[test]
     fn image_relink_request_tracks_stable_asset_id() {
         use rhythm_core::ids::AssetId;
 
