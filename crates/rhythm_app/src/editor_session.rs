@@ -1431,6 +1431,7 @@ impl EditorSession {
         true
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn inspector_numeric_edit_original_value(
         &self,
@@ -1442,6 +1443,7 @@ impl EditorSession {
             .map(|edit| edit.original_value)
     }
 
+    #[cfg(test)]
     pub const fn take_inspector_numeric_commit(&mut self) -> Option<InspectorNumericCommit> {
         self.pending_inspector_numeric_commit.take()
     }
@@ -2273,8 +2275,8 @@ impl EditorSession {
 #[cfg(test)]
 mod tests {
     use super::{
-        EditorSession, KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality,
-        ViewportCameraAction,
+        EditorSession, InspectorNumericCommit, InspectorNumericComponent, InspectorNumericTarget,
+        KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality, ViewportCameraAction,
     };
     use rhythm_core::{
         domain::Vec2,
