@@ -54,6 +54,30 @@ impl LocalBounds2d {
 }
 
 #[must_use]
+#[must_use]
+pub fn object_transform_point_in_bounds(
+    local_point: Vec2,
+    transform: ObjectTransform2d,
+    bounds: LocalBounds2d,
+) -> Option<Vec2> {
+    let anchor_x = bounds.min.x() + transform.anchor.x() * bounds.size.x();
+    let anchor_y = bounds.min.y() + transform.anchor.y() * bounds.size.y();
+
+    let scaled_x = (local_point.x() - anchor_x) * transform.scale.x();
+    let scaled_y = (local_point.y() - anchor_y) * transform.scale.y();
+
+    let radians = transform.rotation_degrees.to_radians();
+    let (sin, cos) = radians.sin_cos();
+    let rotated_x = cos * scaled_x - sin * scaled_y;
+    let rotated_y = sin * scaled_x + cos * scaled_y;
+
+    Vec2::new(
+        rotated_x + transform.position.x(),
+        rotated_y + transform.position.y(),
+    )
+    .ok()
+}
+
 pub fn inverse_object_transform_point_in_bounds(
     composition_point: Vec2,
     transform: ObjectTransform2d,
@@ -174,6 +198,7 @@ mod tests {
     use super::{
         LocalBounds2d, ObjectTransform2d, hit_test_ellipse, hit_test_image_bounds,
         hit_test_rectangle, hit_test_text_layout_bounds, inverse_object_transform_point,
+        object_transform_point_in_bounds,
     };
     use crate::domain::Vec2;
 
@@ -348,6 +373,22 @@ mod tests {
         assert!(hit_test_rectangle(vec2(200.0, 150.0), transform, size));
         assert!(hit_test_rectangle(vec2(225.0, 100.0), transform, size));
         assert!(!hit_test_rectangle(vec2(200.0, 150.1), transform, size));
+    }
+
+    #[test]
+    fn forward_and_inverse_object_transform_round_trip() {
+        let bounds = LocalBounds2d::new(vec2(-20.0, 10.0), vec2(100.0, 50.0));
+        let transform = transform((300.0, 200.0), (-2.0, 0.5), 90.0, (0.25, 0.75));
+        let local = vec2(40.0, 30.0);
+
+        let composition =
+            object_transform_point_in_bounds(local, transform, bounds).expect("forward transform");
+        let restored =
+            super::inverse_object_transform_point_in_bounds(composition, transform, bounds)
+                .expect("inverse transform");
+
+        assert!((restored.x() - local.x()).abs() < 0.0001);
+        assert!((restored.y() - local.y()).abs() < 0.0001);
     }
 
     #[test]
