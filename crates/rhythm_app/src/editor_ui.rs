@@ -206,7 +206,9 @@ fn draw_animatable_property_row(
                     _ => 1.0,
                 };
                 let suffix = match property {
-                    AnimatableProperty::Position | AnimatableProperty::RectangleSize => " px",
+                    AnimatableProperty::Position
+                    | AnimatableProperty::RectangleSize
+                    | AnimatableProperty::EllipseSize => " px",
                     AnimatableProperty::Scale | AnimatableProperty::Anchor => "%",
                     _ => "",
                 };
@@ -450,7 +452,9 @@ fn draw_multi_animatable_property_row(
                     _ => 1.0,
                 };
                 let suffix = match property {
-                    AnimatableProperty::Position | AnimatableProperty::RectangleSize => " px",
+                    AnimatableProperty::Position
+                    | AnimatableProperty::RectangleSize
+                    | AnimatableProperty::EllipseSize => " px",
                     AnimatableProperty::Scale | AnimatableProperty::Anchor => "%",
                     _ => "",
                 };
@@ -744,34 +748,58 @@ pub fn draw_editor_shell(
                             "Opacity",
                         );
 
-                        if matches!(&object.content, ObjectContent::Rectangle(_)) {
-                            ui.add_space(8.0);
-                            ui.separator();
-                            ui.heading("Rectangle");
-                            draw_animatable_property_row(
-                                ui,
-                                session,
-                                project,
-                                object.id,
-                                AnimatableProperty::RectangleSize,
-                                "Size",
-                            );
-                            draw_animatable_property_row(
-                                ui,
-                                session,
-                                project,
-                                object.id,
-                                AnimatableProperty::RectangleFill,
-                                "Fill",
-                            );
-                            draw_animatable_property_row(
-                                ui,
-                                session,
-                                project,
-                                object.id,
-                                AnimatableProperty::RectangleCornerRadius,
-                                "Corner Radius",
-                            );
+                        match &object.content {
+                            ObjectContent::Rectangle(_) => {
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.heading("Rectangle");
+                                draw_animatable_property_row(
+                                    ui,
+                                    session,
+                                    project,
+                                    object.id,
+                                    AnimatableProperty::RectangleSize,
+                                    "Size",
+                                );
+                                draw_animatable_property_row(
+                                    ui,
+                                    session,
+                                    project,
+                                    object.id,
+                                    AnimatableProperty::RectangleFill,
+                                    "Fill",
+                                );
+                                draw_animatable_property_row(
+                                    ui,
+                                    session,
+                                    project,
+                                    object.id,
+                                    AnimatableProperty::RectangleCornerRadius,
+                                    "Corner Radius",
+                                );
+                            }
+                            ObjectContent::Ellipse(_) => {
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.heading("Ellipse");
+                                draw_animatable_property_row(
+                                    ui,
+                                    session,
+                                    project,
+                                    object.id,
+                                    AnimatableProperty::EllipseSize,
+                                    "Size",
+                                );
+                                draw_animatable_property_row(
+                                    ui,
+                                    session,
+                                    project,
+                                    object.id,
+                                    AnimatableProperty::EllipseFill,
+                                    "Fill",
+                                );
+                            }
+                            ObjectContent::Image(_) | ObjectContent::Text(_) => {}
                         }
                     } else {
                         ui.label("Selected object is unavailable");
@@ -858,6 +886,36 @@ pub fn draw_editor_shell(
                             &selected,
                             AnimatableProperty::RectangleCornerRadius,
                             "Corner Radius",
+                        );
+                    }
+
+                    let all_ellipses = selected.iter().all(|object_id| {
+                        project
+                            .composition
+                            .objects
+                            .iter()
+                            .find(|object| object.id == *object_id)
+                            .is_some_and(|object| matches!(&object.content, ObjectContent::Ellipse(_)))
+                    });
+                    if all_ellipses {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.heading("Ellipse");
+                        draw_multi_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            &selected,
+                            AnimatableProperty::EllipseSize,
+                            "Size",
+                        );
+                        draw_multi_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            &selected,
+                            AnimatableProperty::EllipseFill,
+                            "Fill",
                         );
                     }
                 }
