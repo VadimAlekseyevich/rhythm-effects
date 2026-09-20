@@ -609,7 +609,7 @@ impl ProjectEditor {
     pub fn update_position_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
             Some(ActiveTransaction::ObjectPosition { object_id, .. }) => object_id,
-            None => {
+            _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active position transaction",
                 ));
