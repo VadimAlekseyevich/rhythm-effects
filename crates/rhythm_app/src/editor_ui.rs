@@ -1,7 +1,7 @@
 use crate::{
     editor_session::{
-        EditorSession, InspectorNumericComponent, InspectorNumericTarget, PreviewQuality,
-        ViewportCameraAction,
+        EditorSession, InspectorMultiNumericTarget, InspectorNumericComponent,
+        InspectorNumericTarget, PreviewQuality, ViewportCameraAction,
     },
     timeline::draw_timeline,
     viewport::{
@@ -248,6 +248,179 @@ fn draw_animatable_property_row(
     });
 }
 
+fn inspector_common_numeric_component(
+    values: &[(PropertyValue, InspectorKeyframeState)],
+    component: InspectorNumericComponent,
+) -> Option<Option<f32>> {
+    let mut components = values.iter().map(|(value, _)| match (value, component) {
+        (PropertyValue::Scalar(value), InspectorNumericComponent::Scalar) => Some(*value),
+        (PropertyValue::Vec2(value), InspectorNumericComponent::X) => Some(value.x()),
+        (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => Some(value.y()),
+        _ => None,
+    });
+    let first = components.next()??;
+    let mut common = true;
+    for value in components {
+        if value? != first {
+            common = false;
+        }
+    }
+    Some(common.then_some(first))
+}
+
+fn draw_inspector_multi_numeric_field(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    target: InspectorMultiNumericTarget,
+    object_ids: &[ObjectId],
+    value: Option<f32>,
+    display_scale: f32,
+    suffix: &str,
+) {
+    let editing_buffer = session
+        .inspector_multi_numeric_edit_buffer(target, object_ids)
+        .map(str::to_owned);
+
+    if let Some(mut buffer) = editing_buffer {
+        let response = ui.add_sized(
+            [66.0, 24.0],
+            egui::TextEdit::singleline(&mut buffer).horizontal_align(egui::Align::RIGHT),
+        );
+        session.update_inspector_multi_numeric_edit_buffer(target, buffer);
+
+        let escape = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
+        let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if escape {
+            session.cancel_inspector_multi_numeric_edit(target);
+            response.surrender_focus();
+        } else if enter || response.lost_focus() {
+            session.commit_inspector_multi_numeric_edit(target);
+        }
+    } else {
+        let label = value.map_or_else(
+            || "Mixed".to_owned(),
+            |value| {
+                let display_value = value * display_scale;
+                if suffix.is_empty() {
+                    format!("{display_value:.1}")
+                } else {
+                    format!("{display_value:.1}{suffix}")
+                }
+            },
+        );
+        if ui
+            .add_sized([66.0, 24.0], egui::Button::new(label))
+            .clicked()
+        {
+            let buffer = value
+                .map(|value| format!("{:.1}", value * display_scale))
+                .unwrap_or_default();
+            session.begin_inspector_multi_numeric_edit(
+                target,
+                object_ids.to_vec(),
+                buffer,
+            );
+        }
+    }
+}
+
+fn draw_multi_animatable_property_row(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    project: &Project,
+    object_ids: &[ObjectId],
+    property: AnimatableProperty,
+    label: &str,
+) {
+    let values: Option<Vec<_>> = object_ids
+        .iter()
+        .map(|object_id| inspector_property_value_and_state(session, project, *object_id, property))
+        .collect();
+    let Some(values) = values else {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            ui.label("—");
+        });
+        return;
+    };
+    let Some((first_value, first_state)) = values.first().copied() else {
+        return;
+    };
+
+    let common_state = values
+        .iter()
+        .all(|(_, state)| *state == first_state)
+        .then_some(first_state);
+    let (key_label, key_tooltip) = match common_state {
+        Some(InspectorKeyframeState::Static) => ("K+", "All selected properties are static"),
+        Some(InspectorKeyframeState::AnimatedOffKey) => {
+            ("K", "All selected properties are animated off-key")
+        }
+        Some(InspectorKeyframeState::KeyAtGrid) => {
+            ("K*", "All selected properties have a key at the current grid")
+        }
+        None => ("K±", "Selected properties have mixed animation states"),
+    };
+
+    ui.horizontal(|ui| {
+        ui.add_sized([72.0, 24.0], egui::Label::new(label));
+        match first_value {
+            PropertyValue::Vec2(_) => {
+                let display_scale = match property {
+                    AnimatableProperty::Scale | AnimatableProperty::Anchor => 100.0,
+                    _ => 1.0,
+                };
+                let suffix = match property {
+                    AnimatableProperty::Position => " px",
+                    AnimatableProperty::Scale | AnimatableProperty::Anchor => "%",
+                    _ => "",
+                };
+                for component in [InspectorNumericComponent::X, InspectorNumericComponent::Y] {
+                    let value = inspector_common_numeric_component(&values, component).flatten();
+                    draw_inspector_multi_numeric_field(
+                        ui,
+                        session,
+                        InspectorMultiNumericTarget {
+                            property,
+                            component,
+                        },
+                        object_ids,
+                        value,
+                        display_scale,
+                        suffix,
+                    );
+                }
+            }
+            PropertyValue::Scalar(_) => {
+                let (display_scale, suffix) = match property {
+                    AnimatableProperty::Opacity => (100.0, "%"),
+                    AnimatableProperty::Rotation => (1.0, "°"),
+                    _ => (1.0, ""),
+                };
+                let component = InspectorNumericComponent::Scalar;
+                let value = inspector_common_numeric_component(&values, component).flatten();
+                draw_inspector_multi_numeric_field(
+                    ui,
+                    session,
+                    InspectorMultiNumericTarget {
+                        property,
+                        component,
+                    },
+                    object_ids,
+                    value,
+                    display_scale,
+                    suffix,
+                );
+            }
+            PropertyValue::Color(_) => {
+                ui.label("Mixed");
+            }
+        }
+        ui.add_enabled(false, egui::Button::new(key_label))
+            .on_hover_text(key_tooltip);
+    });
+}
+
 #[derive(Debug, Clone)]
 pub struct DiagnosticsView {
     pub adapter_name: String,
@@ -411,7 +584,8 @@ pub fn draw_editor_shell(
             ui.heading("Inspector");
             ui.separator();
 
-            let selected = session.selected_object_ids();
+            let mut selected = session.selected_object_ids();
+            selected.sort_by_key(|object_id| object_id.get());
             match selected.as_slice() {
                 [] => {
                     ui.label("No object selected");
@@ -477,7 +651,49 @@ pub fn draw_editor_shell(
                 }
                 _ => {
                     ui.heading(format!("{} objects selected", selected.len()));
-                    ui.label("Common transform controls will appear here.");
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.heading("Transform");
+                    draw_multi_animatable_property_row(
+                        ui,
+                        session,
+                        project,
+                        &selected,
+                        AnimatableProperty::Position,
+                        "Position",
+                    );
+                    draw_multi_animatable_property_row(
+                        ui,
+                        session,
+                        project,
+                        &selected,
+                        AnimatableProperty::Scale,
+                        "Scale",
+                    );
+                    draw_multi_animatable_property_row(
+                        ui,
+                        session,
+                        project,
+                        &selected,
+                        AnimatableProperty::Rotation,
+                        "Rotation",
+                    );
+                    draw_multi_animatable_property_row(
+                        ui,
+                        session,
+                        project,
+                        &selected,
+                        AnimatableProperty::Anchor,
+                        "Anchor",
+                    );
+                    draw_multi_animatable_property_row(
+                        ui,
+                        session,
+                        project,
+                        &selected,
+                        AnimatableProperty::Opacity,
+                        "Opacity",
+                    );
                 }
             }
 
