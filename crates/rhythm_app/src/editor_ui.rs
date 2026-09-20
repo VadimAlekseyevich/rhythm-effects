@@ -13,7 +13,7 @@ use rhythm_core::{
     domain::Vec2,
     geometry::LocalBounds2d,
     ids::ObjectId,
-    project::Project,
+    project::{ObjectContent, Project},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, property_base_value,
         property_keyframe_at_tick, property_keyframe_count,
@@ -157,6 +157,45 @@ fn draw_inspector_numeric_field(
     }
 }
 
+fn draw_inspector_color_channel_field(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    target: InspectorNumericTarget,
+    channel_label: &str,
+    value: f32,
+) {
+    let display_value = value * 100.0;
+    let editing_buffer = session
+        .inspector_numeric_edit_buffer(target)
+        .map(str::to_owned);
+
+    if let Some(mut buffer) = editing_buffer {
+        let response = ui.add_sized(
+            [40.0, 24.0],
+            egui::TextEdit::singleline(&mut buffer).horizontal_align(egui::Align::RIGHT),
+        );
+        session.update_inspector_numeric_edit_buffer(target, buffer);
+
+        let escape = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
+        let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if escape {
+            session.cancel_inspector_numeric_edit(target);
+            response.surrender_focus();
+        } else if enter || response.lost_focus() {
+            session.commit_inspector_numeric_edit(target);
+        }
+    } else if ui
+        .add_sized(
+            [40.0, 24.0],
+            egui::Button::new(format!("{channel_label}{display_value:.0}")),
+        )
+        .on_hover_text(format!("{channel_label} channel: {display_value:.1}%"))
+        .clicked()
+    {
+        session.begin_inspector_numeric_edit(target, value, format!("{display_value:.1}"));
+    }
+}
+
 fn draw_animatable_property_row(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
@@ -190,7 +229,7 @@ fn draw_animatable_property_row(
                     _ => 1.0,
                 };
                 let suffix = match property {
-                    AnimatableProperty::Position => " px",
+                    AnimatableProperty::Position | AnimatableProperty::RectangleSize => " px",
                     AnimatableProperty::Scale | AnimatableProperty::Anchor => "%",
                     _ => "",
                 };
@@ -223,6 +262,7 @@ fn draw_animatable_property_row(
                 let (display_scale, suffix) = match property {
                     AnimatableProperty::Opacity => (100.0, "%"),
                     AnimatableProperty::Rotation => (1.0, "°"),
+                    AnimatableProperty::RectangleCornerRadius => (1.0, " px"),
                     _ => (1.0, ""),
                 };
                 draw_inspector_numeric_field(
@@ -238,8 +278,25 @@ fn draw_animatable_property_row(
                     suffix,
                 );
             }
-            PropertyValue::Color(_) => {
-                ui.label(format_inspector_property_value(property, value));
+            PropertyValue::Color(value) => {
+                for (component, channel_label, channel_value) in [
+                    (InspectorNumericComponent::R, "R", value.r()),
+                    (InspectorNumericComponent::G, "G", value.g()),
+                    (InspectorNumericComponent::B, "B", value.b()),
+                    (InspectorNumericComponent::A, "A", value.a()),
+                ] {
+                    draw_inspector_color_channel_field(
+                        ui,
+                        session,
+                        InspectorNumericTarget {
+                            object_id,
+                            property,
+                            component,
+                        },
+                        channel_label,
+                        channel_value,
+                    );
+                }
             }
         }
         if ui.button(key_label).on_hover_text(key_tooltip).clicked() {
@@ -256,6 +313,10 @@ fn inspector_common_numeric_component(
         (PropertyValue::Scalar(value), InspectorNumericComponent::Scalar) => Some(*value),
         (PropertyValue::Vec2(value), InspectorNumericComponent::X) => Some(value.x()),
         (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => Some(value.y()),
+        (PropertyValue::Color(value), InspectorNumericComponent::R) => Some(value.r()),
+        (PropertyValue::Color(value), InspectorNumericComponent::G) => Some(value.g()),
+        (PropertyValue::Color(value), InspectorNumericComponent::B) => Some(value.b()),
+        (PropertyValue::Color(value), InspectorNumericComponent::A) => Some(value.a()),
         _ => None,
     });
     let first = components.next()??;
@@ -320,6 +381,50 @@ fn draw_inspector_multi_numeric_field(
     }
 }
 
+fn draw_inspector_multi_color_channel_field(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    target: InspectorMultiNumericTarget,
+    object_ids: &[ObjectId],
+    channel_label: &str,
+    value: Option<f32>,
+) {
+    let editing_buffer = session
+        .inspector_multi_numeric_edit_buffer(target, object_ids)
+        .map(str::to_owned);
+
+    if let Some(mut buffer) = editing_buffer {
+        let response = ui.add_sized(
+            [40.0, 24.0],
+            egui::TextEdit::singleline(&mut buffer).horizontal_align(egui::Align::RIGHT),
+        );
+        session.update_inspector_multi_numeric_edit_buffer(target, buffer);
+
+        let escape = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
+        let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if escape {
+            session.cancel_inspector_multi_numeric_edit(target);
+            response.surrender_focus();
+        } else if enter || response.lost_focus() {
+            session.commit_inspector_multi_numeric_edit(target);
+        }
+    } else {
+        let label = value.map_or_else(
+            || format!("{channel_label}Mix"),
+            |value| format!("{channel_label}{:.0}", value * 100.0),
+        );
+        if ui
+            .add_sized([40.0, 24.0], egui::Button::new(label))
+            .clicked()
+        {
+            let buffer = value
+                .map(|value| format!("{:.1}", value * 100.0))
+                .unwrap_or_default();
+            session.begin_inspector_multi_numeric_edit(target, object_ids.to_vec(), buffer);
+        }
+    }
+}
+
 fn draw_multi_animatable_property_row(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
@@ -368,7 +473,7 @@ fn draw_multi_animatable_property_row(
                     _ => 1.0,
                 };
                 let suffix = match property {
-                    AnimatableProperty::Position => " px",
+                    AnimatableProperty::Position | AnimatableProperty::RectangleSize => " px",
                     AnimatableProperty::Scale | AnimatableProperty::Anchor => "%",
                     _ => "",
                 };
@@ -392,6 +497,7 @@ fn draw_multi_animatable_property_row(
                 let (display_scale, suffix) = match property {
                     AnimatableProperty::Opacity => (100.0, "%"),
                     AnimatableProperty::Rotation => (1.0, "°"),
+                    AnimatableProperty::RectangleCornerRadius => (1.0, " px"),
                     _ => (1.0, ""),
                 };
                 let component = InspectorNumericComponent::Scalar;
@@ -410,7 +516,25 @@ fn draw_multi_animatable_property_row(
                 );
             }
             PropertyValue::Color(_) => {
-                ui.label("Mixed");
+                for (component, channel_label) in [
+                    (InspectorNumericComponent::R, "R"),
+                    (InspectorNumericComponent::G, "G"),
+                    (InspectorNumericComponent::B, "B"),
+                    (InspectorNumericComponent::A, "A"),
+                ] {
+                    let value = inspector_common_numeric_component(&values, component).flatten();
+                    draw_inspector_multi_color_channel_field(
+                        ui,
+                        session,
+                        InspectorMultiNumericTarget {
+                            property,
+                            component,
+                        },
+                        object_ids,
+                        channel_label,
+                        value,
+                    );
+                }
             }
         }
         ui.add_enabled(false, egui::Button::new(key_label))
@@ -642,6 +766,36 @@ pub fn draw_editor_shell(
                             AnimatableProperty::Opacity,
                             "Opacity",
                         );
+
+                        if matches!(&object.content, ObjectContent::Rectangle(_)) {
+                            ui.add_space(8.0);
+                            ui.separator();
+                            ui.heading("Rectangle");
+                            draw_animatable_property_row(
+                                ui,
+                                session,
+                                project,
+                                object.id,
+                                AnimatableProperty::RectangleSize,
+                                "Size",
+                            );
+                            draw_animatable_property_row(
+                                ui,
+                                session,
+                                project,
+                                object.id,
+                                AnimatableProperty::RectangleFill,
+                                "Fill",
+                            );
+                            draw_animatable_property_row(
+                                ui,
+                                session,
+                                project,
+                                object.id,
+                                AnimatableProperty::RectangleCornerRadius,
+                                "Corner Radius",
+                            );
+                        }
                     } else {
                         ui.label("Selected object is unavailable");
                     }
@@ -691,6 +845,44 @@ pub fn draw_editor_shell(
                         AnimatableProperty::Opacity,
                         "Opacity",
                     );
+
+                    let all_rectangles = selected.iter().all(|object_id| {
+                        project
+                            .composition
+                            .objects
+                            .iter()
+                            .find(|object| object.id == *object_id)
+                            .is_some_and(|object| matches!(&object.content, ObjectContent::Rectangle(_)))
+                    });
+                    if all_rectangles {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.heading("Rectangle");
+                        draw_multi_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            &selected,
+                            AnimatableProperty::RectangleSize,
+                            "Size",
+                        );
+                        draw_multi_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            &selected,
+                            AnimatableProperty::RectangleFill,
+                            "Fill",
+                        );
+                        draw_multi_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            &selected,
+                            AnimatableProperty::RectangleCornerRadius,
+                            "Corner Radius",
+                        );
+                    }
                 }
             }
 
