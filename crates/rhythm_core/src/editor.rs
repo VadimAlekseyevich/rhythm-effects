@@ -1207,18 +1207,19 @@ impl ProjectEditor {
                 if before.as_ref().is_some_and(|before| *before == after) {
                     return Ok(false);
                 }
-                if before.is_none() && after.value == initial_value {
-                    if let Some(previous_next_entity_id) = inserted_next_entity_id_before {
-                        remove_property_keyframe_by_id(
-                            &mut self.project,
-                            object_id,
-                            property,
-                            keyframe_id,
-                        )?
-                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
-                        self.project.next_entity_id = previous_next_entity_id;
-                        return Ok(false);
-                    }
+                if before.is_none()
+                    && after.value == initial_value
+                    && let Some(previous_next_entity_id) = inserted_next_entity_id_before
+                {
+                    remove_property_keyframe_by_id(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        keyframe_id,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                    self.project.next_entity_id = previous_next_entity_id;
+                    return Ok(false);
                 }
 
                 self.history.push(PendingHistoryEntry::new(
