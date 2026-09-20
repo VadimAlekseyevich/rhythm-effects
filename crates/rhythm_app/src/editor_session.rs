@@ -8,8 +8,8 @@ use rhythm_core::{
     ids::{KeyframeId, ObjectId},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
-        property_keyframe_at_tick, property_keyframe_count, property_keyframe_has_successor,
-        property_value_compatible,
+        property_base_value, property_keyframe_at_tick, property_keyframe_count,
+        property_keyframe_has_successor, property_value_compatible,
     },
     time::{
         BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
@@ -1446,6 +1446,67 @@ impl EditorSession {
         self.pending_inspector_numeric_commit.take()
     }
 
+    pub fn commit_pending_inspector_static_property_edit(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(commit) = self.pending_inspector_numeric_commit else {
+            return Ok(false);
+        };
+
+        if property_keyframe_count(
+            editor.project(),
+            commit.target.object_id,
+            commit.target.property,
+        )? != 0
+        {
+            return Ok(false);
+        }
+
+        let project_value = match commit.target.property {
+            AnimatableProperty::Scale
+            | AnimatableProperty::Anchor
+            | AnimatableProperty::Opacity => commit.value / 100.0,
+            _ => commit.value,
+        };
+        if !project_value.is_finite() {
+            self.pending_inspector_numeric_commit = None;
+            return Ok(false);
+        }
+
+        let before = property_base_value(
+            editor.project(),
+            commit.target.object_id,
+            commit.target.property,
+        )?;
+        let after = match (before, commit.target.component) {
+            (PropertyValue::Scalar(_), InspectorNumericComponent::Scalar) => {
+                PropertyValue::Scalar(project_value)
+            }
+            (PropertyValue::Vec2(value), InspectorNumericComponent::X) => PropertyValue::Vec2(
+                Vec2::new(project_value, value.y())
+                    .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+            ),
+            (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => PropertyValue::Vec2(
+                Vec2::new(value.x(), project_value)
+                    .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+            ),
+            _ => {
+                self.pending_inspector_numeric_commit = None;
+                return Err(EditError::HistoryInvariant(
+                    "inspector numeric component does not match property value",
+                ));
+            }
+        };
+
+        self.pending_inspector_numeric_commit = None;
+        editor.execute(EditCommand::SetPropertyBase {
+            object_id: commit.target.object_id,
+            property: commit.target.property,
+            value: after,
+        })
+    }
+
     pub fn request_focused_keyframe_action(
         &mut self,
         object_id: ObjectId,
@@ -2390,6 +2451,82 @@ mod tests {
         assert!(session.cancel_inspector_numeric_edit(target));
         assert_eq!(session.inspector_numeric_edit_buffer(target), None);
         assert_eq!(session.take_inspector_numeric_commit(), None);
+    }
+
+    #[test]
+    fn inspector_static_numeric_commit_updates_only_target_component() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+        let target = InspectorNumericTarget {
+            object_id,
+            property: AnimatableProperty::Scale,
+            component: InspectorNumericComponent::X,
+        };
+
+        session.begin_inspector_numeric_edit(target, 1.0, "100.0".to_owned());
+        assert!(session.update_inspector_numeric_edit_buffer(target, "250.0".to_owned()));
+        assert!(session.commit_inspector_numeric_edit(target));
+        assert_eq!(
+            session.commit_pending_inspector_static_property_edit(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(
+                Vec2::new(2.5, 1.0).expect("updated scale")
+            ))
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(
+                Vec2::new(1.0, 1.0).expect("restored scale")
+            ))
+        );
+    }
+
+    #[test]
+    fn inspector_animated_numeric_commit_stays_pending_for_keyframe_handler() {
+        use rhythm_core::animation::{Animated, Interpolation, Keyframe};
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.composition.objects[0].transform.rotation_degrees = Animated::with_keyframes(
+            0.0,
+            vec![Keyframe::new(
+                KeyframeId::new(2).expect("keyframe id"),
+                MusicalTick::new(0),
+                10.0,
+                Interpolation::Linear,
+            )],
+        )
+        .expect("animated rotation");
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        let target = InspectorNumericTarget {
+            object_id,
+            property: AnimatableProperty::Rotation,
+            component: InspectorNumericComponent::Scalar,
+        };
+
+        session.begin_inspector_numeric_edit(target, 10.0, "10.0".to_owned());
+        assert!(session.update_inspector_numeric_edit_buffer(target, "25.0".to_owned()));
+        assert!(session.commit_inspector_numeric_edit(target));
+        assert_eq!(
+            session.commit_pending_inspector_static_property_edit(&mut editor),
+            Ok(false)
+        );
+        assert_eq!(
+            session.take_inspector_numeric_commit(),
+            Some(InspectorNumericCommit {
+                target,
+                value: 25.0,
+            })
+        );
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]
