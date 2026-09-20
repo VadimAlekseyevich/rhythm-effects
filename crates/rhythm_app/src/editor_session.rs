@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use rhythm_core::{
     animation::{BezierEasing, Interpolation},
+    domain::Vec2,
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     geometry::LocalBounds2d,
     ids::{KeyframeId, ObjectId},
@@ -105,6 +106,23 @@ pub enum ViewportCameraAction {
     FrameSelection,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewportPositionDragPhase {
+    Active,
+    CommitRequested,
+    CancelRequested,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportPositionDrag {
+    object_id: ObjectId,
+    pointer_start: [f32; 2],
+    position_start: Vec2,
+    current_position: Vec2,
+    phase: ViewportPositionDragPhase,
+    transaction_started: bool,
+}
+
 const MIN_VIEWPORT_ZOOM: f32 = 0.1;
 const MAX_VIEWPORT_ZOOM: f32 = 8.0;
 const FRAME_SELECTION_PADDING_POINTS: f32 = 32.0;
@@ -166,6 +184,7 @@ pub struct EditorSession {
     viewport_pan_points: [f32; 2],
     viewport_zoom: f32,
     pending_viewport_camera_action: Option<ViewportCameraAction>,
+    viewport_position_drag: Option<ViewportPositionDrag>,
     selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
@@ -188,6 +207,7 @@ impl Default for EditorSession {
             viewport_pan_points: [0.0, 0.0],
             viewport_zoom: 1.0,
             pending_viewport_camera_action: None,
+            viewport_position_drag: None,
             selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
@@ -364,6 +384,135 @@ impl EditorSession {
         self.viewport_zoom = new_zoom;
         self.viewport_pan_points = new_pan;
         changed
+    }
+
+    pub fn begin_viewport_position_drag(
+        &mut self,
+        object_id: ObjectId,
+        pointer_start: [f32; 2],
+        position_start: Vec2,
+    ) -> bool {
+        if self.viewport_position_drag.is_some()
+            || !pointer_start[0].is_finite()
+            || !pointer_start[1].is_finite()
+        {
+            return false;
+        }
+
+        self.viewport_position_drag = Some(ViewportPositionDrag {
+            object_id,
+            pointer_start,
+            position_start,
+            current_position: position_start,
+            phase: ViewportPositionDragPhase::Active,
+            transaction_started: false,
+        });
+        true
+    }
+
+    #[must_use]
+    pub fn viewport_position_drag_active(&self) -> bool {
+        self.viewport_position_drag
+            .is_some_and(|drag| drag.phase == ViewportPositionDragPhase::Active)
+    }
+
+    pub fn update_viewport_position_drag(
+        &mut self,
+        pointer: [f32; 2],
+        composition_units_per_point: [f32; 2],
+    ) -> bool {
+        let Some(drag) = self.viewport_position_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportPositionDragPhase::Active
+            || !pointer[0].is_finite()
+            || !pointer[1].is_finite()
+            || !composition_units_per_point[0].is_finite()
+            || !composition_units_per_point[1].is_finite()
+            || composition_units_per_point[0] <= 0.0
+            || composition_units_per_point[1] <= 0.0
+        {
+            return false;
+        }
+
+        let delta_x =
+            (pointer[0] - drag.pointer_start[0]) * composition_units_per_point[0];
+        let delta_y =
+            (pointer[1] - drag.pointer_start[1]) * composition_units_per_point[1];
+        let Ok(current_position) = Vec2::new(
+            drag.position_start.x() + delta_x,
+            drag.position_start.y() + delta_y,
+        ) else {
+            return false;
+        };
+
+        if current_position == drag.current_position {
+            return false;
+        }
+        drag.current_position = current_position;
+        true
+    }
+
+    pub fn finish_viewport_position_drag(&mut self) -> bool {
+        let Some(drag) = self.viewport_position_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportPositionDragPhase::Active {
+            return false;
+        }
+
+        drag.phase = ViewportPositionDragPhase::CommitRequested;
+        true
+    }
+
+    pub fn cancel_viewport_position_drag(&mut self) -> bool {
+        let Some(drag) = self.viewport_position_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase == ViewportPositionDragPhase::CancelRequested {
+            return false;
+        }
+
+        drag.phase = ViewportPositionDragPhase::CancelRequested;
+        true
+    }
+
+    pub fn sync_viewport_position_drag(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(drag) = self.viewport_position_drag.as_mut() else {
+            return Ok(false);
+        };
+
+        if drag.phase == ViewportPositionDragPhase::CancelRequested && !drag.transaction_started {
+            self.viewport_position_drag = None;
+            return Ok(true);
+        }
+
+        if !drag.transaction_started {
+            if let Err(error) = editor.begin_position_transaction(drag.object_id) {
+                self.viewport_position_drag = None;
+                return Err(error);
+            }
+            drag.transaction_started = true;
+        }
+
+        if drag.phase == ViewportPositionDragPhase::CancelRequested {
+            let changed = editor.cancel_transaction()?;
+            self.viewport_position_drag = None;
+            return Ok(changed);
+        }
+
+        editor.update_position_transaction(drag.current_position)?;
+
+        if drag.phase == ViewportPositionDragPhase::CommitRequested {
+            let changed = editor.commit_transaction()?;
+            self.viewport_position_drag = None;
+            return Ok(changed);
+        }
+
+        Ok(true)
     }
 
     #[allow(dead_code)]
@@ -1370,6 +1519,86 @@ mod tests {
         assert!(session.replace_object_selection(None));
         assert!(session.selected_object_ids().is_empty());
         assert!(!session.replace_object_selection(None));
+    }
+
+    #[test]
+    fn viewport_position_drag_updates_preview_and_commits_one_history_entry() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_position_drag(
+            object_id,
+            [100.0, 80.0],
+            Vec2::new(0.0, 0.0).expect("position"),
+        ));
+        assert!(session.update_viewport_position_drag([120.0, 90.0], [2.0, 2.0]));
+        assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(40.0, 20.0).expect("preview position")
+        );
+
+        assert!(session.update_viewport_position_drag([130.0, 95.0], [2.0, 2.0]));
+        assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), 0);
+        assert!(session.finish_viewport_position_drag());
+        assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(60.0, 30.0).expect("committed position")
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(0.0, 0.0).expect("restored position")
+        );
+    }
+
+    #[test]
+    fn viewport_position_drag_cancel_restores_before_without_history() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_position_drag(
+            object_id,
+            [50.0, 50.0],
+            Vec2::new(0.0, 0.0).expect("position"),
+        ));
+        assert!(session.update_viewport_position_drag([80.0, 70.0], [1.0, 1.0]));
+        assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(30.0, 20.0).expect("preview position")
+        );
+
+        assert!(session.cancel_viewport_position_drag());
+        assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(0.0, 0.0).expect("restored position")
+        );
+        assert!(!session.viewport_position_drag_active());
     }
 
     #[test]
