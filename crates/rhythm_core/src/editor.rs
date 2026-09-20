@@ -111,6 +111,14 @@ pub struct PropertyKeyframeInterpolationRecord {
     pub after: Interpolation,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PropertyKeyframeValueRecord {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub before: Option<PropertyKeyframe>,
+    pub after: PropertyKeyframe,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     AddObject {
@@ -206,6 +214,10 @@ pub enum HistoryPayload {
     },
     PositionsBaseChanged {
         changes: Vec<(ObjectId, Vec2, Vec2)>,
+    },
+    DirectPositionsChanged {
+        base_changes: Vec<(ObjectId, Vec2, Vec2)>,
+        keyframe_changes: Vec<PropertyKeyframeValueRecord>,
     },
     ScaleBaseChanged {
         object_id: ObjectId,
@@ -398,9 +410,28 @@ impl History {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
+enum DirectPositionTarget {
+    Base {
+        object_id: ObjectId,
+        before: Vec2,
+    },
+    Keyframe {
+        object_id: ObjectId,
+        keyframe_id: KeyframeId,
+        before: Option<PropertyKeyframe>,
+        initial: Vec2,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
     ObjectPosition { object_id: ObjectId, before: Vec2 },
     ObjectPositions { before: Vec<(ObjectId, Vec2)> },
+    DirectPositions {
+        targets: Vec<DirectPositionTarget>,
+        next_entity_id_before: u64,
+    },
     ObjectScale { object_id: ObjectId, before: Vec2 },
     ObjectRotation { object_id: ObjectId, before: f32 },
     PropertyKeyframeValue {
@@ -789,6 +820,145 @@ impl ProjectEditor {
         Ok(())
     }
 
+    pub fn begin_direct_multi_position_transaction(
+        &mut self,
+        object_ids: &[ObjectId],
+        tick: MusicalTick,
+        evaluated_positions: &[(ObjectId, Vec2)],
+    ) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+        if object_ids.len() < 2 {
+            return Err(EditError::HistoryInvariant(
+                "direct multi-position transaction requires multiple objects",
+            ));
+        }
+
+        let next_entity_id_before = self.project.next_entity_id;
+        let mut targets = Vec::with_capacity(object_ids.len());
+        let mut ids = object_ids.to_vec();
+        ids.sort_by_key(|object_id| object_id.get());
+        ids.dedup();
+
+        for object_id in ids {
+            if property_keyframe_count(&self.project, object_id, AnimatableProperty::Position)? == 0
+            {
+                let index = self.object_index(object_id)?;
+                targets.push(DirectPositionTarget::Base {
+                    object_id,
+                    before: *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value(),
+                });
+                continue;
+            }
+
+            let initial = evaluated_positions
+                .iter()
+                .find_map(|(evaluated_id, position)| {
+                    (*evaluated_id == object_id).then_some(*position)
+                })
+                .ok_or(EditError::HistoryInvariant(
+                    "missing evaluated position for animated multi-move member",
+                ))?;
+            let before = crate::property::property_keyframe_at_tick(
+                &self.project,
+                object_id,
+                AnimatableProperty::Position,
+                tick,
+            )?;
+            let keyframe_id = if let Some(before) = before {
+                before.id
+            } else {
+                let keyframe_id = self.next_keyframe_id()?;
+                let keyframe = PropertyKeyframe {
+                    id: keyframe_id,
+                    tick,
+                    value: PropertyValue::Vec2(initial),
+                    interpolation: Interpolation::Linear,
+                };
+                insert_property_keyframe(
+                    &mut self.project,
+                    object_id,
+                    AnimatableProperty::Position,
+                    keyframe,
+                )?;
+                self.project.next_entity_id = self
+                    .project
+                    .next_entity_id
+                    .checked_add(1)
+                    .ok_or(EditError::IdAllocation(IdAllocationError::Exhausted))?;
+                keyframe_id
+            };
+            targets.push(DirectPositionTarget::Keyframe {
+                object_id,
+                keyframe_id,
+                before,
+                initial,
+            });
+        }
+
+        self.transaction = Some(ActiveTransaction::DirectPositions {
+            targets,
+            next_entity_id_before,
+        });
+        Ok(())
+    }
+
+    pub fn update_direct_multi_position_transaction(
+        &mut self,
+        delta: Vec2,
+    ) -> Result<(), EditError> {
+        let targets = match &self.transaction {
+            Some(ActiveTransaction::DirectPositions { targets, .. }) => targets.clone(),
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active direct multi-position transaction",
+                ));
+            }
+        };
+
+        for target in targets {
+            match target {
+                DirectPositionTarget::Base { object_id, before } => {
+                    let index = self.object_index(object_id)?;
+                    *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value_mut() =
+                        Vec2::new(before.x() + delta.x(), before.y() + delta.y())
+                            .map_err(|_| EditError::InvalidValue("position"))?;
+                }
+                DirectPositionTarget::Keyframe {
+                    object_id,
+                    keyframe_id,
+                    before,
+                    initial,
+                } => {
+                    let start = before
+                        .and_then(|keyframe| match keyframe.value {
+                            PropertyValue::Vec2(value) => Some(value),
+                            _ => None,
+                        })
+                        .unwrap_or(initial);
+                    let value = Vec2::new(start.x() + delta.x(), start.y() + delta.y())
+                        .map_err(|_| EditError::InvalidValue("position"))?;
+                    set_property_keyframe_value(
+                        &mut self.project,
+                        object_id,
+                        AnimatableProperty::Position,
+                        keyframe_id,
+                        PropertyValue::Vec2(value),
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn begin_scale_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
         if self.transaction.is_some() {
             return Err(EditError::HistoryInvariant("transaction already active"));
@@ -907,6 +1077,120 @@ impl ProjectEditor {
                     HistoryPayload::PositionsBaseChanged { changes },
                 ));
                 Ok(true)
+            }
+            ActiveTransaction::DirectPositions {
+                targets,
+                next_entity_id_before,
+            } => {
+                let mut base_changes = Vec::new();
+                let mut keyframe_changes = Vec::new();
+
+                for target in targets {
+                    match target {
+                        DirectPositionTarget::Base { object_id, before } => {
+                            let index = self.object_index(object_id)?;
+                            let after = *self.project.composition.objects[index]
+                                .transform
+                                .position
+                                .base_value();
+                            if before != after {
+                                base_changes.push((object_id, before, after));
+                            }
+                        }
+                        DirectPositionTarget::Keyframe {
+                            object_id,
+                            keyframe_id,
+                            before,
+                            initial,
+                        } => {
+                            let after = property_keyframe_by_id(
+                                &self.project,
+                                object_id,
+                                AnimatableProperty::Position,
+                                keyframe_id,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                            let changed = before
+                                .as_ref()
+                                .map_or(after.value != PropertyValue::Vec2(initial), |before| {
+                                    before.value != after.value
+                                });
+                            if changed {
+                                keyframe_changes.push(PropertyKeyframeValueRecord {
+                                    object_id,
+                                    property: AnimatableProperty::Position,
+                                    before,
+                                    after,
+                                });
+                            } else if before.is_none() {
+                                remove_property_keyframe_by_id(
+                                    &mut self.project,
+                                    object_id,
+                                    AnimatableProperty::Position,
+                                    keyframe_id,
+                                )?
+                                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                            }
+                        }
+                    }
+                }
+
+                if base_changes.is_empty() && keyframe_changes.is_empty() {
+                    self.project.next_entity_id = next_entity_id_before;
+                    return Ok(false);
+                }
+
+                let count = base_changes.len() + keyframe_changes.len();
+                self.history.push(PendingHistoryEntry::new(
+                    &format!("Move {count} Objects"),
+                    HistoryPayload::DirectPositionsChanged {
+                        base_changes,
+                        keyframe_changes,
+                    },
+                ));
+                Ok(true)
+            }
+            ActiveTransaction::DirectPositions {
+                targets,
+                next_entity_id_before,
+            } => {
+                for target in targets {
+                    match target {
+                        DirectPositionTarget::Base { object_id, before } => {
+                            let index = self.object_index(object_id)?;
+                            *self.project.composition.objects[index]
+                                .transform
+                                .position
+                                .base_value_mut() = before;
+                        }
+                        DirectPositionTarget::Keyframe {
+                            object_id,
+                            keyframe_id,
+                            before,
+                            initial: _,
+                        } => {
+                            if let Some(before) = before {
+                                set_property_keyframe_value(
+                                    &mut self.project,
+                                    object_id,
+                                    AnimatableProperty::Position,
+                                    keyframe_id,
+                                    before.value,
+                                )?
+                                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                            } else {
+                                remove_property_keyframe_by_id(
+                                    &mut self.project,
+                                    object_id,
+                                    AnimatableProperty::Position,
+                                    keyframe_id,
+                                )?
+                                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                            }
+                        }
+                    }
+                }
+                self.project.next_entity_id = next_entity_id_before;
             }
             ActiveTransaction::ObjectScale { object_id, before } => {
                 let index = self.object_index(object_id)?;
@@ -1900,6 +2184,64 @@ impl ProjectEditor {
                         .transform
                         .position
                         .base_value_mut() = value;
+                }
+            }
+            (
+                HistoryPayload::DirectPositionsChanged {
+                    base_changes,
+                    keyframe_changes,
+                },
+                direction,
+            ) => {
+                for (object_id, before, after) in base_changes {
+                    let value = *direction.pick(before, after);
+                    let index = self.object_index(*object_id)?;
+                    *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value_mut() = value;
+                }
+
+                for record in keyframe_changes {
+                    match (&record.before, direction) {
+                        (Some(before), HistoryDirection::Undo) => {
+                            set_property_keyframe_value(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                before.id,
+                                before.value,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(before.id))?;
+                        }
+                        (Some(_), HistoryDirection::Redo) => {
+                            set_property_keyframe_value(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.after.id,
+                                record.after.value,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(record.after.id))?;
+                        }
+                        (None, HistoryDirection::Undo) => {
+                            remove_property_keyframe_by_id(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.after.id,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(record.after.id))?;
+                        }
+                        (None, HistoryDirection::Redo) => {
+                            insert_property_keyframe(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.after,
+                            )?;
+                        }
+                    }
                 }
             }
             (
