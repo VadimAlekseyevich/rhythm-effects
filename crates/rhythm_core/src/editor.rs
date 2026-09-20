@@ -204,6 +204,11 @@ pub enum HistoryPayload {
         before: Vec2,
         after: Vec2,
     },
+    ScaleBaseChanged {
+        object_id: ObjectId,
+        before: Vec2,
+        after: Vec2,
+    },
     OpacityBaseChanged {
         object_id: ObjectId,
         before: f32,
@@ -381,6 +386,7 @@ impl History {
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
     ObjectPosition { object_id: ObjectId, before: Vec2 },
+    ObjectScale { object_id: ObjectId, before: Vec2 },
 }
 
 #[derive(Debug)]
@@ -618,6 +624,39 @@ impl ProjectEditor {
         Ok(())
     }
 
+    pub fn begin_scale_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let index = self.object_index(object_id)?;
+        let before = *self.project.composition.objects[index]
+            .transform
+            .scale
+            .base_value();
+
+        self.transaction = Some(ActiveTransaction::ObjectScale { object_id, before });
+        Ok(())
+    }
+
+    pub fn update_scale_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
+        let object_id = match self.transaction {
+            Some(ActiveTransaction::ObjectScale { object_id, .. }) => object_id,
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active scale transaction",
+                ));
+            }
+        };
+
+        let index = self.object_index(object_id)?;
+        *self.project.composition.objects[index]
+            .transform
+            .scale
+            .base_value_mut() = value;
+        Ok(())
+    }
+
     pub fn commit_transaction(&mut self) -> Result<bool, EditError> {
         let Some(transaction) = self.transaction.take() else {
             return Ok(false);
@@ -645,6 +684,27 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::ObjectScale { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                let after = *self.project.composition.objects[index]
+                    .transform
+                    .scale
+                    .base_value();
+
+                if before == after {
+                    return Ok(false);
+                }
+
+                self.history.push(PendingHistoryEntry::new(
+                    "Scale Object",
+                    HistoryPayload::ScaleBaseChanged {
+                        object_id,
+                        before,
+                        after,
+                    },
+                ));
+                Ok(true)
+            }
         }
     }
 
@@ -659,6 +719,13 @@ impl ProjectEditor {
                 *self.project.composition.objects[index]
                     .transform
                     .position
+                    .base_value_mut() = before;
+            }
+            ActiveTransaction::ObjectScale { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .scale
                     .base_value_mut() = before;
             }
         }
@@ -1488,6 +1555,21 @@ impl ProjectEditor {
                 *self.project.composition.objects[index]
                     .transform
                     .position
+                    .base_value_mut() = value;
+            }
+            (
+                HistoryPayload::ScaleBaseChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let value = *direction.pick(before, after);
+                let index = self.object_index(*object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .scale
                     .base_value_mut() = value;
             }
             (
@@ -2453,6 +2535,72 @@ mod tests {
                 .x(),
             0.0
         );
+    }
+
+    #[test]
+    fn one_scale_drag_transaction_creates_one_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_scale_transaction(object_id)
+            .expect("begin scale transaction");
+        for scale in [(1.25, 0.75), (1.5, 0.5), (-2.0, 1.25)] {
+            editor
+                .update_scale_transaction(Vec2::new(scale.0, scale.1).expect("finite scale"))
+                .expect("preview scale");
+        }
+
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(editor.commit_transaction(), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(-2.0, 1.25).expect("committed scale")
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(1.0, 1.0).expect("restored scale")
+        );
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(-2.0, 1.25).expect("redone scale")
+        );
+    }
+
+    #[test]
+    fn cancelled_scale_transaction_restores_before_state() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_scale_transaction(object_id)
+            .expect("begin scale transaction");
+        editor
+            .update_scale_transaction(Vec2::new(3.0, -0.5).expect("finite scale"))
+            .expect("preview scale");
+        assert_eq!(editor.cancel_transaction(), Ok(true));
+
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(1.0, 1.0).expect("restored scale")
+        );
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]
