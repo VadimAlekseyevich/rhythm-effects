@@ -176,15 +176,9 @@ pub fn property_keyframe_at_tick(
     tick: MusicalTick,
 ) -> Result<Option<PropertyKeyframe>, PropertyAccessError> {
     Ok(match animated_ref(project, object_id, property)? {
-        AnimatedRef::Scalar(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(pack_scalar_keyframe),
-        AnimatedRef::Vec2(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(pack_vec2_keyframe),
-        AnimatedRef::Color(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(pack_color_keyframe),
+        AnimatedRef::Scalar(animated) => animated.keyframe_at_tick(tick).map(pack_scalar_keyframe),
+        AnimatedRef::Vec2(animated) => animated.keyframe_at_tick(tick).map(pack_vec2_keyframe),
+        AnimatedRef::Color(animated) => animated.keyframe_at_tick(tick).map(pack_color_keyframe),
     })
 }
 
