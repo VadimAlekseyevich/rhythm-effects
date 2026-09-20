@@ -5,6 +5,7 @@ use winit::keyboard::KeyCode;
 pub enum EditorShortcut {
     FocusProperty(AnimatableProperty),
     KeyframeAction,
+    TogglePlayback,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -37,6 +38,7 @@ pub const fn dispatch_physical_shortcut(
         KeyCode::KeyR => Some(EditorShortcut::FocusProperty(AnimatableProperty::Rotation)),
         KeyCode::KeyO => Some(EditorShortcut::FocusProperty(AnimatableProperty::Opacity)),
         KeyCode::KeyK => Some(EditorShortcut::KeyframeAction),
+        KeyCode::Space => Some(EditorShortcut::TogglePlayback),
         _ => None,
     }
 }
@@ -68,6 +70,10 @@ mod tests {
         assert_eq!(
             dispatch_physical_shortcut(KeyCode::KeyK, ShortcutModifiers::default()),
             Some(EditorShortcut::KeyframeAction)
+        );
+        assert_eq!(
+            dispatch_physical_shortcut(KeyCode::Space, ShortcutModifiers::default()),
+            Some(EditorShortcut::TogglePlayback)
         );
     }
 
