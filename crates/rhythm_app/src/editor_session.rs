@@ -627,6 +627,45 @@ impl EditorSession {
         Ok(changed)
     }
 
+    pub fn queue_selected_keyframe_interpolation(
+        &mut self,
+        preset: KeyframeInterpolationPreset,
+    ) -> bool {
+        if self.selected_keyframes.is_empty() {
+            return false;
+        }
+
+        self.pending_keyframe_interpolation = Some(preset.interpolation());
+        true
+    }
+
+    pub fn commit_pending_keyframe_interpolation(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(interpolation) = self.pending_keyframe_interpolation.take() else {
+            return Ok(false);
+        };
+
+        let mut outgoing_ids = Vec::with_capacity(self.selected_keyframes.len());
+        for keyframe_id in self.selected_keyframe_ids() {
+            let Some(located) = locate_property_keyframe(editor.project(), keyframe_id) else {
+                return Err(EditError::KeyframeNotFound(keyframe_id));
+            };
+            if property_keyframe_has_successor(
+                editor.project(),
+                located.object_id,
+                located.property,
+                keyframe_id,
+            )? {
+                outgoing_ids.push(keyframe_id);
+            }
+        }
+
+        outgoing_ids.sort_by_key(|keyframe_id| keyframe_id.get());
+        editor.set_property_keyframe_interpolations(outgoing_ids, interpolation)
+    }
+
     pub fn commit_pending_keyframe_move(
         &mut self,
         editor: &mut ProjectEditor,
@@ -921,7 +960,7 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSession, PreviewQuality};
+    use super::{EditorSession, KeyframeInterpolationPreset, PreviewQuality};
     use rhythm_core::time::{
         BeatDivision, BpmMicros, DurationNs, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
     };
@@ -1130,6 +1169,76 @@ mod tests {
         assert!(pasted_first.id.get() > second.get());
         assert!(session.is_keyframe_selected(pasted_first.id));
         assert!(session.is_keyframe_selected(pasted_second.id));
+    }
+
+    #[test]
+    fn interpolation_preset_targets_selected_outgoing_segments_only() {
+        use rhythm_core::{
+            animation::Interpolation,
+            property::{AnimatableProperty, PropertyValue, locate_property_keyframe},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.1),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("second");
+        let terminal = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("terminal");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, second, terminal]);
+        assert!(session.queue_selected_keyframe_interpolation(KeyframeInterpolationPreset::Hold));
+        assert_eq!(
+            session.commit_pending_keyframe_interpolation(&mut editor),
+            Ok(true)
+        );
+
+        assert_eq!(
+            locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            locate_property_keyframe(editor.project(), second)
+                .expect("second")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            locate_property_keyframe(editor.project(), terminal)
+                .expect("terminal")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+        assert_eq!(session.selected_keyframe_count(), 3);
     }
 
     #[test]
