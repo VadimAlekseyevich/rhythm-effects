@@ -967,8 +967,8 @@ mod tests {
         ids::{KeyframeId, ObjectId},
         property::AnimatableProperty,
         time::{
-            BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs, TempoMap,
-            TimeSignature,
+            BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
+            TempoMap, TimeSignature,
         },
     };
 
