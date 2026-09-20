@@ -3698,6 +3698,55 @@ mod tests {
     }
 
     #[test]
+    fn effect_stack_actions_commit_through_project_editor() {
+        use rhythm_core::{
+            animation::Animated,
+            ids::EffectId,
+            project::{BlurEffect, Effect, EffectKind},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let first_effect_id = EffectId::new(2).expect("effect id");
+        let second_effect_id = EffectId::new(3).expect("effect id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.composition.objects[0].effects = vec![
+            Effect {
+                id: first_effect_id,
+                enabled: true,
+                kind: EffectKind::Blur(BlurEffect {
+                    radius_px: Animated::new_static(8.0),
+                }),
+            },
+            Effect {
+                id: second_effect_id,
+                enabled: true,
+                kind: EffectKind::Blur(BlurEffect {
+                    radius_px: Animated::new_static(16.0),
+                }),
+            },
+        ];
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+
+        session.queue_effect_enabled(object_id, first_effect_id, false);
+        session.queue_effect_move(object_id, second_effect_id, 0);
+        session.queue_effect_remove(object_id, first_effect_id);
+        assert_eq!(
+            session.commit_pending_effect_stack_actions(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 3);
+        let effects = &editor.project().composition.objects[0].effects;
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id, second_effect_id);
+        assert_eq!(
+            session.commit_pending_effect_stack_actions(&mut editor),
+            Ok(false)
+        );
+    }
+
+    #[test]
     fn inspector_text_actions_commit_buffered_and_enum_edits() {
         use rhythm_core::{
             animation::Animated,
