@@ -123,6 +123,15 @@ struct ViewportPositionDrag {
     transaction_started: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct ViewportMultiPositionDrag {
+    object_ids: Vec<ObjectId>,
+    pointer_start: [f32; 2],
+    current_delta: Vec2,
+    phase: ViewportTransformDragPhase,
+    transaction_started: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ViewportScaleDrag {
     object_id: ObjectId,
@@ -209,6 +218,7 @@ pub struct EditorSession {
     viewport_zoom: f32,
     pending_viewport_camera_action: Option<ViewportCameraAction>,
     viewport_position_drag: Option<ViewportPositionDrag>,
+    viewport_multi_position_drag: Option<ViewportMultiPositionDrag>,
     viewport_scale_drag: Option<ViewportScaleDrag>,
     viewport_rotation_drag: Option<ViewportRotationDrag>,
     selected_objects: HashSet<ObjectId>,
@@ -234,6 +244,7 @@ impl Default for EditorSession {
             viewport_zoom: 1.0,
             pending_viewport_camera_action: None,
             viewport_position_drag: None,
+            viewport_multi_position_drag: None,
             viewport_scale_drag: None,
             viewport_rotation_drag: None,
             selected_objects: HashSet::new(),
@@ -421,6 +432,7 @@ impl EditorSession {
         position_start: Vec2,
     ) -> bool {
         if self.viewport_position_drag.is_some()
+            || self.viewport_multi_position_drag.is_some()
             || self.viewport_scale_drag.is_some()
             || self.viewport_rotation_drag.is_some()
             || !pointer_start[0].is_finite()
@@ -551,6 +563,146 @@ impl EditorSession {
         Ok(true)
     }
 
+    pub fn begin_viewport_multi_position_drag(
+        &mut self,
+        mut object_ids: Vec<ObjectId>,
+        pointer_start: [f32; 2],
+    ) -> bool {
+        if self.viewport_position_drag.is_some()
+            || self.viewport_multi_position_drag.is_some()
+            || self.viewport_scale_drag.is_some()
+            || self.viewport_rotation_drag.is_some()
+            || !pointer_start[0].is_finite()
+            || !pointer_start[1].is_finite()
+        {
+            return false;
+        }
+
+        object_ids.sort_by_key(|object_id| object_id.get());
+        object_ids.dedup();
+        if object_ids.len() < 2 {
+            return false;
+        }
+
+        self.viewport_multi_position_drag = Some(ViewportMultiPositionDrag {
+            object_ids,
+            pointer_start,
+            current_delta: Vec2::new(0.0, 0.0).expect("zero delta is finite"),
+            phase: ViewportTransformDragPhase::Active,
+            transaction_started: false,
+        });
+        true
+    }
+
+    #[must_use]
+    pub fn viewport_multi_position_drag_active(&self) -> bool {
+        self.viewport_multi_position_drag
+            .as_ref()
+            .is_some_and(|drag| drag.phase == ViewportTransformDragPhase::Active)
+    }
+
+    pub fn update_viewport_multi_position_drag(
+        &mut self,
+        pointer: [f32; 2],
+        composition_units_per_point: [f32; 2],
+        constrain_axis: bool,
+    ) -> bool {
+        let Some(drag) = self.viewport_multi_position_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportTransformDragPhase::Active
+            || !pointer[0].is_finite()
+            || !pointer[1].is_finite()
+            || !composition_units_per_point[0].is_finite()
+            || !composition_units_per_point[1].is_finite()
+            || composition_units_per_point[0] <= 0.0
+            || composition_units_per_point[1] <= 0.0
+        {
+            return false;
+        }
+
+        let mut delta_x = (pointer[0] - drag.pointer_start[0]) * composition_units_per_point[0];
+        let mut delta_y = (pointer[1] - drag.pointer_start[1]) * composition_units_per_point[1];
+        if constrain_axis {
+            if delta_x.abs() >= delta_y.abs() {
+                delta_y = 0.0;
+            } else {
+                delta_x = 0.0;
+            }
+        }
+        let Ok(current_delta) = Vec2::new(delta_x, delta_y) else {
+            return false;
+        };
+        if current_delta == drag.current_delta {
+            return false;
+        }
+
+        drag.current_delta = current_delta;
+        true
+    }
+
+    pub fn finish_viewport_multi_position_drag(&mut self) -> bool {
+        let Some(drag) = self.viewport_multi_position_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportTransformDragPhase::Active {
+            return false;
+        }
+
+        drag.phase = ViewportTransformDragPhase::CommitRequested;
+        true
+    }
+
+    pub fn cancel_viewport_multi_position_drag(&mut self) -> bool {
+        let Some(drag) = self.viewport_multi_position_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
+            return false;
+        }
+
+        drag.phase = ViewportTransformDragPhase::CancelRequested;
+        true
+    }
+
+    pub fn sync_viewport_multi_position_drag(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(drag) = self.viewport_multi_position_drag.as_mut() else {
+            return Ok(false);
+        };
+
+        if drag.phase == ViewportTransformDragPhase::CancelRequested && !drag.transaction_started {
+            self.viewport_multi_position_drag = None;
+            return Ok(true);
+        }
+
+        if !drag.transaction_started {
+            if let Err(error) = editor.begin_multi_position_transaction(&drag.object_ids) {
+                self.viewport_multi_position_drag = None;
+                return Err(error);
+            }
+            drag.transaction_started = true;
+        }
+
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
+            let changed = editor.cancel_transaction()?;
+            self.viewport_multi_position_drag = None;
+            return Ok(changed);
+        }
+
+        editor.update_multi_position_transaction(drag.current_delta)?;
+
+        if drag.phase == ViewportTransformDragPhase::CommitRequested {
+            let changed = editor.commit_transaction()?;
+            self.viewport_multi_position_drag = None;
+            return Ok(changed);
+        }
+
+        Ok(true)
+    }
+
     pub fn begin_viewport_scale_drag(
         &mut self,
         object_id: ObjectId,
@@ -560,6 +712,7 @@ impl EditorSession {
         rotation_degrees: f32,
     ) -> bool {
         if self.viewport_position_drag.is_some()
+            || self.viewport_multi_position_drag.is_some()
             || self.viewport_scale_drag.is_some()
             || self.viewport_rotation_drag.is_some()
             || !rotation_degrees.is_finite()
@@ -714,6 +867,7 @@ impl EditorSession {
         rotation_start: f32,
     ) -> bool {
         if self.viewport_position_drag.is_some()
+            || self.viewport_multi_position_drag.is_some()
             || self.viewport_scale_drag.is_some()
             || self.viewport_rotation_drag.is_some()
             || !rotation_start.is_finite()
@@ -1932,6 +2086,67 @@ mod tests {
                 .position
                 .base_value(),
             Vec2::new(0.0, 80.0).expect("y constrained position")
+        );
+    }
+
+    #[test]
+    fn viewport_multi_position_drag_applies_one_shared_delta_and_history_entry() {
+        let first_id = ObjectId::new(1).expect("first object");
+        let second_id = ObjectId::new(2).expect("second object");
+        let mut project = editor_with_object_for_drag().into_project();
+        let mut second = project.composition.objects[0].clone();
+        second.id = second_id;
+        second.transform.position = rhythm_core::animation::Animated::new_static(
+            Vec2::new(100.0, 50.0).expect("second position"),
+        );
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+        let mut editor =
+            rhythm_core::editor::ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_multi_position_drag(
+            vec![second_id, first_id],
+            [100.0, 100.0],
+        ));
+        assert!(session.update_viewport_multi_position_drag(
+            [130.0, 80.0],
+            [2.0, 2.0],
+            false,
+        ));
+        assert_eq!(
+            session.sync_viewport_multi_position_drag(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(60.0, -40.0).expect("first preview")
+        );
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(160.0, 10.0).expect("second preview")
+        );
+
+        assert!(session.finish_viewport_multi_position_drag());
+        assert_eq!(
+            session.sync_viewport_multi_position_drag(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(100.0, 50.0).expect("second restored")
         );
     }
 
