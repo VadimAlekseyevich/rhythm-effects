@@ -405,6 +405,7 @@ struct InspectorMultiNumericCommit {
 pub struct EditorSession {
     pub preview_quality: PreviewQuality,
     playhead: ProjectTimeNs,
+    playing: bool,
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
     follow_playhead: bool,
@@ -443,6 +444,7 @@ impl Default for EditorSession {
         Self {
             preview_quality: PreviewQuality::Auto,
             playhead: ProjectTimeNs::new(0),
+            playing: false,
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
             follow_playhead: false,
@@ -486,6 +488,23 @@ impl EditorSession {
 
     pub const fn seek_paused(&mut self, project_time: ProjectTimeNs) {
         self.playhead = project_time;
+        self.playing = false;
+    }
+
+    #[must_use]
+    pub const fn is_playing(&self) -> bool {
+        self.playing
+    }
+
+    pub const fn toggle_playback(&mut self) -> bool {
+        self.playing = !self.playing;
+        self.playing
+    }
+
+    pub const fn pause_playback(&mut self) -> bool {
+        let changed = self.playing;
+        self.playing = false;
+        changed
     }
 
     #[must_use]
@@ -5372,6 +5391,23 @@ mod tests {
         .expect("first keyframe");
         assert_eq!(keyframe.id.get(), 2);
         assert!(session.is_keyframe_selected(keyframe.id));
+    }
+
+    #[test]
+    fn playback_toggle_and_paused_seek_are_explicit_session_state() {
+        let mut session = EditorSession::default();
+        assert!(!session.is_playing());
+
+        assert!(session.toggle_playback());
+        assert!(session.is_playing());
+        assert!(session.pause_playback());
+        assert!(!session.is_playing());
+        assert!(!session.pause_playback());
+
+        assert!(session.toggle_playback());
+        session.seek_paused(ProjectTimeNs::new(750_000_000));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(750_000_000));
+        assert!(!session.is_playing());
     }
 
     #[test]
