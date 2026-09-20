@@ -401,12 +401,11 @@ mod tests {
         project.composition.objects[0].transform.rotation_degrees = Animated::new_static(90.0);
         let scene = evaluate_scene(&project, ProjectTimeNs::new(0)).expect("scene");
 
-        let overlay = selection_overlay_geometry(
-            &scene,
-            &[ObjectId::new(1).expect("object id")],
-            |_, _| None,
-        )
-        .expect("selection overlay");
+        let overlay =
+            selection_overlay_geometry(&scene, &[ObjectId::new(1).expect("object id")], |_, _| {
+                None
+            })
+            .expect("selection overlay");
 
         assert_eq!(
             overlay.corners,
