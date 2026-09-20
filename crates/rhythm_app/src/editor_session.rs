@@ -870,9 +870,14 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSession, PreviewQuality};
-    use rhythm_core::time::{
-        BeatDivision, BpmMicros, DurationNs, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
+    use super::{EditorSession, KeyframeDragMember, PreviewQuality};
+    use rhythm_core::{
+        ids::{KeyframeId, ObjectId},
+        property::AnimatableProperty,
+        time::{
+            BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs, TempoMap,
+            TimeSignature,
+        },
     };
 
     fn tempo_120() -> TempoMap {
