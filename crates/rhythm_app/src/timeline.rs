@@ -1,12 +1,12 @@
-use crate::editor_session::{EditorSession, KeyframeDragMember};
+use crate::editor_session::{EditorSession, KeyframeDragMember, KeyframeInterpolationPreset};
 use rhythm_core::{
     animation::Animated,
     ids::{EffectId, KeyframeId, ObjectId},
     project::{EffectKind, ObjectContent, Project},
     property::{AnimatableProperty, EffectAnimatableProperty, property_keyframe_by_id},
     time::{
-        BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
-        floor_tick_position_to_grid, snap_tick_position_to_grid,
+        BeatDivision, MusicalTick, PPQ, ProjectTimeNs, TempoMap, floor_tick_position_to_grid,
+        snap_tick_position_to_grid,
     },
 };
 use rhythm_engine::waveform::{WaveformData, WaveformSlice};
@@ -901,6 +901,21 @@ fn draw_timeline_rows(
                                         session.select_only_keyframe(keyframe.id);
                                     }
                                 }
+                                if response.secondary_clicked() {
+                                    session.focus_property(*object_id, animatable_property);
+                                    if !session.is_keyframe_selected(keyframe.id) {
+                                        session.select_only_keyframe(keyframe.id);
+                                    }
+                                }
+                                response.context_menu(|ui| {
+                                    ui.label("Interpolation");
+                                    for preset in KeyframeInterpolationPreset::ALL {
+                                        if ui.button(preset.label()).clicked() {
+                                            session.queue_selected_keyframe_interpolation(preset);
+                                            ui.close();
+                                        }
+                                    }
+                                });
                                 if response.drag_started() {
                                     session.focus_property(*object_id, animatable_property);
                                     if !session.is_keyframe_selected(keyframe.id) {
