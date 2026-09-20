@@ -1585,7 +1585,7 @@ mod tests {
         assert!(session.begin_viewport_position_drag(
             object_id,
             [100.0, 100.0],
-            Vec2::new(10.0, 20.0).expect("position"),
+            Vec2::new(0.0, 0.0).expect("position"),
         ));
         assert!(session.update_viewport_position_drag(
             [130.0, 110.0],
@@ -1598,7 +1598,7 @@ mod tests {
                 .transform
                 .position
                 .base_value(),
-            Vec2::new(70.0, 20.0).expect("x constrained position")
+            Vec2::new(60.0, 0.0).expect("x constrained position")
         );
 
         assert!(session.update_viewport_position_drag(
@@ -1612,7 +1612,7 @@ mod tests {
                 .transform
                 .position
                 .base_value(),
-            Vec2::new(10.0, 100.0).expect("y constrained position")
+            Vec2::new(0.0, 80.0).expect("y constrained position")
         );
     }
 
