@@ -6,6 +6,7 @@ use rhythm_core::{
     editor::{EditCommand, EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     geometry::LocalBounds2d,
     ids::{AssetId, KeyframeId, ObjectId},
+    project::{FontStyle, FontWeight, TextAlignment},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
         property_base_value, property_keyframe_at_tick, property_keyframe_count,
@@ -249,6 +250,53 @@ pub struct InspectorNumericCommit {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectorTextField {
+    Content,
+    FontFamily,
+    FontSize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InspectorTextTarget {
+    pub object_id: ObjectId,
+    pub field: InspectorTextField,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InspectorTextEdit {
+    target: InspectorTextTarget,
+    buffer: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum TextInspectorAction {
+    SetContent {
+        object_id: ObjectId,
+        text: String,
+    },
+    SetFontFamily {
+        object_id: ObjectId,
+        family: String,
+    },
+    SetFontSize {
+        object_id: ObjectId,
+        font_size: f32,
+    },
+    SetFontWeight {
+        object_id: ObjectId,
+        weight: FontWeight,
+    },
+    SetFontStyle {
+        object_id: ObjectId,
+        style: FontStyle,
+    },
+    SetAlignment {
+        object_id: ObjectId,
+        alignment: TextAlignment,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InspectorMultiNumericTarget {
     pub property: AnimatableProperty,
     pub component: InspectorNumericComponent,
@@ -292,6 +340,8 @@ pub struct EditorSession {
     pending_inspector_numeric_commit: Option<InspectorNumericCommit>,
     inspector_multi_numeric_edit: Option<InspectorMultiNumericEdit>,
     pending_inspector_multi_numeric_commit: Option<InspectorMultiNumericCommit>,
+    inspector_text_edit: Option<InspectorTextEdit>,
+    pending_text_inspector_actions: Vec<TextInspectorAction>,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
     pending_keyframe_interpolation: Option<Interpolation>,
@@ -325,6 +375,8 @@ impl Default for EditorSession {
             pending_inspector_numeric_commit: None,
             inspector_multi_numeric_edit: None,
             pending_inspector_multi_numeric_commit: None,
+            inspector_text_edit: None,
+            pending_text_inspector_actions: Vec::new(),
             keyframe_drag: None,
             pending_keyframe_move: None,
             pending_keyframe_interpolation: None,
@@ -1924,6 +1976,148 @@ impl EditorSession {
             editor.set_property_values_at_tick(commit.target.property, resolved_tick, values)?;
         if let Some(resolved_time) = resolved_time {
             self.playhead = resolved_time;
+        }
+        Ok(changed)
+    }
+
+    pub fn begin_inspector_text_edit(
+        &mut self,
+        target: InspectorTextTarget,
+        buffer: String,
+    ) {
+        self.inspector_text_edit = Some(InspectorTextEdit { target, buffer });
+    }
+
+    #[must_use]
+    pub fn inspector_text_edit_buffer(&self, target: InspectorTextTarget) -> Option<&str> {
+        self.inspector_text_edit
+            .as_ref()
+            .filter(|edit| edit.target == target)
+            .map(|edit| edit.buffer.as_str())
+    }
+
+    pub fn update_inspector_text_edit_buffer(
+        &mut self,
+        target: InspectorTextTarget,
+        buffer: String,
+    ) -> bool {
+        let Some(edit) = self.inspector_text_edit.as_mut() else {
+            return false;
+        };
+        if edit.target != target || edit.buffer == buffer {
+            return false;
+        }
+
+        edit.buffer = buffer;
+        true
+    }
+
+    pub fn commit_inspector_text_edit(&mut self, target: InspectorTextTarget) -> bool {
+        let Some(edit) = self.inspector_text_edit.as_ref() else {
+            return false;
+        };
+        if edit.target != target {
+            return false;
+        }
+
+        let action = match target.field {
+            InspectorTextField::Content => TextInspectorAction::SetContent {
+                object_id: target.object_id,
+                text: edit.buffer.clone(),
+            },
+            InspectorTextField::FontFamily => TextInspectorAction::SetFontFamily {
+                object_id: target.object_id,
+                family: edit.buffer.clone(),
+            },
+            InspectorTextField::FontSize => {
+                let Ok(font_size) = edit.buffer.trim().parse::<f32>() else {
+                    return false;
+                };
+                if !font_size.is_finite() || font_size <= 0.0 {
+                    return false;
+                }
+                TextInspectorAction::SetFontSize {
+                    object_id: target.object_id,
+                    font_size,
+                }
+            }
+        };
+
+        self.pending_text_inspector_actions.push(action);
+        self.inspector_text_edit = None;
+        true
+    }
+
+    pub fn cancel_inspector_text_edit(&mut self, target: InspectorTextTarget) -> bool {
+        let Some(edit) = self.inspector_text_edit.as_ref() else {
+            return false;
+        };
+        if edit.target != target {
+            return false;
+        }
+
+        self.inspector_text_edit = None;
+        true
+    }
+
+    pub fn queue_text_font_weight(&mut self, object_id: ObjectId, weight: FontWeight) {
+        self.pending_text_inspector_actions
+            .push(TextInspectorAction::SetFontWeight { object_id, weight });
+    }
+
+    pub fn queue_text_font_style(&mut self, object_id: ObjectId, style: FontStyle) {
+        self.pending_text_inspector_actions
+            .push(TextInspectorAction::SetFontStyle { object_id, style });
+    }
+
+    pub fn queue_text_alignment(&mut self, object_id: ObjectId, alignment: TextAlignment) {
+        self.pending_text_inspector_actions
+            .push(TextInspectorAction::SetAlignment {
+                object_id,
+                alignment,
+            });
+    }
+
+    pub fn commit_pending_text_inspector_actions(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        if self.pending_text_inspector_actions.is_empty() {
+            return Ok(false);
+        }
+
+        let actions = std::mem::take(&mut self.pending_text_inspector_actions);
+        let mut changed = false;
+        for action in actions {
+            let action_changed = match action {
+                TextInspectorAction::SetContent { object_id, text } => {
+                    editor.execute(EditCommand::SetTextContent { object_id, text })?
+                }
+                TextInspectorAction::SetFontFamily { object_id, family } => {
+                    editor.execute(EditCommand::SetTextFontFamily { object_id, family })?
+                }
+                TextInspectorAction::SetFontSize {
+                    object_id,
+                    font_size,
+                } => editor.execute(EditCommand::SetTextFontSize {
+                    object_id,
+                    font_size,
+                })?,
+                TextInspectorAction::SetFontWeight { object_id, weight } => {
+                    editor.execute(EditCommand::SetTextFontWeight { object_id, weight })?
+                }
+                TextInspectorAction::SetFontStyle { object_id, style } => {
+                    editor.execute(EditCommand::SetTextFontStyle { object_id, style })?
+                }
+                TextInspectorAction::SetAlignment {
+                    object_id,
+                    alignment,
+                } => editor.execute(EditCommand::SetTextAlignment {
+                    object_id,
+                    alignment,
+                })?,
+            };
+            changed |= action_changed;
         }
         Ok(changed)
     }
