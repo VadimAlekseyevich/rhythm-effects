@@ -204,6 +204,9 @@ pub enum HistoryPayload {
         before: Vec2,
         after: Vec2,
     },
+    PositionsBaseChanged {
+        changes: Vec<(ObjectId, Vec2, Vec2)>,
+    },
     ScaleBaseChanged {
         object_id: ObjectId,
         before: Vec2,
@@ -391,6 +394,7 @@ impl History {
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
     ObjectPosition { object_id: ObjectId, before: Vec2 },
+    ObjectPositions { before: Vec<(ObjectId, Vec2)> },
     ObjectScale { object_id: ObjectId, before: Vec2 },
     ObjectRotation { object_id: ObjectId, before: f32 },
 }
@@ -630,6 +634,63 @@ impl ProjectEditor {
         Ok(())
     }
 
+    pub fn begin_multi_position_transaction(
+        &mut self,
+        object_ids: &[ObjectId],
+    ) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+        if object_ids.is_empty() {
+            return Err(EditError::HistoryInvariant(
+                "multi-position transaction requires objects",
+            ));
+        }
+
+        let mut object_ids = object_ids.to_vec();
+        object_ids.sort_by_key(|object_id| object_id.get());
+        object_ids.dedup();
+
+        let mut before = Vec::with_capacity(object_ids.len());
+        for object_id in object_ids {
+            let index = self.object_index(object_id)?;
+            before.push((
+                object_id,
+                *self.project.composition.objects[index]
+                    .transform
+                    .position
+                    .base_value(),
+            ));
+        }
+
+        self.transaction = Some(ActiveTransaction::ObjectPositions { before });
+        Ok(())
+    }
+
+    pub fn update_multi_position_transaction(&mut self, delta: Vec2) -> Result<(), EditError> {
+        let before = match &self.transaction {
+            Some(ActiveTransaction::ObjectPositions { before }) => before.clone(),
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active multi-position transaction",
+                ));
+            }
+        };
+
+        for (object_id, position) in before {
+            let index = self.object_index(object_id)?;
+            *self.project.composition.objects[index]
+                .transform
+                .position
+                .base_value_mut() = Vec2::new(
+                position.x() + delta.x(),
+                position.y() + delta.y(),
+            )
+            .map_err(|_| EditError::InvalidValue("position"))?;
+        }
+        Ok(())
+    }
+
     pub fn begin_scale_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
         if self.transaction.is_some() {
             return Err(EditError::HistoryInvariant("transaction already active"));
@@ -725,6 +786,30 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::ObjectPositions { before } => {
+                let mut changes = Vec::with_capacity(before.len());
+                for (object_id, before_position) in before {
+                    let index = self.object_index(object_id)?;
+                    let after = *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value();
+                    if before_position != after {
+                        changes.push((object_id, before_position, after));
+                    }
+                }
+
+                if changes.is_empty() {
+                    return Ok(false);
+                }
+
+                let count = changes.len();
+                self.history.push(PendingHistoryEntry::new(
+                    &format!("Move {count} Objects"),
+                    HistoryPayload::PositionsBaseChanged { changes },
+                ));
+                Ok(true)
+            }
             ActiveTransaction::ObjectScale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
@@ -782,6 +867,15 @@ impl ProjectEditor {
                     .transform
                     .position
                     .base_value_mut() = before;
+            }
+            ActiveTransaction::ObjectPositions { before } => {
+                for (object_id, position) in before {
+                    let index = self.object_index(object_id)?;
+                    *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value_mut() = position;
+                }
             }
             ActiveTransaction::ObjectScale { object_id, before } => {
                 let index = self.object_index(object_id)?;
@@ -1625,6 +1719,16 @@ impl ProjectEditor {
                     .transform
                     .position
                     .base_value_mut() = value;
+            }
+            (HistoryPayload::PositionsBaseChanged { changes }, direction) => {
+                for (object_id, before, after) in changes {
+                    let value = *direction.pick(before, after);
+                    let index = self.object_index(*object_id)?;
+                    *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value_mut() = value;
+                }
             }
             (
                 HistoryPayload::ScaleBaseChanged {
@@ -2618,6 +2722,68 @@ mod tests {
                 .base_value()
                 .x(),
             0.0
+        );
+    }
+
+    #[test]
+    fn multi_position_drag_applies_shared_delta_as_one_history_entry() {
+        let mut project = Project::new(
+            "Untitled",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut first = object(1, "A");
+        first.transform.position =
+            Animated::new_static(Vec2::new(10.0, 20.0).expect("first position"));
+        let mut second = object(2, "B");
+        second.transform.position =
+            Animated::new_static(Vec2::new(-5.0, 40.0).expect("second position"));
+        project.composition.objects.extend([first, second]);
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+
+        editor
+            .begin_multi_position_transaction(&[
+                ObjectId::new(2).expect("second"),
+                ObjectId::new(1).expect("first"),
+            ])
+            .expect("begin multi-position transaction");
+        editor
+            .update_multi_position_transaction(Vec2::new(30.0, -10.0).expect("delta"))
+            .expect("preview move");
+        assert_eq!(editor.history_len(), 0);
+
+        assert_eq!(editor.commit_transaction(), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(40.0, 10.0).expect("first moved")
+        );
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(25.0, 30.0).expect("second moved")
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(10.0, 20.0).expect("first restored")
+        );
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(-5.0, 40.0).expect("second restored")
         );
     }
 
