@@ -406,6 +406,7 @@ impl EditorSession {
         true
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn keyframe_clipboard(&self) -> Option<&KeyframeCopyPacket> {
         self.keyframe_clipboard.as_ref()
@@ -597,6 +598,7 @@ impl EditorSession {
         self.selected_keyframes.contains(&keyframe_id)
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn selected_keyframe_count(&self) -> usize {
         self.selected_keyframes.len()
@@ -660,6 +662,7 @@ impl EditorSession {
             .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
     }
 
+    #[cfg(test)]
     pub const fn set_authoring_division(&mut self, division: BeatDivision) {
         self.authoring_division = division;
     }
