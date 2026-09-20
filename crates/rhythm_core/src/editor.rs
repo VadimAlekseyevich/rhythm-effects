@@ -1,9 +1,13 @@
 use crate::{
     animation::{AnimationInvariantError, Keyframe},
     domain::Vec2,
-    ids::{KeyframeId, ObjectId},
+    ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{Object, Project, ProjectValidationError},
-    time::TempoMap,
+    property::{
+        AnimatableProperty, PropertyAccessError, PropertyKeyframe, property_base_value,
+        property_keyframe_count, insert_property_keyframe, remove_property_keyframe_by_id,
+    },
+    time::{MusicalTick, TempoMap},
 };
 
 pub const HISTORY_CAPACITY: usize = 500;
@@ -12,6 +16,8 @@ pub const HISTORY_CAPACITY: usize = 500;
 pub enum EditError {
     InvalidProject(ProjectValidationError),
     AnimationInvariant(AnimationInvariantError),
+    PropertyAccess(PropertyAccessError),
+    IdAllocation(IdAllocationError),
     ObjectNotFound(ObjectId),
     DuplicateObjectId(ObjectId),
     KeyframeNotFound(KeyframeId),
@@ -28,6 +34,18 @@ impl From<ProjectValidationError> for EditError {
 impl From<AnimationInvariantError> for EditError {
     fn from(value: AnimationInvariantError) -> Self {
         Self::AnimationInvariant(value)
+    }
+}
+
+impl From<PropertyAccessError> for EditError {
+    fn from(value: PropertyAccessError) -> Self {
+        Self::PropertyAccess(value)
+    }
+}
+
+impl From<IdAllocationError> for EditError {
+    fn from(value: IdAllocationError) -> Self {
+        Self::IdAllocation(value)
     }
 }
 
@@ -55,6 +73,11 @@ pub enum EditCommand {
         object_id: ObjectId,
         keyframe: Keyframe<f32>,
     },
+    InsertPropertyKeyframe {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe: PropertyKeyframe,
+    },
     SetTempoMap {
         tempo_map: TempoMap,
     },
@@ -70,6 +93,7 @@ impl EditCommand {
             Self::SetPositionBase { .. } => "SetPositionBase",
             Self::SetOpacityBase { .. } => "SetOpacityBase",
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
+            Self::InsertPropertyKeyframe { .. } => "InsertPropertyKeyframe",
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
     }
@@ -103,6 +127,11 @@ pub enum HistoryPayload {
     OpacityKeyframeInserted {
         object_id: ObjectId,
         keyframe: Keyframe<f32>,
+    },
+    PropertyKeyframeInserted {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe: PropertyKeyframe,
     },
     TempoMapChanged {
         before: TempoMap,
@@ -308,6 +337,39 @@ impl ProjectEditor {
 
     pub fn mark_saved(&mut self) {
         self.history.mark_saved();
+    }
+
+    pub fn next_keyframe_id(&self) -> Result<KeyframeId, EditError> {
+        let mut allocator = EntityIdAllocator::new(self.project.next_entity_id)?;
+        Ok(allocator.allocate_keyframe()?)
+    }
+
+    pub fn create_first_property_keyframe(
+        &mut self,
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        tick: MusicalTick,
+    ) -> Result<Option<KeyframeId>, EditError> {
+        if property_keyframe_count(&self.project, object_id, property)? != 0 {
+            return Ok(None);
+        }
+
+        let value = property_base_value(&self.project, object_id, property)?;
+        let keyframe_id = self.next_keyframe_id()?;
+        let keyframe = PropertyKeyframe {
+            id: keyframe_id,
+            tick,
+            value,
+            interpolation: crate::animation::Interpolation::Linear,
+        };
+
+        let changed = self.execute(EditCommand::InsertPropertyKeyframe {
+            object_id,
+            property,
+            keyframe,
+        })?;
+
+        Ok(changed.then_some(keyframe_id))
     }
 
     pub fn execute(&mut self, command: EditCommand) -> Result<bool, EditError> {
@@ -582,6 +644,46 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::InsertPropertyKeyframe {
+                object_id,
+                property,
+                keyframe,
+            } => {
+                if keyframe.id.get() != self.project.next_entity_id {
+                    return Err(EditError::HistoryInvariant(
+                        "keyframe id must match next_entity_id",
+                    ));
+                }
+
+                let next_entity_id = self
+                    .project
+                    .next_entity_id
+                    .checked_add(1)
+                    .ok_or(EditError::IdAllocation(IdAllocationError::Exhausted))?;
+                insert_property_keyframe(&mut self.project, object_id, property, keyframe)?;
+
+                let previous_next_entity_id = self.project.next_entity_id;
+                self.project.next_entity_id = next_entity_id;
+                if let Err(error) = self.project.validate() {
+                    let _ = remove_property_keyframe_by_id(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        keyframe.id,
+                    );
+                    self.project.next_entity_id = previous_next_entity_id;
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Add Keyframe",
+                    HistoryPayload::PropertyKeyframeInserted {
+                        object_id,
+                        property,
+                        keyframe,
+                    },
+                )))
+            }
             EditCommand::SetTempoMap { tempo_map } => {
                 let before = self.project.tempo_map.clone();
                 if before == tempo_map {
@@ -703,6 +805,37 @@ impl ProjectEditor {
                     .opacity
                     .insert_keyframe(keyframe.clone())?;
             }
+            (
+                HistoryPayload::PropertyKeyframeInserted {
+                    object_id,
+                    property,
+                    keyframe,
+                },
+                HistoryDirection::Undo,
+            ) => {
+                remove_property_keyframe_by_id(
+                    &mut self.project,
+                    *object_id,
+                    *property,
+                    keyframe.id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe.id))?;
+            }
+            (
+                HistoryPayload::PropertyKeyframeInserted {
+                    object_id,
+                    property,
+                    keyframe,
+                },
+                HistoryDirection::Redo,
+            ) => {
+                insert_property_keyframe(
+                    &mut self.project,
+                    *object_id,
+                    *property,
+                    *keyframe,
+                )?;
+            }
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
             }
@@ -780,6 +913,52 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn first_property_keyframe_uses_shared_allocator_and_undo_preserves_allocator() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+        let keyframe_id = editor
+            .create_first_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Position,
+                MusicalTick::new(240),
+            )
+            .expect("keyframe edit")
+            .expect("first keyframe");
+
+        assert_eq!(keyframe_id.get(), 2);
+        assert_eq!(editor.project().next_entity_id, 3);
+        assert_eq!(
+            crate::property::property_keyframe_count(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Position,
+            ),
+            Ok(1)
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            crate::property::property_keyframe_count(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Position,
+            ),
+            Ok(0)
+        );
+        assert_eq!(editor.project().next_entity_id, 3);
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            crate::property::property_keyframe_count(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Position,
+            ),
+            Ok(1)
+        );
     }
 
     #[test]
