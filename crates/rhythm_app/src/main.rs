@@ -218,11 +218,15 @@ impl ApplicationHandler for RhythmApp {
 
                     let handled = if direction != 0 && alt && !shift && !super_key {
                         let result = if control {
-                            self.session
-                                .move_selected_keyframes_by_beat(&mut self.project_editor, direction)
+                            self.session.move_selected_keyframes_by_beat(
+                                &mut self.project_editor,
+                                direction,
+                            )
                         } else {
-                            self.session
-                                .move_selected_keyframes_by_grid(&mut self.project_editor, direction)
+                            self.session.move_selected_keyframes_by_grid(
+                                &mut self.project_editor,
+                                direction,
+                            )
                         };
                         match result {
                             Ok(changed) => changed,
@@ -231,12 +235,7 @@ impl ApplicationHandler for RhythmApp {
                                 false
                             }
                         }
-                    } else if !control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::Delete
-                    {
+                    } else if !control && !shift && !alt && !super_key && code == KeyCode::Delete {
                         match self
                             .session
                             .delete_selected_keyframes(&mut self.project_editor)
@@ -247,12 +246,7 @@ impl ApplicationHandler for RhythmApp {
                                 false
                             }
                         }
-                    } else if !control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::Escape
-                    {
+                    } else if !control && !shift && !alt && !super_key && code == KeyCode::Escape {
                         self.session.cancel_keyframe_drag()
                     } else if !control && !shift && !alt && !super_key && code == KeyCode::KeyK {
                         match self.session.keyframe_action(&mut self.project_editor) {
