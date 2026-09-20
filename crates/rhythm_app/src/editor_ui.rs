@@ -1,7 +1,10 @@
 use crate::{
     editor_session::{EditorSession, PreviewQuality, ViewportCameraAction},
     timeline::draw_timeline,
-    viewport::{objects_intersecting_box, pick_topmost_object, selected_objects_bounds},
+    viewport::{
+        objects_intersecting_box, pick_topmost_object, selected_objects_bounds,
+        selection_overlay_geometry,
+    },
 };
 use rhythm_core::{domain::Vec2, geometry::LocalBounds2d, project::Project, time::ProjectTimeNs};
 
@@ -259,6 +262,14 @@ pub fn draw_editor_shell(
                 )
                 .ok()
             };
+            let composition_to_screen = |point: Vec2| {
+                egui::pos2(
+                    response.rect.left()
+                        + point.x() / composition_size.x * response.rect.width(),
+                    response.rect.top()
+                        + point.y() / composition_size.y * response.rect.height(),
+                )
+            };
 
             if response.clicked()
                 && let Some(pointer) = response.interact_pointer_pos()
@@ -352,6 +363,43 @@ pub fn draw_editor_shell(
                     let selected =
                         objects_intersecting_box(project, &scene, selection_bounds, |_, _| None);
                     session.replace_object_selection_many(selected);
+                }
+            }
+
+            if let Ok(scene) =
+                rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
+            {
+                let selected = session.selected_object_ids();
+                if let Some(overlay) =
+                    selection_overlay_geometry(&scene, &selected, |_, _| None)
+                {
+                    let corners = overlay.corners.map(composition_to_screen);
+                    let anchor = composition_to_screen(overlay.anchor);
+                    let stroke =
+                        egui::Stroke::new(1.5, ui.visuals().selection.stroke.color);
+
+                    for (start, end) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
+                        ui.painter()
+                            .line_segment([corners[start], corners[end]], stroke);
+                    }
+
+                    const ANCHOR_RADIUS: f32 = 5.0;
+                    const ANCHOR_ARM: f32 = 7.0;
+                    ui.painter().circle_stroke(anchor, ANCHOR_RADIUS, stroke);
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(anchor.x - ANCHOR_ARM, anchor.y),
+                            egui::pos2(anchor.x + ANCHOR_ARM, anchor.y),
+                        ],
+                        stroke,
+                    );
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(anchor.x, anchor.y - ANCHOR_ARM),
+                            egui::pos2(anchor.x, anchor.y + ANCHOR_ARM),
+                        ],
+                        stroke,
+                    );
                 }
             }
         } else {
