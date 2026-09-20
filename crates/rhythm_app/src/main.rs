@@ -423,6 +423,14 @@ impl ApplicationHandler for RhythmApp {
                     }
                     match self
                         .session
+                        .commit_pending_focused_keyframe_action(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector keyframe action failed"),
+                    }
+                    match self
+                        .session
                         .commit_pending_keyframe_interpolation(&mut self.project_editor)
                     {
                         Ok(true) => window.request_redraw(),
