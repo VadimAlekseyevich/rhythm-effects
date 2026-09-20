@@ -187,20 +187,20 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-155** — Implement Ctrl+Alt+Left/Right selected-key movement by exactly one beat.
 - [x] **AI-156** — Implement copy packet with property compatibility, values, easing and relative tick offsets.
 - [x] **AI-157** — Implement paste anchored at nearest-grid playhead with fresh KeyframeIds.
-- [ ] **AI-158** — Implement Ctrl+D duplicate of selected keys with duplicates remaining selected.
-- [ ] **AI-159** — Implement Hold/Linear/easing preset context actions for selected outgoing segments.
-- [ ] **AI-160** — Implement Follow Playhead toggle defaulting OFF and edge-follow behavior.
-- [ ] **AI-161** — Add the 10,000-key timeline stress fixture and verify no full-project draw scan.
+- [x] **AI-158** — Implement Ctrl+D duplicate of selected keys with duplicates remaining selected.
+- [x] **AI-159** — Implement Hold/Linear/easing preset context actions for selected outgoing segments.
+- [x] **AI-160** — Implement Follow Playhead toggle defaulting OFF and edge-follow behavior.
+- [x] **AI-161** — Add the 10,000-key timeline stress fixture and verify no full-project draw scan.
 
 ## M7 — Editor core
 
-- [ ] **AI-162** — Implement CPU inverse-transform hit testing for Rectangle.
-- [ ] **AI-163** — Implement CPU inverse-transform hit testing for Ellipse.
-- [ ] **AI-164** — Implement CPU bounds hit testing for Image.
-- [ ] **AI-165** — Implement CPU layout-bounds hit testing hook for Text.
-- [ ] **AI-166** — Select the topmost visible unlocked viewport object on click.
-- [ ] **AI-167** — Implement Ctrl-click object toggle selection in the viewport.
-- [ ] **AI-168** — Implement viewport box selection from empty space.
+- [x] **AI-162** — Implement CPU inverse-transform hit testing for Rectangle.
+- [x] **AI-163** — Implement CPU inverse-transform hit testing for Ellipse.
+- [x] **AI-164** — Implement CPU bounds hit testing for Image.
+- [x] **AI-165** — Implement CPU layout-bounds hit testing hook for Text.
+- [x] **AI-166** — Select the topmost visible unlocked viewport object on click.
+- [x] **AI-167** — Implement Ctrl-click object toggle selection in the viewport.
+- [x] **AI-168** — Implement viewport box selection from empty space.
 - [ ] **AI-169** — Implement middle-mouse viewport pan.
 - [ ] **AI-170** — Implement mouse-wheel viewport zoom around pointer.
 - [ ] **AI-171** — Implement Fit Composition and Frame Selection actions.
