@@ -566,40 +566,42 @@ impl EditorSession {
         &mut self,
         editor: &mut ProjectEditor,
     ) -> Result<bool, EditError> {
-        let Some(drag) = self.viewport_position_drag.as_mut() else {
+        let Some(snapshot) = self.viewport_position_drag else {
             return Ok(false);
         };
 
-        if drag.phase == ViewportTransformDragPhase::CancelRequested && !drag.transaction_started {
+        if snapshot.phase == ViewportTransformDragPhase::CancelRequested
+            && !snapshot.transaction_started
+        {
             self.viewport_position_drag = None;
             return Ok(true);
         }
 
-        if !drag.transaction_started {
-            let object_id = drag.object_id;
-            let Some(animated_transaction) =
-                self.begin_direct_transform_transaction(
-                    editor,
-                    object_id,
-                    AnimatableProperty::Position,
-                )?
+        if !snapshot.transaction_started {
+            let Some(animated_transaction) = self.begin_direct_transform_transaction(
+                editor,
+                snapshot.object_id,
+                AnimatableProperty::Position,
+            )?
             else {
                 self.viewport_position_drag = None;
                 return Ok(false);
             };
             if !animated_transaction
-                && let Err(error) = editor.begin_position_transaction(object_id)
+                && let Err(error) = editor.begin_position_transaction(snapshot.object_id)
             {
                 self.viewport_position_drag = None;
                 return Err(error);
             }
-            let Some(drag) = self.viewport_position_drag.as_mut() else {
-                return Ok(false);
-            };
-            drag.transaction_started = true;
-            drag.animated_transaction = animated_transaction;
+            if let Some(drag) = self.viewport_position_drag.as_mut() {
+                drag.transaction_started = true;
+                drag.animated_transaction = animated_transaction;
+            }
         }
 
+        let Some(drag) = self.viewport_position_drag else {
+            return Ok(false);
+        };
         if drag.phase == ViewportTransformDragPhase::CancelRequested {
             let changed = editor.cancel_transaction()?;
             self.viewport_position_drag = None;
@@ -886,36 +888,42 @@ impl EditorSession {
         &mut self,
         editor: &mut ProjectEditor,
     ) -> Result<bool, EditError> {
-        let Some(drag) = self.viewport_scale_drag.as_mut() else {
+        let Some(snapshot) = self.viewport_scale_drag else {
             return Ok(false);
         };
 
-        if drag.phase == ViewportTransformDragPhase::CancelRequested && !drag.transaction_started {
+        if snapshot.phase == ViewportTransformDragPhase::CancelRequested
+            && !snapshot.transaction_started
+        {
             self.viewport_scale_drag = None;
             return Ok(true);
         }
 
-        if !drag.transaction_started {
-            let object_id = drag.object_id;
-            let Some(animated_transaction) =
-                self.begin_direct_transform_transaction(editor, object_id, AnimatableProperty::Scale)?
+        if !snapshot.transaction_started {
+            let Some(animated_transaction) = self.begin_direct_transform_transaction(
+                editor,
+                snapshot.object_id,
+                AnimatableProperty::Scale,
+            )?
             else {
                 self.viewport_scale_drag = None;
                 return Ok(false);
             };
             if !animated_transaction
-                && let Err(error) = editor.begin_scale_transaction(object_id)
+                && let Err(error) = editor.begin_scale_transaction(snapshot.object_id)
             {
                 self.viewport_scale_drag = None;
                 return Err(error);
             }
-            let Some(drag) = self.viewport_scale_drag.as_mut() else {
-                return Ok(false);
-            };
-            drag.transaction_started = true;
-            drag.animated_transaction = animated_transaction;
+            if let Some(drag) = self.viewport_scale_drag.as_mut() {
+                drag.transaction_started = true;
+                drag.animated_transaction = animated_transaction;
+            }
         }
 
+        let Some(drag) = self.viewport_scale_drag else {
+            return Ok(false);
+        };
         if drag.phase == ViewportTransformDragPhase::CancelRequested {
             let changed = editor.cancel_transaction()?;
             self.viewport_scale_drag = None;
@@ -1051,20 +1059,21 @@ impl EditorSession {
         &mut self,
         editor: &mut ProjectEditor,
     ) -> Result<bool, EditError> {
-        let Some(drag) = self.viewport_rotation_drag.as_mut() else {
+        let Some(snapshot) = self.viewport_rotation_drag else {
             return Ok(false);
         };
 
-        if drag.phase == ViewportTransformDragPhase::CancelRequested && !drag.transaction_started {
+        if snapshot.phase == ViewportTransformDragPhase::CancelRequested
+            && !snapshot.transaction_started
+        {
             self.viewport_rotation_drag = None;
             return Ok(true);
         }
 
-        if !drag.transaction_started {
-            let object_id = drag.object_id;
+        if !snapshot.transaction_started {
             let Some(animated_transaction) = self.begin_direct_transform_transaction(
                 editor,
-                object_id,
+                snapshot.object_id,
                 AnimatableProperty::Rotation,
             )?
             else {
@@ -1072,18 +1081,20 @@ impl EditorSession {
                 return Ok(false);
             };
             if !animated_transaction
-                && let Err(error) = editor.begin_rotation_transaction(object_id)
+                && let Err(error) = editor.begin_rotation_transaction(snapshot.object_id)
             {
                 self.viewport_rotation_drag = None;
                 return Err(error);
             }
-            let Some(drag) = self.viewport_rotation_drag.as_mut() else {
-                return Ok(false);
-            };
-            drag.transaction_started = true;
-            drag.animated_transaction = animated_transaction;
+            if let Some(drag) = self.viewport_rotation_drag.as_mut() {
+                drag.transaction_started = true;
+                drag.animated_transaction = animated_transaction;
+            }
         }
 
+        let Some(drag) = self.viewport_rotation_drag else {
+            return Ok(false);
+        };
         if drag.phase == ViewportTransformDragPhase::CancelRequested {
             let changed = editor.cancel_transaction()?;
             self.viewport_rotation_drag = None;
