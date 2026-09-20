@@ -244,23 +244,25 @@ pub fn draw_editor_shell(
                 .sense(egui::Sense::click()),
             );
 
-            let screen_to_composition = |point: egui::Pos2| -> Option<Vec2> {
-                if response.rect.width() <= 0.0
-                    || response.rect.height() <= 0.0
-                    || !response.rect.contains(point)
-                {
+            let screen_to_composition_unclamped = |point: egui::Pos2| -> Option<Vec2> {
+                if response.rect.width() <= 0.0 || response.rect.height() <= 0.0 {
                     return None;
                 }
 
-                let normalized_x =
-                    ((point.x - response.rect.left()) / response.rect.width()).clamp(0.0, 1.0);
-                let normalized_y =
-                    ((point.y - response.rect.top()) / response.rect.height()).clamp(0.0, 1.0);
                 Vec2::new(
-                    normalized_x * project.settings.composition_width as f32,
-                    normalized_y * project.settings.composition_height as f32,
+                    (point.x - response.rect.left()) / response.rect.width()
+                        * project.settings.composition_width as f32,
+                    (point.y - response.rect.top()) / response.rect.height()
+                        * project.settings.composition_height as f32,
                 )
                 .ok()
+            };
+            let screen_to_composition = |point: egui::Pos2| -> Option<Vec2> {
+                response
+                    .rect
+                    .contains(point)
+                    .then(|| screen_to_composition_unclamped(point))
+                    .flatten()
             };
             let composition_to_screen = |point: Vec2| {
                 egui::pos2(
@@ -303,32 +305,89 @@ pub fn draw_editor_shell(
                 && let Ok(scene) =
                     rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
             {
-                let picked = pick_topmost_object(project, &scene, composition_origin, |_, _| None);
                 let ctrl = ui.input(|input| input.modifiers.ctrl);
                 let selected = session.selected_object_ids();
+                const SCALE_HANDLE_HIT_RADIUS: f32 = 9.0;
 
-                if !ctrl
-                    && selected.len() == 1
-                    && picked == selected.first().copied()
-                    && let Some(object_id) = picked
-                    && let Some(object) = project
+                let scale_drag_started = if !ctrl && selected.len() == 1 {
+                    let object_id = selected[0];
+                    project
                         .composition
                         .objects
                         .iter()
                         .find(|object| object.id == object_id)
-                    && object.transform.position.keyframes().is_empty()
-                {
-                    session.begin_viewport_position_drag(
-                        object_id,
-                        [origin.x, origin.y],
-                        *object.transform.position.base_value(),
-                    );
-                } else if picked.is_none() {
-                    session.begin_viewport_box_selection([origin.x, origin.y]);
+                        .filter(|object| {
+                            object.visible
+                                && !object.locked
+                                && object.transform.scale.keyframes().is_empty()
+                        })
+                        .and_then(|object| {
+                            selection_overlay_geometry(&scene, &selected, |_, _| None).and_then(
+                                |overlay| {
+                                    overlay
+                                        .corners
+                                        .iter()
+                                        .copied()
+                                        .find(|corner| {
+                                            composition_to_screen(*corner).distance(origin)
+                                                <= SCALE_HANDLE_HIT_RADIUS
+                                        })
+                                        .and_then(|handle_start| {
+                                            scene
+                                                .objects
+                                                .iter()
+                                                .find(|evaluated| evaluated.id == object_id)
+                                                .map(|evaluated| {
+                                                    session.begin_viewport_scale_drag(
+                                                        object_id,
+                                                        overlay.anchor,
+                                                        handle_start,
+                                                        *object.transform.scale.base_value(),
+                                                        evaluated.transform.rotation_degrees,
+                                                    )
+                                                })
+                                        })
+                                },
+                            )
+                        })
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+
+                if !scale_drag_started {
+                    let picked =
+                        pick_topmost_object(project, &scene, composition_origin, |_, _| None);
+                    if !ctrl
+                        && selected.len() == 1
+                        && picked == selected.first().copied()
+                        && let Some(object_id) = picked
+                        && let Some(object) = project
+                            .composition
+                            .objects
+                            .iter()
+                            .find(|object| object.id == object_id)
+                        && object.transform.position.keyframes().is_empty()
+                    {
+                        session.begin_viewport_position_drag(
+                            object_id,
+                            [origin.x, origin.y],
+                            *object.transform.position.base_value(),
+                        );
+                    } else if picked.is_none() {
+                        session.begin_viewport_box_selection([origin.x, origin.y]);
+                    }
                 }
             }
 
             if primary_down
+                && let Some(pointer) = pointer_pos
+                && session.viewport_scale_drag_active()
+            {
+                if let Some(composition_pointer) = screen_to_composition_unclamped(pointer) {
+                    session.update_viewport_scale_drag(composition_pointer);
+                }
+            } else if primary_down
                 && let Some(pointer) = pointer_pos
                 && session.viewport_position_drag_active()
             {
@@ -372,8 +431,20 @@ pub fn draw_editor_shell(
                 }
             }
 
-            let position_drag_released =
-                primary_released && session.viewport_position_drag_active();
+            let scale_drag_released = primary_released && session.viewport_scale_drag_active();
+            if scale_drag_released {
+                if let Some(pointer) = pointer_pos
+                    && let Some(composition_pointer) =
+                        screen_to_composition_unclamped(pointer)
+                {
+                    session.update_viewport_scale_drag(composition_pointer);
+                }
+                session.finish_viewport_scale_drag();
+            }
+
+            let position_drag_released = primary_released
+                && !scale_drag_released
+                && session.viewport_position_drag_active();
             if position_drag_released {
                 if let Some(pointer) = pointer_pos {
                     session.update_viewport_position_drag(
@@ -389,6 +460,7 @@ pub fn draw_editor_shell(
             }
 
             if primary_released
+                && !scale_drag_released
                 && !position_drag_released
                 && let Some((start, current)) = session.take_viewport_box_selection()
             {
@@ -426,6 +498,29 @@ pub fn draw_editor_shell(
                     for (start, end) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
                         ui.painter()
                             .line_segment([corners[start], corners[end]], stroke);
+                    }
+
+                    if selected.len() == 1 {
+                        const SCALE_HANDLE_SIZE: f32 = 8.0;
+                        for corner in corners {
+                            ui.painter().rect_filled(
+                                egui::Rect::from_center_size(
+                                    corner,
+                                    egui::vec2(SCALE_HANDLE_SIZE, SCALE_HANDLE_SIZE),
+                                ),
+                                1.0,
+                                ui.visuals().window_fill(),
+                            );
+                            ui.painter().rect_stroke(
+                                egui::Rect::from_center_size(
+                                    corner,
+                                    egui::vec2(SCALE_HANDLE_SIZE, SCALE_HANDLE_SIZE),
+                                ),
+                                1.0,
+                                stroke,
+                                egui::StrokeKind::Inside,
+                            );
+                        }
                     }
 
                     const ANCHOR_RADIUS: f32 = 5.0;
