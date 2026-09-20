@@ -6,7 +6,17 @@ use crate::{
         selection_overlay_geometry,
     },
 };
-use rhythm_core::{domain::Vec2, geometry::LocalBounds2d, project::Project, time::ProjectTimeNs};
+use rhythm_core::{
+    domain::Vec2,
+    geometry::LocalBounds2d,
+    ids::ObjectId,
+    project::Project,
+    property::{
+        AnimatableProperty, PropertyValue, evaluate_property_at_tick, property_base_value,
+        property_keyframe_at_tick, property_keyframe_count,
+    },
+    time::{ProjectTimeNs, snap_tick_position_to_grid},
+};
 
 fn rotation_handle_points(corners: [egui::Pos2; 4]) -> (egui::Pos2, egui::Pos2) {
     let center = egui::pos2(
@@ -39,6 +49,108 @@ fn fit_composition_preview(available: egui::Vec2, composition: egui::Vec2) -> eg
     } else {
         egui::vec2(available.x, available.x / composition_aspect)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InspectorKeyframeState {
+    Static,
+    AnimatedOffKey,
+    KeyAtGrid,
+}
+
+fn inspector_property_value_and_state(
+    session: &EditorSession,
+    project: &Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+) -> Option<(PropertyValue, InspectorKeyframeState)> {
+    let keyframe_count = property_keyframe_count(project, object_id, property).ok()?;
+    if keyframe_count == 0 {
+        return Some((
+            property_base_value(project, object_id, property).ok()?,
+            InspectorKeyframeState::Static,
+        ));
+    }
+
+    let continuous_tick = project
+        .tempo_map
+        .continuous_tick_position(session.playhead())
+        .ok()?;
+    let value = evaluate_property_at_tick(project, object_id, property, continuous_tick).ok()?;
+    let state = snap_tick_position_to_grid(continuous_tick, session.authoring_division())
+        .ok()
+        .and_then(|tick| property_keyframe_at_tick(project, object_id, property, tick).ok())
+        .flatten()
+        .map_or(InspectorKeyframeState::AnimatedOffKey, |_| {
+            InspectorKeyframeState::KeyAtGrid
+        });
+
+    Some((value, state))
+}
+
+fn format_inspector_property_value(
+    property: AnimatableProperty,
+    value: PropertyValue,
+) -> String {
+    match (property, value) {
+        (AnimatableProperty::Position, PropertyValue::Vec2(value)) => {
+            format!("{:.1}, {:.1} px", value.x(), value.y())
+        }
+        (AnimatableProperty::Scale, PropertyValue::Vec2(value)) => {
+            format!("{:.1}%, {:.1}%", value.x() * 100.0, value.y() * 100.0)
+        }
+        (AnimatableProperty::Rotation, PropertyValue::Scalar(value)) => {
+            format!("{value:.1}°")
+        }
+        (AnimatableProperty::Anchor, PropertyValue::Vec2(value)) => {
+            format!("{:.1}%, {:.1}%", value.x() * 100.0, value.y() * 100.0)
+        }
+        (AnimatableProperty::Opacity, PropertyValue::Scalar(value)) => {
+            format!("{:.1}%", value * 100.0)
+        }
+        (_, PropertyValue::Scalar(value)) => format!("{value:.3}"),
+        (_, PropertyValue::Vec2(value)) => format!("{:.3}, {:.3}", value.x(), value.y()),
+        (_, PropertyValue::Color(_)) => "Color".to_owned(),
+    }
+}
+
+fn draw_animatable_property_row(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    project: &Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    label: &str,
+) {
+    let Some((value, keyframe_state)) =
+        inspector_property_value_and_state(session, project, object_id, property)
+    else {
+        ui.horizontal(|ui| {
+            ui.label(label);
+            ui.label("—");
+        });
+        return;
+    };
+
+    let formatted = format_inspector_property_value(property, value);
+    let focused = session
+        .focused_property()
+        .is_some_and(|focused| focused.object_id == object_id && focused.property == property);
+    let (key_label, key_tooltip) = match keyframe_state {
+        InspectorKeyframeState::Static => ("K+", "Static — add first keyframe"),
+        InspectorKeyframeState::AnimatedOffKey => ("K", "Animated — no key at current grid"),
+        InspectorKeyframeState::KeyAtGrid => ("K*", "Keyframe at current grid — remove keyframe"),
+    };
+
+    ui.horizontal(|ui| {
+        ui.add_sized([72.0, 24.0], egui::Label::new(label));
+        if ui.selectable_label(focused, formatted).clicked() {
+            session.focus_property(object_id, property);
+        }
+        if ui.button(key_label).on_hover_text(key_tooltip).clicked() {
+            session.request_focused_keyframe_action(object_id, property);
+        }
+    });
 }
 
 #[derive(Debug, Clone)]
@@ -221,6 +333,49 @@ pub fn draw_editor_shell(
                         let visibility = if object.visible { "Visible" } else { "Hidden" };
                         let lock = if object.locked { "Locked" } else { "Unlocked" };
                         ui.label(format!("{visibility} · {lock}"));
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.heading("Transform");
+                        draw_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            object.id,
+                            AnimatableProperty::Position,
+                            "Position",
+                        );
+                        draw_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            object.id,
+                            AnimatableProperty::Scale,
+                            "Scale",
+                        );
+                        draw_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            object.id,
+                            AnimatableProperty::Rotation,
+                            "Rotation",
+                        );
+                        draw_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            object.id,
+                            AnimatableProperty::Anchor,
+                            "Anchor",
+                        );
+                        draw_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            object.id,
+                            AnimatableProperty::Opacity,
+                            "Opacity",
+                        );
                     } else {
                         ui.label("Selected object is unavailable");
                     }
