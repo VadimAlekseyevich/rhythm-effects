@@ -15,7 +15,8 @@ use rhythm_core::{
     geometry::LocalBounds2d,
     ids::{AssetId, ObjectId},
     project::{
-        AssetSource, FontStyle, FontWeight, ObjectContent, Project, TextAlignment, TextObject,
+        AssetSource, Effect, EffectKind, FontStyle, FontWeight, ObjectContent, Project,
+        TextAlignment, TextObject,
     },
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, property_base_value,
@@ -23,6 +24,66 @@ use rhythm_core::{
     },
     time::{ProjectTimeNs, snap_tick_position_to_grid},
 };
+
+fn effect_kind_label(kind: &EffectKind) -> &'static str {
+    match kind {
+        EffectKind::Blur(_) => "Blur",
+        EffectKind::Glow(_) => "Glow",
+        EffectKind::Tint(_) => "Tint",
+        EffectKind::Noise(_) => "Noise",
+        EffectKind::RgbSplit(_) => "RGB Split",
+    }
+}
+
+fn draw_effect_stack(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    object_id: ObjectId,
+    effects: &[Effect],
+) {
+    ui.add_space(8.0);
+    ui.separator();
+    ui.heading("Effects");
+
+    if effects.is_empty() {
+        ui.label("No effects");
+        return;
+    }
+
+    for (index, effect) in effects.iter().enumerate() {
+        ui.push_id(effect.id.get(), |ui| {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    let mut enabled = effect.enabled;
+                    if ui.toggle_value(&mut enabled, "On").changed() {
+                        session.queue_effect_enabled(object_id, effect.id, enabled);
+                    }
+
+                    ui.strong(effect_kind_label(&effect.kind));
+                    ui.label(format!("#{}", effect.id.get()));
+
+                    if ui
+                        .add_enabled(index > 0, egui::Button::new("↑"))
+                        .on_hover_text("Move effect earlier")
+                        .clicked()
+                    {
+                        session.queue_effect_move(object_id, effect.id, index - 1);
+                    }
+                    if ui
+                        .add_enabled(index + 1 < effects.len(), egui::Button::new("↓"))
+                        .on_hover_text("Move effect later")
+                        .clicked()
+                    {
+                        session.queue_effect_move(object_id, effect.id, index + 1);
+                    }
+                    if ui.button("Remove").clicked() {
+                        session.queue_effect_remove(object_id, effect.id);
+                    }
+                });
+            });
+        });
+    }
+}
 
 const FONT_WEIGHTS: [FontWeight; 9] = [
     FontWeight::Thin,
@@ -1055,6 +1116,7 @@ pub fn draw_editor_shell(
                                 draw_text_inspector(ui, session, object.id, text, project);
                             }
                         }
+                        draw_effect_stack(ui, session, object.id, &object.effects);
                     } else {
                         ui.label("Selected object is unavailable");
                     }
