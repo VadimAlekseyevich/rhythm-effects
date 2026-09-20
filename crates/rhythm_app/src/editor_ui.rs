@@ -315,11 +315,7 @@ fn draw_inspector_multi_numeric_field(
             let buffer = value
                 .map(|value| format!("{:.1}", value * display_scale))
                 .unwrap_or_default();
-            session.begin_inspector_multi_numeric_edit(
-                target,
-                object_ids.to_vec(),
-                buffer,
-            );
+            session.begin_inspector_multi_numeric_edit(target, object_ids.to_vec(), buffer);
         }
     }
 }
@@ -356,9 +352,10 @@ fn draw_multi_animatable_property_row(
         Some(InspectorKeyframeState::AnimatedOffKey) => {
             ("K", "All selected properties are animated off-key")
         }
-        Some(InspectorKeyframeState::KeyAtGrid) => {
-            ("K*", "All selected properties have a key at the current grid")
-        }
+        Some(InspectorKeyframeState::KeyAtGrid) => (
+            "K*",
+            "All selected properties have a key at the current grid",
+        ),
         None => ("K±", "Selected properties have mixed animation states"),
     };
 
