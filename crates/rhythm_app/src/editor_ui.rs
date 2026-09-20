@@ -3,12 +3,7 @@ use crate::{
     timeline::draw_timeline,
     viewport::{objects_intersecting_box, pick_topmost_object},
 };
-use rhythm_core::{
-    domain::Vec2,
-    geometry::LocalBounds2d,
-    project::Project,
-    time::ProjectTimeNs,
-};
+use rhythm_core::{domain::Vec2, geometry::LocalBounds2d, project::Project, time::ProjectTimeNs};
 
 fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
     const COMPOSITION_ASPECT: f32 = 1920.0 / 1080.0;
@@ -241,8 +236,8 @@ pub fn draw_editor_shell(
                 }
             }
 
-            let (primary_pressed, primary_down, primary_released, pointer_pos, press_origin) =
-                ui.input(|input| {
+            let (primary_pressed, primary_down, primary_released, pointer_pos, press_origin) = ui
+                .input(|input| {
                     (
                         input.pointer.primary_pressed(),
                         input.pointer.primary_down(),
