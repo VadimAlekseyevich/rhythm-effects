@@ -216,6 +216,8 @@ Ctrl+D duplicates active keyframe selection and leaves the duplicate selected fo
 
 Relative pattern timing remains unchanged.
 
+Duplicate placement repeats the pattern immediately after itself: the shared offset is the selected tick span plus one current authoring-grid step. This keeps source keys intact, avoids self-collision with the selected pattern, and makes a single-key duplicate land one current grid step to the right.
+
 ## 20. Easing
 
 Fast preset access through context/command/curve UI.
