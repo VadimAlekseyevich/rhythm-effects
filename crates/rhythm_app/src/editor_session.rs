@@ -2770,6 +2770,70 @@ mod tests {
     }
 
     #[test]
+    fn inspector_keyframe_action_promotes_final_removed_value_to_static_base() {
+        use rhythm_core::animation::{Animated, Interpolation, Keyframe};
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let keyframe_id = KeyframeId::new(2).expect("keyframe id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.tempo_map = tempo_120();
+        project.composition.objects[0].transform.opacity = Animated::with_keyframes(
+            1.0,
+            vec![Keyframe::new(
+                keyframe_id,
+                MusicalTick::new(240),
+                0.25,
+                Interpolation::Linear,
+            )],
+        )
+        .expect("animated opacity");
+        project.next_entity_id = 3;
+
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(130_000_000));
+        session.select_only_keyframe(keyframe_id);
+        session.request_focused_keyframe_action(object_id, AnimatableProperty::Opacity);
+
+        assert_eq!(
+            session.commit_pending_focused_keyframe_action(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_none()
+        );
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(0.25))
+        );
+        assert_eq!(session.selected_keyframe_count(), 0);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_some()
+        );
+    }
+
+    #[test]
     fn object_list_actions_apply_through_project_editor() {
         let object_id = ObjectId::new(1).expect("object id");
         let mut editor = editor_with_object_for_drag();
