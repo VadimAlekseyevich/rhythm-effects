@@ -810,8 +810,12 @@ impl ProjectEditor {
                     continue;
                 }
 
-                let before =
-                    crate::property::property_keyframe_at_tick(&self.project, object_id, property, tick)?;
+                let before = crate::property::property_keyframe_at_tick(
+                    &self.project,
+                    object_id,
+                    property,
+                    tick,
+                )?;
                 if let Some(existing) = before {
                     if existing.value == value {
                         continue;
