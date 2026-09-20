@@ -2763,6 +2763,7 @@ mod tests {
         project::{
             Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
         },
+        property::{AnimatableProperty, PropertyValue, property_base_value},
         time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
     };
 
