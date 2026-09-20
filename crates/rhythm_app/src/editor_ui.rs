@@ -85,7 +85,11 @@ fn draw_effect_stack(
 
     let picker_open = session.effect_picker_open_for(object_id);
     if ui
-        .button(if picker_open { "Close Add Effect" } else { "Add Effect" })
+        .button(if picker_open {
+            "Close Add Effect"
+        } else {
+            "Add Effect"
+        })
         .clicked()
     {
         session.toggle_effect_picker(object_id);
