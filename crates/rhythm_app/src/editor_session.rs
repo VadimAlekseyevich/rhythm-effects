@@ -664,12 +664,12 @@ impl EditorSession {
         let mut changed = false;
         for action in actions {
             let action_changed = match action {
-                EffectStackAction::Add { object_id, preset } => editor.execute(
-                    EditCommand::AddEffect {
+                EffectStackAction::Add { object_id, preset } => {
+                    editor.execute(EditCommand::AddEffect {
                         object_id,
                         kind: preset.kind(),
-                    },
-                )?,
+                    })?
+                }
                 EffectStackAction::SetEnabled {
                     object_id,
                     effect_id,
