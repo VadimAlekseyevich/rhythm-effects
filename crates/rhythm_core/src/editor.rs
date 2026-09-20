@@ -209,6 +209,11 @@ pub enum HistoryPayload {
         before: Vec2,
         after: Vec2,
     },
+    RotationBaseChanged {
+        object_id: ObjectId,
+        before: f32,
+        after: f32,
+    },
     OpacityBaseChanged {
         object_id: ObjectId,
         before: f32,
@@ -387,6 +392,7 @@ impl History {
 enum ActiveTransaction {
     ObjectPosition { object_id: ObjectId, before: Vec2 },
     ObjectScale { object_id: ObjectId, before: Vec2 },
+    ObjectRotation { object_id: ObjectId, before: f32 },
 }
 
 #[derive(Debug)]
@@ -655,6 +661,43 @@ impl ProjectEditor {
         Ok(())
     }
 
+    pub fn begin_rotation_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let index = self.object_index(object_id)?;
+        let before = *self.project.composition.objects[index]
+            .transform
+            .rotation_degrees
+            .base_value();
+
+        self.transaction = Some(ActiveTransaction::ObjectRotation { object_id, before });
+        Ok(())
+    }
+
+    pub fn update_rotation_transaction(&mut self, value: f32) -> Result<(), EditError> {
+        if !value.is_finite() {
+            return Err(EditError::InvalidValue("rotation"));
+        }
+
+        let object_id = match self.transaction {
+            Some(ActiveTransaction::ObjectRotation { object_id, .. }) => object_id,
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active rotation transaction",
+                ));
+            }
+        };
+
+        let index = self.object_index(object_id)?;
+        *self.project.composition.objects[index]
+            .transform
+            .rotation_degrees
+            .base_value_mut() = value;
+        Ok(())
+    }
+
     pub fn commit_transaction(&mut self) -> Result<bool, EditError> {
         let Some(transaction) = self.transaction.take() else {
             return Ok(false);
@@ -703,6 +746,27 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::ObjectRotation { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                let after = *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
+                    .base_value();
+
+                if before == after {
+                    return Ok(false);
+                }
+
+                self.history.push(PendingHistoryEntry::new(
+                    "Rotate Object",
+                    HistoryPayload::RotationBaseChanged {
+                        object_id,
+                        before,
+                        after,
+                    },
+                ));
+                Ok(true)
+            }
         }
     }
 
@@ -724,6 +788,13 @@ impl ProjectEditor {
                 *self.project.composition.objects[index]
                     .transform
                     .scale
+                    .base_value_mut() = before;
+            }
+            ActiveTransaction::ObjectRotation { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
                     .base_value_mut() = before;
             }
         }
@@ -1568,6 +1639,21 @@ impl ProjectEditor {
                 *self.project.composition.objects[index]
                     .transform
                     .scale
+                    .base_value_mut() = value;
+            }
+            (
+                HistoryPayload::RotationBaseChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let value = *direction.pick(before, after);
+                let index = self.object_index(*object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
                     .base_value_mut() = value;
             }
             (
@@ -2533,6 +2619,72 @@ mod tests {
                 .x(),
             0.0
         );
+    }
+
+    #[test]
+    fn one_rotation_drag_transaction_creates_one_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_rotation_transaction(object_id)
+            .expect("begin rotation transaction");
+        for rotation in [15.0, 45.0, 190.0, 405.0] {
+            editor
+                .update_rotation_transaction(rotation)
+                .expect("preview rotation");
+        }
+
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(editor.commit_transaction(), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            405.0
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            0.0
+        );
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            405.0
+        );
+    }
+
+    #[test]
+    fn cancelled_rotation_transaction_restores_before_state() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_rotation_transaction(object_id)
+            .expect("begin rotation transaction");
+        editor
+            .update_rotation_transaction(-123.5)
+            .expect("preview rotation");
+        assert_eq!(editor.cancel_transaction(), Ok(true));
+
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            0.0
+        );
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]
