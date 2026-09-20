@@ -556,9 +556,9 @@ fn draw_animatable_property_row(
     };
 
     ui.horizontal(|ui| {
-        let focused = session.focused_property().is_some_and(|focused| {
-            focused.object_id == object_id && focused.property == property
-        });
+        let focused = session
+            .focused_property()
+            .is_some_and(|focused| focused.object_id == object_id && focused.property == property);
         let row_label = if focused {
             format!("▶ {label}")
         } else {
