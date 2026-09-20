@@ -857,7 +857,9 @@ pub fn draw_editor_shell(
                             .objects
                             .iter()
                             .find(|object| object.id == *object_id)
-                            .is_some_and(|object| matches!(&object.content, ObjectContent::Rectangle(_)))
+                            .is_some_and(|object| {
+                                matches!(&object.content, ObjectContent::Rectangle(_))
+                            })
                     });
                     if all_rectangles {
                         ui.add_space(8.0);
