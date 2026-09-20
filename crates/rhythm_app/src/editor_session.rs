@@ -145,6 +145,7 @@ pub struct EditorSession {
     playhead: ProjectTimeNs,
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
+    follow_playhead: bool,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -161,6 +162,7 @@ impl Default for EditorSession {
             playhead: ProjectTimeNs::new(0),
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
+            follow_playhead: false,
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
@@ -185,6 +187,27 @@ impl EditorSession {
     #[must_use]
     pub const fn authoring_division(&self) -> BeatDivision {
         self.authoring_division
+    }
+
+    #[must_use]
+    pub const fn follow_playhead(&self) -> bool {
+        self.follow_playhead
+    }
+
+    pub const fn set_follow_playhead(&mut self, enabled: bool) {
+        self.follow_playhead = enabled;
+    }
+
+    pub fn update_playhead_during_playback(
+        &mut self,
+        project_time: ProjectTimeNs,
+        duration: DurationNs,
+    ) {
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX);
+        self.playhead = ProjectTimeNs::new(project_time.get().clamp(0, duration_ns));
+        if self.follow_playhead {
+            self.follow_playhead_to_viewport_edge(duration);
+        }
     }
 
     #[must_use]
@@ -892,7 +915,48 @@ impl EditorSession {
             start: ProjectTimeNs::new(new_start),
             end: ProjectTimeNs::new(new_start.saturating_add(span)),
         });
+        self.follow_playhead = false;
         true
+    }
+
+    fn follow_playhead_to_viewport_edge(&mut self, duration: DurationNs) {
+        const EDGE_FRACTION: f64 = 0.10;
+        const RIGHT_EDGE_TARGET_FRACTION: f64 = 0.25;
+        const LEFT_EDGE_TARGET_FRACTION: f64 = 0.75;
+
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let Some(view) = self.timeline_view else {
+            return;
+        };
+        let span = (view.end.get() - view.start.get()).clamp(1, duration_ns);
+        if span >= duration_ns {
+            return;
+        }
+
+        let edge_margin = ((span as f64) * EDGE_FRACTION).round() as i64;
+        let left_edge = view.start.get().saturating_add(edge_margin);
+        let right_edge = view.end.get().saturating_sub(edge_margin);
+        let playhead = self.playhead.get();
+
+        let target_fraction = if playhead >= right_edge {
+            Some(RIGHT_EDGE_TARGET_FRACTION)
+        } else if playhead <= left_edge {
+            Some(LEFT_EDGE_TARGET_FRACTION)
+        } else {
+            None
+        };
+        let Some(target_fraction) = target_fraction else {
+            return;
+        };
+
+        let target_offset = ((span as f64) * target_fraction).round() as i64;
+        let new_start = playhead
+            .saturating_sub(target_offset)
+            .clamp(0, duration_ns - span);
+        self.timeline_view = Some(TimelineView {
+            start: ProjectTimeNs::new(new_start),
+            end: ProjectTimeNs::new(new_start.saturating_add(span)),
+        });
     }
 
     pub fn change_authoring_division(&mut self, finer: bool) -> bool {
@@ -1067,6 +1131,46 @@ mod tests {
         session.toggle_keyframe_selection(second);
         assert!(!session.is_keyframe_selected(second));
         assert_eq!(session.selected_keyframe_count(), 1);
+    }
+
+    #[test]
+    fn follow_playhead_defaults_off_and_scrolls_only_near_view_edges() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+
+        assert!(!session.follow_playhead());
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(2_500_000_000), 2.0));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000))
+        );
+
+        session.set_follow_playhead(true);
+        session.update_playhead_during_playback(ProjectTimeNs::new(3_000_000_000), duration);
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000))
+        );
+
+        session.update_playhead_during_playback(ProjectTimeNs::new(4_600_000_000), duration);
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(3_350_000_000),
+                ProjectTimeNs::new(8_350_000_000),
+            )
+        );
+    }
+
+    #[test]
+    fn manual_timeline_pan_disables_follow_playhead() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(5_000_000_000), 2.0));
+        session.set_follow_playhead(true);
+
+        assert!(session.pan_timeline_points(duration, -100.0, 1_000.0));
+        assert!(!session.follow_playhead());
     }
 
     #[test]
