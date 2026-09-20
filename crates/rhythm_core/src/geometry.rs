@@ -20,11 +20,44 @@ impl ObjectTransform2d {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LocalBounds2d {
+    pub min: Vec2,
+    pub size: Vec2,
+}
+
+impl LocalBounds2d {
+    #[must_use]
+    pub const fn new(min: Vec2, size: Vec2) -> Self {
+        Self { min, size }
+    }
+
+    #[must_use]
+    pub fn from_size(size: Vec2) -> Self {
+        Self {
+            min: Vec2::new(0.0, 0.0).expect("zero local-bounds origin is finite"),
+            size,
+        }
+    }
+
+    #[must_use]
+    pub fn contains(self, point: Vec2) -> bool {
+        if self.size.x() < 0.0 || self.size.y() < 0.0 {
+            return false;
+        }
+
+        let max_x = self.min.x() + self.size.x();
+        let max_y = self.min.y() + self.size.y();
+        (self.min.x()..=max_x).contains(&point.x())
+            && (self.min.y()..=max_y).contains(&point.y())
+    }
+}
+
 #[must_use]
-pub fn inverse_object_transform_point(
+pub fn inverse_object_transform_point_in_bounds(
     composition_point: Vec2,
     transform: ObjectTransform2d,
-    bounds_size: Vec2,
+    bounds: LocalBounds2d,
 ) -> Option<Vec2> {
     let scale_x = transform.scale.x();
     let scale_y = transform.scale.y();
@@ -41,14 +74,46 @@ pub fn inverse_object_transform_point(
     let unrotated_x = cos * translated_x + sin * translated_y;
     let unrotated_y = -sin * translated_x + cos * translated_y;
 
-    let anchor_x = transform.anchor.x() * bounds_size.x();
-    let anchor_y = transform.anchor.y() * bounds_size.y();
+    let anchor_x = bounds.min.x() + transform.anchor.x() * bounds.size.x();
+    let anchor_y = bounds.min.y() + transform.anchor.y() * bounds.size.y();
 
     Vec2::new(
         unrotated_x / scale_x + anchor_x,
         unrotated_y / scale_y + anchor_y,
     )
     .ok()
+}
+
+#[must_use]
+pub fn inverse_object_transform_point(
+    composition_point: Vec2,
+    transform: ObjectTransform2d,
+    bounds_size: Vec2,
+) -> Option<Vec2> {
+    inverse_object_transform_point_in_bounds(
+        composition_point,
+        transform,
+        LocalBounds2d::from_size(bounds_size),
+    )
+}
+
+#[must_use]
+pub fn hit_test_text_layout_bounds(
+    composition_point: Vec2,
+    transform: ObjectTransform2d,
+    layout_bounds: LocalBounds2d,
+) -> bool {
+    if layout_bounds.size.x() <= 0.0 || layout_bounds.size.y() <= 0.0 {
+        return false;
+    }
+
+    let Some(local_point) =
+        inverse_object_transform_point_in_bounds(composition_point, transform, layout_bounds)
+    else {
+        return false;
+    };
+
+    layout_bounds.contains(local_point)
 }
 
 #[must_use]
@@ -107,8 +172,8 @@ pub fn hit_test_rectangle(
 #[cfg(test)]
 mod tests {
     use super::{
-        ObjectTransform2d, hit_test_ellipse, hit_test_image_bounds, hit_test_rectangle,
-        inverse_object_transform_point,
+        LocalBounds2d, ObjectTransform2d, hit_test_ellipse, hit_test_image_bounds,
+        hit_test_rectangle, hit_test_text_layout_bounds, inverse_object_transform_point,
     };
     use crate::domain::Vec2;
 
@@ -128,6 +193,50 @@ mod tests {
             rotation_degrees,
             vec2(anchor.0, anchor.1),
         )
+    }
+
+    #[test]
+    fn text_hit_test_uses_resolved_layout_bounds_with_nonzero_origin() {
+        let transform = transform((200.0, 100.0), (1.0, 1.0), 0.0, (0.5, 0.5));
+        let layout_bounds = LocalBounds2d::new(vec2(-10.0, -20.0), vec2(100.0, 40.0));
+
+        assert!(hit_test_text_layout_bounds(
+            vec2(200.0, 100.0),
+            transform,
+            layout_bounds
+        ));
+        assert!(hit_test_text_layout_bounds(
+            vec2(150.0, 80.0),
+            transform,
+            layout_bounds
+        ));
+        assert!(hit_test_text_layout_bounds(
+            vec2(250.0, 120.0),
+            transform,
+            layout_bounds
+        ));
+        assert!(!hit_test_text_layout_bounds(
+            vec2(250.1, 100.0),
+            transform,
+            layout_bounds
+        ));
+    }
+
+    #[test]
+    fn text_hit_test_hook_respects_transform_and_empty_layout() {
+        let transform = transform((300.0, 200.0), (-2.0, 0.5), 90.0, (0.5, 0.5));
+        let layout_bounds = LocalBounds2d::new(vec2(-20.0, 10.0), vec2(80.0, 40.0));
+
+        assert!(hit_test_text_layout_bounds(
+            vec2(300.0, 200.0),
+            transform,
+            layout_bounds
+        ));
+        assert!(!hit_test_text_layout_bounds(
+            vec2(300.0, 200.0),
+            transform,
+            LocalBounds2d::new(vec2(0.0, 0.0), vec2(0.0, 40.0))
+        ));
     }
 
     #[test]
