@@ -1745,16 +1745,19 @@ impl EditorSession {
             return Ok(false);
         }
 
-        let has_animated = commit.object_ids.iter().try_fold(false, |animated, object_id| {
-            Ok::<_, EditError>(
-                animated
-                    || property_keyframe_count(
-                        editor.project(),
-                        *object_id,
-                        commit.target.property,
-                    )? > 0,
-            )
-        })?;
+        let has_animated = commit
+            .object_ids
+            .iter()
+            .try_fold(false, |animated, object_id| {
+                Ok::<_, EditError>(
+                    animated
+                        || property_keyframe_count(
+                            editor.project(),
+                            *object_id,
+                            commit.target.property,
+                        )? > 0,
+                )
+            })?;
 
         let (resolved_tick, resolved_time) = if has_animated {
             let project = editor.project();
@@ -1776,38 +1779,32 @@ impl EditorSession {
 
         let mut values = Vec::with_capacity(commit.object_ids.len());
         for object_id in &commit.object_ids {
-            let before = if property_keyframe_count(
-                editor.project(),
-                *object_id,
-                commit.target.property,
-            )? == 0
-            {
-                property_base_value(editor.project(), *object_id, commit.target.property)?
-            } else {
-                evaluate_property_at_tick(
-                    editor.project(),
-                    *object_id,
-                    commit.target.property,
-                    resolved_tick.get() as f64,
-                )?
-            };
+            let before =
+                if property_keyframe_count(editor.project(), *object_id, commit.target.property)?
+                    == 0
+                {
+                    property_base_value(editor.project(), *object_id, commit.target.property)?
+                } else {
+                    evaluate_property_at_tick(
+                        editor.project(),
+                        *object_id,
+                        commit.target.property,
+                        resolved_tick.get() as f64,
+                    )?
+                };
 
             let after = match (before, commit.target.component) {
                 (PropertyValue::Scalar(_), InspectorNumericComponent::Scalar) => {
                     PropertyValue::Scalar(project_value)
                 }
-                (PropertyValue::Vec2(value), InspectorNumericComponent::X) => {
-                    PropertyValue::Vec2(
-                        Vec2::new(project_value, value.y())
-                            .map_err(|_| EditError::InvalidValue("inspector property value"))?,
-                    )
-                }
-                (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => {
-                    PropertyValue::Vec2(
-                        Vec2::new(value.x(), project_value)
-                            .map_err(|_| EditError::InvalidValue("inspector property value"))?,
-                    )
-                }
+                (PropertyValue::Vec2(value), InspectorNumericComponent::X) => PropertyValue::Vec2(
+                    Vec2::new(project_value, value.y())
+                        .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+                ),
+                (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => PropertyValue::Vec2(
+                    Vec2::new(value.x(), project_value)
+                        .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+                ),
                 _ => {
                     return Err(EditError::HistoryInvariant(
                         "inspector multi numeric component does not match property value",
@@ -3023,19 +3020,12 @@ mod tests {
         };
         let ids = vec![first_id, second_id];
 
-        assert!(session.begin_inspector_multi_numeric_edit(
-            target,
-            ids.clone(),
-            String::new(),
-        ));
+        assert!(session.begin_inspector_multi_numeric_edit(target, ids.clone(), String::new(),));
         assert_eq!(
             session.inspector_multi_numeric_edit_buffer(target, &ids),
             Some("")
         );
-        assert!(session.update_inspector_multi_numeric_edit_buffer(
-            target,
-            "250.0".to_owned(),
-        ));
+        assert!(session.update_inspector_multi_numeric_edit_buffer(target, "250.0".to_owned(),));
         assert!(session.commit_inspector_multi_numeric_edit(target));
         assert_eq!(
             session.commit_pending_inspector_multi_property_edit(&mut editor),
