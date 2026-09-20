@@ -3,6 +3,7 @@
 mod editor_session;
 mod editor_ui;
 mod gpu;
+mod shortcuts;
 mod timeline;
 mod viewport;
 
@@ -13,6 +14,7 @@ use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use rhythm_core::APP_NAME;
+use shortcuts::{EditorShortcut, ShortcutModifiers, dispatch_physical_shortcut};
 use rhythm_engine::renderer::Renderer;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -216,8 +218,32 @@ impl ApplicationHandler for RhythmApp {
                         KeyCode::ArrowRight => 1,
                         _ => 0,
                     };
+                    let shortcut = dispatch_physical_shortcut(
+                        code,
+                        ShortcutModifiers {
+                            control,
+                            shift,
+                            alt,
+                            super_key,
+                        },
+                    );
 
-                    let handled = if control
+                    let handled = if let Some(shortcut) = shortcut {
+                        match shortcut {
+                            EditorShortcut::FocusProperty(property) => {
+                                self.session.focus_selected_property(property)
+                            }
+                            EditorShortcut::KeyframeAction => {
+                                match self.session.keyframe_action(&mut self.project_editor) {
+                                    Ok(changed) => changed,
+                                    Err(error) => {
+                                        warn!(?error, "keyframe action failed");
+                                        false
+                                    }
+                                }
+                            }
+                        }
+                    } else if control
                         && !shift
                         && !alt
                         && !super_key
@@ -297,14 +323,6 @@ impl ApplicationHandler for RhythmApp {
                         };
                         self.session.request_viewport_camera_action(action);
                         true
-                    } else if !control && !shift && !alt && !super_key && code == KeyCode::KeyK {
-                        match self.session.keyframe_action(&mut self.project_editor) {
-                            Ok(changed) => changed,
-                            Err(error) => {
-                                warn!(?error, "keyframe action failed");
-                                false
-                            }
-                        }
                     } else if direction != 0 && !alt && !super_key {
                         let project = self.project_editor.project();
                         if control && shift {
