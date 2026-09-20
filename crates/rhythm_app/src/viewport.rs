@@ -85,7 +85,6 @@ fn transformed_bounds(
     let mut max_y = first.y();
 
     for point in transformed {
-        let point = point?;
         min_x = min_x.min(point.x());
         min_y = min_y.min(point.y());
         max_x = max_x.max(point.x());
