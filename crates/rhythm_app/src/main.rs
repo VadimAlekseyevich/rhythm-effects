@@ -423,6 +423,14 @@ impl ApplicationHandler for RhythmApp {
                     }
                     match self
                         .session
+                        .commit_pending_text_inspector_actions(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector Text edit failed"),
+                    }
+                    match self
+                        .session
                         .commit_pending_inspector_static_property_edit(&mut self.project_editor)
                     {
                         Ok(true) => window.request_redraw(),
