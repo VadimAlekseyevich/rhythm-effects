@@ -18,10 +18,16 @@ pub enum RuntimeHitBounds {
     TextLayout(LocalBounds2d),
 }
 
-fn transformed_bounds(
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SelectionOverlayGeometry {
+    pub corners: [Vec2; 4],
+    pub anchor: Vec2,
+}
+
+fn transformed_corners(
     transform: ObjectTransform2d,
     local_bounds: LocalBounds2d,
-) -> Option<LocalBounds2d> {
+) -> Option<[Vec2; 4]> {
     if local_bounds.size.x() < 0.0 || local_bounds.size.y() < 0.0 {
         return None;
     }
@@ -30,17 +36,49 @@ fn transformed_bounds(
     let min_y = local_bounds.min.y();
     let max_x = min_x + local_bounds.size.x();
     let max_y = min_y + local_bounds.size.y();
-    let corners = [
+    let local_corners = [
         Vec2::new(min_x, min_y).ok()?,
         Vec2::new(max_x, min_y).ok()?,
         Vec2::new(max_x, max_y).ok()?,
         Vec2::new(min_x, max_y).ok()?,
     ];
 
-    let mut transformed = corners
-        .into_iter()
-        .map(|corner| object_transform_point_in_bounds(corner, transform, local_bounds));
-    let first = transformed.next()??;
+    Some([
+        object_transform_point_in_bounds(local_corners[0], transform, local_bounds)?,
+        object_transform_point_in_bounds(local_corners[1], transform, local_bounds)?,
+        object_transform_point_in_bounds(local_corners[2], transform, local_bounds)?,
+        object_transform_point_in_bounds(local_corners[3], transform, local_bounds)?,
+    ])
+}
+
+fn bounds_corners(bounds: LocalBounds2d) -> Option<[Vec2; 4]> {
+    if bounds.size.x() < 0.0 || bounds.size.y() < 0.0 {
+        return None;
+    }
+
+    let min_x = bounds.min.x();
+    let min_y = bounds.min.y();
+    let max_x = min_x + bounds.size.x();
+    let max_y = min_y + bounds.size.y();
+    Some([
+        Vec2::new(min_x, min_y).ok()?,
+        Vec2::new(max_x, min_y).ok()?,
+        Vec2::new(max_x, max_y).ok()?,
+        Vec2::new(min_x, max_y).ok()?,
+    ])
+}
+
+fn transformed_bounds(
+    transform: ObjectTransform2d,
+    local_bounds: LocalBounds2d,
+) -> Option<LocalBounds2d> {
+    if local_bounds.size.x() < 0.0 || local_bounds.size.y() < 0.0 {
+        return None;
+    }
+
+    let corners = transformed_corners(transform, local_bounds)?;
+    let mut transformed = corners.into_iter();
+    let first = transformed.next()?;
     let mut min_x = first.x();
     let mut min_y = first.y();
     let mut max_x = first.x();
@@ -146,6 +184,49 @@ where
     }
 
     combined
+}
+
+#[must_use]
+pub fn selection_overlay_geometry<F>(
+    scene: &EvaluatedScene,
+    selected_object_ids: &[ObjectId],
+    mut runtime_bounds: F,
+) -> Option<SelectionOverlayGeometry>
+where
+    F: FnMut(ObjectId, &EvaluatedObjectContent) -> Option<RuntimeHitBounds>,
+{
+    if selected_object_ids.is_empty() {
+        return None;
+    }
+
+    if selected_object_ids.len() == 1 {
+        let object_id = selected_object_ids[0];
+        let evaluated = scene.objects.iter().find(|object| object.id == object_id)?;
+        let local_bounds =
+            evaluated_local_bounds(evaluated.id, &evaluated.content, &mut runtime_bounds)?;
+        let transform = ObjectTransform2d::new(
+            evaluated.transform.position,
+            evaluated.transform.scale,
+            evaluated.transform.rotation_degrees,
+            evaluated.transform.anchor,
+        );
+        return Some(SelectionOverlayGeometry {
+            corners: transformed_corners(transform, local_bounds)?,
+            anchor: evaluated.transform.position,
+        });
+    }
+
+    let bounds = selected_objects_bounds(scene, selected_object_ids, |object_id, content| {
+        runtime_bounds(object_id, content)
+    })?;
+    Some(SelectionOverlayGeometry {
+        corners: bounds_corners(bounds)?,
+        anchor: Vec2::new(
+            bounds.min.x() + bounds.size.x() * 0.5,
+            bounds.min.y() + bounds.size.y() * 0.5,
+        )
+        .ok()?,
+    })
 }
 
 #[must_use]
@@ -257,7 +338,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{objects_intersecting_box, pick_topmost_object, selected_objects_bounds};
+    use super::{
+        objects_intersecting_box, pick_topmost_object, selected_objects_bounds,
+        selection_overlay_geometry,
+    };
     use rhythm_core::{
         animation::Animated,
         domain::{LinearRgba, Vec2},
@@ -307,6 +391,62 @@ mod tests {
             .push(rectangle(2, "Front", true, false));
         project.next_entity_id = 3;
         project
+    }
+
+    #[test]
+    fn single_selection_overlay_preserves_rotated_bounds_and_anchor() {
+        let mut project = project_with_overlapping_rectangles();
+        project.composition.objects[0].transform.position =
+            Animated::new_static(Vec2::new(300.0, 200.0).expect("position"));
+        project.composition.objects[0].transform.rotation_degrees = Animated::new_static(90.0);
+        let scene = evaluate_scene(&project, ProjectTimeNs::new(0)).expect("scene");
+
+        let overlay = selection_overlay_geometry(
+            &scene,
+            &[ObjectId::new(1).expect("object id")],
+            |_, _| None,
+        )
+        .expect("selection overlay");
+
+        assert_eq!(
+            overlay.corners,
+            [
+                Vec2::new(325.0, 150.0).expect("corner"),
+                Vec2::new(325.0, 250.0).expect("corner"),
+                Vec2::new(275.0, 250.0).expect("corner"),
+                Vec2::new(275.0, 150.0).expect("corner"),
+            ]
+        );
+        assert_eq!(overlay.anchor, Vec2::new(300.0, 200.0).expect("anchor"));
+    }
+
+    #[test]
+    fn multi_selection_overlay_uses_combined_bounds_center() {
+        let mut project = project_with_overlapping_rectangles();
+        project.composition.objects[1].transform.position =
+            Animated::new_static(Vec2::new(400.0, 200.0).expect("position"));
+        let scene = evaluate_scene(&project, ProjectTimeNs::new(0)).expect("scene");
+
+        let overlay = selection_overlay_geometry(
+            &scene,
+            &[
+                ObjectId::new(1).expect("object id"),
+                ObjectId::new(2).expect("object id"),
+            ],
+            |_, _| None,
+        )
+        .expect("selection overlay");
+
+        assert_eq!(
+            overlay.corners,
+            [
+                Vec2::new(150.0, 75.0).expect("corner"),
+                Vec2::new(450.0, 75.0).expect("corner"),
+                Vec2::new(450.0, 225.0).expect("corner"),
+                Vec2::new(150.0, 225.0).expect("corner"),
+            ]
+        );
+        assert_eq!(overlay.anchor, Vec2::new(300.0, 150.0).expect("anchor"));
     }
 
     #[test]
