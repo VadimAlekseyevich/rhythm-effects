@@ -176,8 +176,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-144** — Implement empty-canvas box selection.
 - [x] **AI-145** — Implement Ctrl box-add/toggle selection semantics.
 - [x] **AI-146** — Implement K on a static focused property to create the first key at nearest grid and move playhead there.
-- [ ] **AI-147** — Implement K on an existing resolved key to remove that key.
-- [ ] **AI-148** — Implement K on an animated property without a current key to create one from evaluated value.
+- [x] **AI-147** — Implement K on an existing resolved key to remove that key.
+- [x] **AI-148** — Implement K on an animated property without a current key to create one from evaluated value.
 - [ ] **AI-149** — Implement pointer keyframe drag through continuous time -> musical position -> current-grid snap.
 - [ ] **AI-150** — Implement Esc cancellation for a keyframe drag transaction.
 - [ ] **AI-151** — Implement multi-key drag using one anchor key and identical integer tick delta.

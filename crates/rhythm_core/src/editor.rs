@@ -4,8 +4,9 @@ use crate::{
     ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{Object, Project, ProjectValidationError},
     property::{
-        AnimatableProperty, PropertyAccessError, PropertyKeyframe, insert_property_keyframe,
-        property_base_value, property_keyframe_count, remove_property_keyframe_by_id,
+        AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
+        insert_property_keyframe, property_base_value, property_keyframe_count,
+        remove_property_keyframe_by_id, set_property_base_value,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -78,6 +79,11 @@ pub enum EditCommand {
         property: AnimatableProperty,
         keyframe: PropertyKeyframe,
     },
+    RemovePropertyKeyframe {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe: PropertyKeyframe,
+    },
     SetTempoMap {
         tempo_map: TempoMap,
     },
@@ -94,6 +100,7 @@ impl EditCommand {
             Self::SetOpacityBase { .. } => "SetOpacityBase",
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
             Self::InsertPropertyKeyframe { .. } => "InsertPropertyKeyframe",
+            Self::RemovePropertyKeyframe { .. } => "RemovePropertyKeyframe",
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
     }
@@ -132,6 +139,13 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         property: AnimatableProperty,
         keyframe: PropertyKeyframe,
+    },
+    PropertyKeyframeRemoved {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe: PropertyKeyframe,
+        base_before: Option<PropertyValue>,
+        base_after: Option<PropertyValue>,
     },
     TempoMapChanged {
         before: TempoMap,
@@ -355,6 +369,16 @@ impl ProjectEditor {
         }
 
         let value = property_base_value(&self.project, object_id, property)?;
+        self.create_property_keyframe(object_id, property, tick, value)
+    }
+
+    pub fn create_property_keyframe(
+        &mut self,
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        tick: MusicalTick,
+        value: PropertyValue,
+    ) -> Result<Option<KeyframeId>, EditError> {
         let keyframe_id = self.next_keyframe_id()?;
         let keyframe = PropertyKeyframe {
             id: keyframe_id,
@@ -370,6 +394,19 @@ impl ProjectEditor {
         })?;
 
         Ok(changed.then_some(keyframe_id))
+    }
+
+    pub fn remove_property_keyframe(
+        &mut self,
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe: PropertyKeyframe,
+    ) -> Result<bool, EditError> {
+        self.execute(EditCommand::RemovePropertyKeyframe {
+            object_id,
+            property,
+            keyframe,
+        })
     }
 
     pub fn execute(&mut self, command: EditCommand) -> Result<bool, EditError> {
@@ -684,6 +721,74 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::RemovePropertyKeyframe {
+                object_id,
+                property,
+                keyframe,
+            } => {
+                let keyframe_count = property_keyframe_count(&self.project, object_id, property)?;
+                let base_before = if keyframe_count == 1 {
+                    Some(property_base_value(&self.project, object_id, property)?)
+                } else {
+                    None
+                };
+
+                let removed = remove_property_keyframe_by_id(
+                    &mut self.project,
+                    object_id,
+                    property,
+                    keyframe.id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe.id))?;
+
+                if removed != keyframe {
+                    insert_property_keyframe(&mut self.project, object_id, property, removed)?;
+                    return Err(EditError::HistoryInvariant(
+                        "removed keyframe payload mismatch",
+                    ));
+                }
+
+                let base_after = if keyframe_count == 1 {
+                    set_property_base_value(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        keyframe.value,
+                    )?;
+                    Some(keyframe.value)
+                } else {
+                    None
+                };
+
+                if let Err(error) = self.project.validate() {
+                    if let Some(base_before) = base_before {
+                        let _ = set_property_base_value(
+                            &mut self.project,
+                            object_id,
+                            property,
+                            base_before,
+                        );
+                    }
+                    let _ = insert_property_keyframe(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        keyframe,
+                    );
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Remove Keyframe",
+                    HistoryPayload::PropertyKeyframeRemoved {
+                        object_id,
+                        property,
+                        keyframe,
+                        base_before,
+                        base_after,
+                    },
+                )))
+            }
             EditCommand::SetTempoMap { tempo_map } => {
                 let before = self.project.tempo_map.clone();
                 if before == tempo_map {
@@ -831,6 +936,57 @@ impl ProjectEditor {
             ) => {
                 insert_property_keyframe(&mut self.project, *object_id, *property, *keyframe)?;
             }
+            (
+                HistoryPayload::PropertyKeyframeRemoved {
+                    object_id,
+                    property,
+                    keyframe,
+                    base_before,
+                    base_after,
+                },
+                HistoryDirection::Undo,
+            ) => {
+                if let Some(base_before) = base_before {
+                    set_property_base_value(
+                        &mut self.project,
+                        *object_id,
+                        *property,
+                        *base_before,
+                    )?;
+                }
+                insert_property_keyframe(
+                    &mut self.project,
+                    *object_id,
+                    *property,
+                    *keyframe,
+                )?;
+            }
+            (
+                HistoryPayload::PropertyKeyframeRemoved {
+                    object_id,
+                    property,
+                    keyframe,
+                    base_before: _,
+                    base_after,
+                },
+                HistoryDirection::Redo,
+            ) => {
+                remove_property_keyframe_by_id(
+                    &mut self.project,
+                    *object_id,
+                    *property,
+                    keyframe.id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe.id))?;
+                if let Some(base_after) = base_after {
+                    set_property_base_value(
+                        &mut self.project,
+                        *object_id,
+                        *property,
+                        *base_after,
+                    )?;
+                }
+            }
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
             }
@@ -908,6 +1064,73 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn removing_final_property_keyframe_promotes_removed_value_to_static_base() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+        let keyframe_id = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                crate::property::PropertyValue::Scalar(0.25),
+            )
+            .expect("insert")
+            .expect("keyframe");
+        let keyframe = crate::property::property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            crate::property::AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("keyframe");
+        assert_eq!(keyframe.id, keyframe_id);
+
+        assert_eq!(
+            editor.remove_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                keyframe,
+            ),
+            Ok(true)
+        );
+        assert_eq!(
+            crate::property::property_keyframe_count(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+            ),
+            Ok(0)
+        );
+        assert_eq!(
+            crate::property::property_base_value(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+            ),
+            Ok(crate::property::PropertyValue::Scalar(0.25))
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            crate::property::property_base_value(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+            ),
+            Ok(crate::property::PropertyValue::Scalar(1.0))
+        );
+        assert_eq!(
+            crate::property::property_keyframe_count(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+            ),
+            Ok(1)
+        );
     }
 
     #[test]

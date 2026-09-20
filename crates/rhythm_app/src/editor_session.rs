@@ -3,7 +3,10 @@ use std::collections::HashSet;
 use rhythm_core::{
     editor::{EditError, ProjectEditor},
     ids::{KeyframeId, ObjectId},
-    property::AnimatableProperty,
+    property::{
+        AnimatableProperty, evaluate_property_at_tick, property_keyframe_at_tick,
+        property_keyframe_count,
+    },
     time::{
         BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
         snap_tick_position_to_grid,
@@ -109,7 +112,7 @@ impl EditorSession {
             return Ok(false);
         };
 
-        let resolved = {
+        let (resolved_tick, resolved_time) = {
             let project = editor.project();
             let Ok(continuous_tick) = project
                 .tempo_map
@@ -129,16 +132,55 @@ impl EditorSession {
             (tick, project_time)
         };
 
-        let Some(keyframe_id) = editor.create_first_property_keyframe(
+        if let Some(existing) = property_keyframe_at_tick(
+            editor.project(),
             focused.object_id,
             focused.property,
-            resolved.0,
+            resolved_tick,
+        )? {
+            let changed = editor.remove_property_keyframe(
+                focused.object_id,
+                focused.property,
+                existing,
+            )?;
+            if changed {
+                self.selected_keyframes.remove(&existing.id);
+                self.playhead = resolved_time;
+            }
+            return Ok(changed);
+        }
+
+        let value = if property_keyframe_count(
+            editor.project(),
+            focused.object_id,
+            focused.property,
+        )? == 0
+        {
+            rhythm_core::property::property_base_value(
+                editor.project(),
+                focused.object_id,
+                focused.property,
+            )?
+        } else {
+            evaluate_property_at_tick(
+                editor.project(),
+                focused.object_id,
+                focused.property,
+                resolved_tick.get() as f64,
+            )?
+        };
+
+        let Some(keyframe_id) = editor.create_property_keyframe(
+            focused.object_id,
+            focused.property,
+            resolved_tick,
+            value,
         )?
         else {
             return Ok(false);
         };
 
-        self.playhead = resolved.1;
+        self.playhead = resolved_time;
         self.select_only_keyframe(keyframe_id);
         Ok(true)
     }
@@ -517,6 +559,161 @@ mod tests {
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000),)
         );
+    }
+
+    #[test]
+    fn k_on_existing_resolved_key_removes_it() {
+        use rhythm_core::{
+            animation::{Animated, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            ids::{KeyframeId, ObjectId},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            property::{AnimatableProperty, property_base_value, property_keyframe_count},
+            time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = Project::new(
+            "Remove Key",
+            ProjectSettings::default(),
+            TempoMap::with_initial_tempo(
+                GridOffsetNs::new(0),
+                BpmMicros::new(120_000_000).expect("valid BPM"),
+                TimeSignature::default(),
+            ),
+        );
+        project.composition.objects.push(Object {
+            id: object_id,
+            name: "Rectangle".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(Vec2::new(0.0, 0.0).expect("position")),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::with_keyframes(
+                    1.0,
+                    vec![Keyframe::new(
+                        KeyframeId::new(2).expect("key id"),
+                        MusicalTick::new(240),
+                        0.4,
+                        Interpolation::Linear,
+                    )],
+                )
+                .expect("keys"),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(100.0, 100.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 3;
+
+        let mut editor = rhythm_core::editor::ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(120_000_000));
+        session.focus_property(object_id, AnimatableProperty::Opacity);
+
+        assert_eq!(session.keyframe_action(&mut editor), Ok(true));
+        assert_eq!(
+            property_keyframe_count(editor.project(), object_id, AnimatableProperty::Opacity),
+            Ok(0)
+        );
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::Opacity),
+            Ok(rhythm_core::property::PropertyValue::Scalar(0.4))
+        );
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+    }
+
+    #[test]
+    fn k_on_animated_property_without_key_inserts_evaluated_resolved_value() {
+        use rhythm_core::{
+            animation::{Animated, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            ids::{KeyframeId, ObjectId},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = Project::new(
+            "Insert Evaluated Key",
+            ProjectSettings::default(),
+            TempoMap::with_initial_tempo(
+                GridOffsetNs::new(0),
+                BpmMicros::new(120_000_000).expect("valid BPM"),
+                TimeSignature::default(),
+            ),
+        );
+        project.composition.objects.push(Object {
+            id: object_id,
+            name: "Rectangle".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::with_keyframes(
+                    Vec2::new(0.0, 0.0).expect("base"),
+                    vec![
+                        Keyframe::new(
+                            KeyframeId::new(2).expect("key id"),
+                            MusicalTick::new(0),
+                            Vec2::new(0.0, 0.0).expect("position"),
+                            Interpolation::Linear,
+                        ),
+                        Keyframe::new(
+                            KeyframeId::new(3).expect("key id"),
+                            MusicalTick::new(480),
+                            Vec2::new(100.0, 0.0).expect("position"),
+                            Interpolation::Linear,
+                        ),
+                    ],
+                )
+                .expect("keys"),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(100.0, 100.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 4;
+
+        let mut editor = rhythm_core::editor::ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(130_000_000));
+        session.focus_property(object_id, AnimatableProperty::Position);
+
+        assert_eq!(session.keyframe_action(&mut editor), Ok(true));
+        let keyframe = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Position,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("inserted key");
+        assert_eq!(
+            keyframe.value,
+            PropertyValue::Vec2(Vec2::new(50.0, 0.0).expect("midpoint"))
+        );
+        assert_eq!(keyframe.id.get(), 4);
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
     }
 
     #[test]
