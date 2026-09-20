@@ -425,14 +425,25 @@ enum DirectPositionTarget {
 
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
-    Position { object_id: ObjectId, before: Vec2 },
-    Positions { before: Vec<(ObjectId, Vec2)> },
+    Position {
+        object_id: ObjectId,
+        before: Vec2,
+    },
+    Positions {
+        before: Vec<(ObjectId, Vec2)>,
+    },
     DirectPositions {
         targets: Vec<DirectPositionTarget>,
         next_entity_id_before: u64,
     },
-    Scale { object_id: ObjectId, before: Vec2 },
-    Rotation { object_id: ObjectId, before: f32 },
+    Scale {
+        object_id: ObjectId,
+        before: Vec2,
+    },
+    Rotation {
+        object_id: ObjectId,
+        before: f32,
+    },
     PropertyKeyframeValue {
         object_id: ObjectId,
         property: AnimatableProperty,
@@ -656,12 +667,8 @@ impl ProjectEditor {
             return Err(EditError::HistoryInvariant("transaction already active"));
         }
 
-        let existing = crate::property::property_keyframe_at_tick(
-            &self.project,
-            object_id,
-            property,
-            tick,
-        )?;
+        let existing =
+            crate::property::property_keyframe_at_tick(&self.project, object_id, property, tick)?;
         let (keyframe_id, inserted_next_entity_id_before) = if let Some(existing) = existing {
             (existing.id, None)
         } else {
@@ -721,14 +728,8 @@ impl ProjectEditor {
             }
         };
 
-        set_property_keyframe_value(
-            &mut self.project,
-            object_id,
-            property,
-            keyframe_id,
-            value,
-        )?
-        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+        set_property_keyframe_value(&mut self.project, object_id, property, keyframe_id, value)?
+            .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
         Ok(())
     }
 
@@ -1241,13 +1242,9 @@ impl ProjectEditor {
                 initial_value,
                 inserted_next_entity_id_before,
             } => {
-                let after = property_keyframe_by_id(
-                    &self.project,
-                    object_id,
-                    property,
-                    keyframe_id,
-                )?
-                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                let after =
+                    property_keyframe_by_id(&self.project, object_id, property, keyframe_id)?
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
 
                 if before.as_ref().is_some_and(|before| *before == after) {
                     return Ok(false);
@@ -2567,12 +2564,7 @@ impl ProjectEditor {
                     .ok_or(EditError::KeyframeNotFound(after.id))?;
                 }
                 (None, HistoryDirection::Redo) => {
-                    insert_property_keyframe(
-                        &mut self.project,
-                        *object_id,
-                        *property,
-                        *after,
-                    )?;
+                    insert_property_keyframe(&mut self.project, *object_id, *property, *after)?;
                 }
             },
             (HistoryPayload::PropertyKeyframeInterpolationsChanged { records }, direction) => {
