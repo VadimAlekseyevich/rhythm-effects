@@ -204,7 +204,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-169** — Implement middle-mouse viewport pan.
 - [x] **AI-170** — Implement mouse-wheel viewport zoom around pointer.
 - [x] **AI-171** — Implement Fit Composition and Frame Selection actions.
-- [ ] **AI-172** — Render selected-object bounds and center anchor marker as editor-only overlays.
+- [x] **AI-172** — Render selected-object bounds and center anchor marker as editor-only overlays.
 - [ ] **AI-173** — Implement Position direct drag as one transaction.
 - [ ] **AI-174** — Implement Shift axis constraint for Position drag.
 - [ ] **AI-175** — Implement Scale corner handles for a single object.
