@@ -804,11 +804,7 @@ fn draw_timeline_rows(
                         let animatable_property = property.animatable_property();
                         let row_response = ui.interact(
                             rect,
-                            egui::Id::new((
-                                "timeline_property_row",
-                                object_id.get(),
-                                *property,
-                            )),
+                            egui::Id::new(("timeline_property_row", object_id.get(), *property)),
                             egui::Sense::click(),
                         );
                         if row_response.clicked() {

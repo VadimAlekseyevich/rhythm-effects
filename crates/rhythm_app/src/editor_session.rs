@@ -114,14 +114,11 @@ impl EditorSession {
 
         let (resolved_tick, resolved_time) = {
             let project = editor.project();
-            let Ok(continuous_tick) = project
-                .tempo_map
-                .continuous_tick_position(self.playhead)
+            let Ok(continuous_tick) = project.tempo_map.continuous_tick_position(self.playhead)
             else {
                 return Ok(false);
             };
-            let Ok(tick) =
-                snap_tick_position_to_grid(continuous_tick, self.authoring_division)
+            let Ok(tick) = snap_tick_position_to_grid(continuous_tick, self.authoring_division)
             else {
                 return Ok(false);
             };
