@@ -384,6 +384,7 @@ impl EditorSession {
         self.selected_objects.iter().copied().collect()
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn is_object_selected(&self, object_id: ObjectId) -> bool {
         self.selected_objects.contains(&object_id)
@@ -1440,8 +1441,8 @@ mod tests {
         assert_eq!(session.viewport_zoom(), 2.0);
         assert_eq!(session.viewport_pan_points(), [-100.0, -50.0]);
 
-        let old_screen_x = -100.0 + 100.0 * 2.0;
-        let old_screen_y = -50.0 + 50.0 * 2.0;
+        let old_screen_x: f32 = -100.0 + 100.0 * 2.0;
+        let old_screen_y: f32 = -50.0 + 50.0 * 2.0;
         assert!((old_screen_x - 100.0).abs() < 0.0001);
         assert!((old_screen_y - 50.0).abs() < 0.0001);
     }
