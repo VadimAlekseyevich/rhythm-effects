@@ -222,7 +222,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-187** — Implement final-key removal returning the property to static using removed-key value.
 - [x] **AI-188** — Implement multi-selection mixed-value transform rows.
 - [x] **AI-189** — Implement Rectangle Inspector controls.
-- [ ] **AI-190** — Implement Ellipse Inspector controls.
+- [x] **AI-190** — Implement Ellipse Inspector controls.
 - [ ] **AI-191** — Implement Image source/intrinsic-dimensions/Relink Inspector controls.
 - [ ] **AI-192** — Implement Text content/font/weight/style/size/alignment/color Inspector controls.
 - [ ] **AI-193** — Implement Effect stack Inspector with enable/reorder/remove.
