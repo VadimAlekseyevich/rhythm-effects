@@ -186,7 +186,16 @@ pub fn draw_editor_shell(
                                         session.queue_object_locked(object.id, locked);
                                     }
 
-                                    ui.label(&object.name);
+                                    let selected = session.is_object_selected(object.id);
+                                    let response = ui.selectable_label(selected, &object.name);
+                                    if response.clicked() {
+                                        let ctrl = ui.input(|input| input.modifiers.ctrl);
+                                        if ctrl {
+                                            session.toggle_object_selection(object.id);
+                                        } else {
+                                            session.replace_object_selection(Some(object.id));
+                                        }
+                                    }
                                 });
                             });
                         }
@@ -202,7 +211,34 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.heading("Inspector");
             ui.separator();
-            ui.label("Selected object properties will appear here.");
+
+            let selected = session.selected_object_ids();
+            match selected.as_slice() {
+                [] => {
+                    ui.label("No object selected");
+                    ui.label("Select an object in the viewport or Object list.");
+                }
+                [object_id] => {
+                    if let Some(object) = project
+                        .composition
+                        .objects
+                        .iter()
+                        .find(|object| object.id == *object_id)
+                    {
+                        ui.heading(&object.name);
+                        let visibility = if object.visible { "Visible" } else { "Hidden" };
+                        let lock = if object.locked { "Locked" } else { "Unlocked" };
+                        ui.label(format!("{visibility} · {lock}"));
+                    } else {
+                        ui.label("Selected object is unavailable");
+                    }
+                }
+                _ => {
+                    ui.heading(format!("{} objects selected", selected.len()));
+                    ui.label("Common transform controls will appear here.");
+                }
+            }
+
             ui.add_space(16.0);
             ui.separator();
             ui.heading("Diagnostics");
