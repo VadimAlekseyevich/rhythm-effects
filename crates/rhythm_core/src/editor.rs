@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    animation::{AnimationInvariantError, Keyframe},
+    animation::{AnimationInvariantError, Interpolation, Keyframe},
     domain::Vec2,
     ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{Object, Project, ProjectValidationError},
@@ -9,7 +9,7 @@ use crate::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
         insert_property_keyframe, locate_property_keyframe, property_base_value,
         property_keyframe_by_id, property_keyframe_count, remove_property_keyframe_by_id,
-        set_property_base_value,
+        set_property_base_value, set_property_keyframe_interpolation,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -102,6 +102,15 @@ pub struct PropertyBaseChange {
     pub after: PropertyValue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PropertyKeyframeInterpolationRecord {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub keyframe_id: KeyframeId,
+    pub before: Interpolation,
+    pub after: Interpolation,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     AddObject {
@@ -145,6 +154,10 @@ pub enum EditCommand {
     MovePropertyKeyframes {
         moves: Vec<PropertyKeyframeMove>,
     },
+    SetPropertyKeyframeInterpolations {
+        keyframe_ids: Vec<KeyframeId>,
+        interpolation: Interpolation,
+    },
     SetTempoMap {
         tempo_map: TempoMap,
     },
@@ -165,6 +178,7 @@ impl EditCommand {
             Self::InsertPropertyKeyframes { .. } => "InsertPropertyKeyframes",
             Self::DeletePropertyKeyframes { .. } => "DeletePropertyKeyframes",
             Self::MovePropertyKeyframes { .. } => "MovePropertyKeyframes",
+            Self::SetPropertyKeyframeInterpolations { .. } => "SetPropertyKeyframeInterpolations",
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
     }
@@ -186,6 +200,11 @@ pub enum HistoryPayload {
         after: String,
     },
     PositionBaseChanged {
+        object_id: ObjectId,
+        before: Vec2,
+        after: Vec2,
+    },
+    ScaleBaseChanged {
         object_id: ObjectId,
         before: Vec2,
         after: Vec2,
@@ -220,6 +239,9 @@ pub enum HistoryPayload {
     },
     PropertyKeyframesMoved {
         records: Vec<PropertyKeyframeMoveRecord>,
+    },
+    PropertyKeyframeInterpolationsChanged {
+        records: Vec<PropertyKeyframeInterpolationRecord>,
     },
     TempoMapChanged {
         before: TempoMap,
@@ -364,6 +386,7 @@ impl History {
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
     ObjectPosition { object_id: ObjectId, before: Vec2 },
+    ObjectScale { object_id: ObjectId, before: Vec2 },
 }
 
 #[derive(Debug)]
@@ -543,6 +566,17 @@ impl ProjectEditor {
         self.execute(EditCommand::MovePropertyKeyframes { moves })
     }
 
+    pub fn set_property_keyframe_interpolations(
+        &mut self,
+        keyframe_ids: Vec<KeyframeId>,
+        interpolation: Interpolation,
+    ) -> Result<bool, EditError> {
+        self.execute(EditCommand::SetPropertyKeyframeInterpolations {
+            keyframe_ids,
+            interpolation,
+        })
+    }
+
     pub fn execute(&mut self, command: EditCommand) -> Result<bool, EditError> {
         if self.transaction.is_some() {
             return Err(EditError::HistoryInvariant(
@@ -575,7 +609,7 @@ impl ProjectEditor {
     pub fn update_position_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
             Some(ActiveTransaction::ObjectPosition { object_id, .. }) => object_id,
-            None => {
+            _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active position transaction",
                 ));
@@ -586,6 +620,37 @@ impl ProjectEditor {
         *self.project.composition.objects[index]
             .transform
             .position
+            .base_value_mut() = value;
+        Ok(())
+    }
+
+    pub fn begin_scale_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let index = self.object_index(object_id)?;
+        let before = *self.project.composition.objects[index]
+            .transform
+            .scale
+            .base_value();
+
+        self.transaction = Some(ActiveTransaction::ObjectScale { object_id, before });
+        Ok(())
+    }
+
+    pub fn update_scale_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
+        let object_id = match self.transaction {
+            Some(ActiveTransaction::ObjectScale { object_id, .. }) => object_id,
+            _ => {
+                return Err(EditError::HistoryInvariant("no active scale transaction"));
+            }
+        };
+
+        let index = self.object_index(object_id)?;
+        *self.project.composition.objects[index]
+            .transform
+            .scale
             .base_value_mut() = value;
         Ok(())
     }
@@ -617,6 +682,27 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::ObjectScale { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                let after = *self.project.composition.objects[index]
+                    .transform
+                    .scale
+                    .base_value();
+
+                if before == after {
+                    return Ok(false);
+                }
+
+                self.history.push(PendingHistoryEntry::new(
+                    "Scale Object",
+                    HistoryPayload::ScaleBaseChanged {
+                        object_id,
+                        before,
+                        after,
+                    },
+                ));
+                Ok(true)
+            }
         }
     }
 
@@ -631,6 +717,13 @@ impl ProjectEditor {
                 *self.project.composition.objects[index]
                     .transform
                     .position
+                    .base_value_mut() = before;
+            }
+            ActiveTransaction::ObjectScale { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .scale
                     .base_value_mut() = before;
             }
         }
@@ -1277,6 +1370,112 @@ impl ProjectEditor {
                     HistoryPayload::PropertyKeyframesMoved { records },
                 )))
             }
+            EditCommand::SetPropertyKeyframeInterpolations {
+                keyframe_ids,
+                interpolation,
+            } => {
+                let mut unique_ids = HashSet::with_capacity(keyframe_ids.len());
+                let mut records = Vec::with_capacity(keyframe_ids.len());
+
+                for keyframe_id in keyframe_ids {
+                    if !unique_ids.insert(keyframe_id) {
+                        continue;
+                    }
+
+                    let located = locate_property_keyframe(&self.project, keyframe_id)
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                    if located.keyframe.interpolation == interpolation {
+                        continue;
+                    }
+
+                    records.push(PropertyKeyframeInterpolationRecord {
+                        object_id: located.object_id,
+                        property: located.property,
+                        keyframe_id,
+                        before: located.keyframe.interpolation,
+                        after: interpolation,
+                    });
+                }
+
+                if records.is_empty() {
+                    return Ok(None);
+                }
+
+                for (index, record) in records.iter().enumerate() {
+                    match set_property_keyframe_interpolation(
+                        &mut self.project,
+                        record.object_id,
+                        record.property,
+                        record.keyframe_id,
+                        record.after,
+                    ) {
+                        Ok(Some(before)) if before == record.before => {}
+                        Ok(Some(before)) => {
+                            let _ = set_property_keyframe_interpolation(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.keyframe_id,
+                                before,
+                            );
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::HistoryInvariant(
+                                "keyframe interpolation source mismatch",
+                            ));
+                        }
+                        Ok(None) => {
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::KeyframeNotFound(record.keyframe_id));
+                        }
+                        Err(error) => {
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::PropertyAccess(error));
+                        }
+                    }
+                }
+
+                if let Err(error) = self.project.validate() {
+                    for record in records.iter().rev() {
+                        let _ = set_property_keyframe_interpolation(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.keyframe_id,
+                            record.before,
+                        );
+                    }
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Change Keyframe Easing",
+                    HistoryPayload::PropertyKeyframeInterpolationsChanged { records },
+                )))
+            }
             EditCommand::SetTempoMap { tempo_map } => {
                 let before = self.project.tempo_map.clone();
                 if before == tempo_map {
@@ -1357,6 +1556,21 @@ impl ProjectEditor {
                     .base_value_mut() = value;
             }
             (
+                HistoryPayload::ScaleBaseChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let value = *direction.pick(before, after);
+                let index = self.object_index(*object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .scale
+                    .base_value_mut() = value;
+            }
+            (
                 HistoryPayload::OpacityBaseChanged {
                     object_id,
                     before,
@@ -1430,7 +1644,7 @@ impl ProjectEditor {
                     property,
                     keyframe,
                     base_before,
-                    base_after,
+                    base_after: _,
                 },
                 HistoryDirection::Undo,
             ) => {
@@ -1465,10 +1679,7 @@ impl ProjectEditor {
                     set_property_base_value(&mut self.project, *object_id, *property, *base_after)?;
                 }
             }
-            (
-                HistoryPayload::PropertyKeyframesInserted { records },
-                direction,
-            ) => match direction {
+            (HistoryPayload::PropertyKeyframesInserted { records }, direction) => match direction {
                 HistoryDirection::Undo => {
                     for record in records.iter().rev() {
                         remove_property_keyframe_by_id(
@@ -1614,6 +1825,27 @@ impl ProjectEditor {
                     }
                 }
             },
+            (HistoryPayload::PropertyKeyframeInterpolationsChanged { records }, direction) => {
+                for record in records {
+                    let (expected, target) = match direction {
+                        HistoryDirection::Undo => (record.after, record.before),
+                        HistoryDirection::Redo => (record.before, record.after),
+                    };
+                    let observed = set_property_keyframe_interpolation(
+                        &mut self.project,
+                        record.object_id,
+                        record.property,
+                        record.keyframe_id,
+                        target,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(record.keyframe_id))?;
+                    if observed != expected {
+                        return Err(EditError::HistoryInvariant(
+                            "keyframe interpolation history mismatch",
+                        ));
+                    }
+                }
+            }
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
             }
@@ -1757,6 +1989,92 @@ mod tests {
             )
             .expect("property")
             .is_none()
+        );
+    }
+
+    #[test]
+    fn batch_keyframe_interpolation_change_is_one_undoable_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                crate::property::PropertyValue::Scalar(0.1),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                crate::property::PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("second");
+        let third = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                crate::property::PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("third");
+        let history_before = editor.history_len();
+
+        assert_eq!(
+            editor.set_property_keyframe_interpolations(vec![first, second], Interpolation::Hold,),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), history_before + 1);
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), second)
+                .expect("second")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), third)
+                .expect("third")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), second)
+                .expect("second")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
         );
     }
 
@@ -2215,6 +2533,72 @@ mod tests {
                 .x(),
             0.0
         );
+    }
+
+    #[test]
+    fn one_scale_drag_transaction_creates_one_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_scale_transaction(object_id)
+            .expect("begin scale transaction");
+        for scale in [(1.25, 0.75), (1.5, 0.5), (-2.0, 1.25)] {
+            editor
+                .update_scale_transaction(Vec2::new(scale.0, scale.1).expect("finite scale"))
+                .expect("preview scale");
+        }
+
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(editor.commit_transaction(), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(-2.0, 1.25).expect("committed scale")
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(1.0, 1.0).expect("restored scale")
+        );
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(-2.0, 1.25).expect("redone scale")
+        );
+    }
+
+    #[test]
+    fn cancelled_scale_transaction_restores_before_state() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_scale_transaction(object_id)
+            .expect("begin scale transaction");
+        editor
+            .update_scale_transaction(Vec2::new(3.0, -0.5).expect("finite scale"))
+            .expect("preview scale");
+        assert_eq!(editor.cancel_transaction(), Ok(true));
+
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(1.0, 1.0).expect("restored scale")
+        );
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]
