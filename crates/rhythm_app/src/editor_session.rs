@@ -92,6 +92,13 @@ struct TimelineBoxSelection {
     ctrl_toggle: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportBoxSelection {
+    start: [f32; 2],
+    current: [f32; 2],
+}
+
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyframeDragMember {
     pub object_id: ObjectId,
@@ -154,6 +161,7 @@ pub struct EditorSession {
     pending_keyframe_interpolation: Option<Interpolation>,
     keyframe_clipboard: Option<KeyframeCopyPacket>,
     timeline_box_selection: Option<TimelineBoxSelection>,
+    viewport_box_selection: Option<ViewportBoxSelection>,
 }
 
 impl Default for EditorSession {
@@ -172,6 +180,7 @@ impl Default for EditorSession {
             pending_keyframe_interpolation: None,
             keyframe_clipboard: None,
             timeline_box_selection: None,
+            viewport_box_selection: None,
         }
     }
 }
@@ -243,6 +252,44 @@ impl EditorSession {
             self.selected_objects.insert(object_id);
         }
         true
+    }
+
+    pub fn replace_object_selection_many(
+        &mut self,
+        object_ids: impl IntoIterator<Item = ObjectId>,
+    ) -> bool {
+        let replacement: HashSet<_> = object_ids.into_iter().collect();
+        if replacement == self.selected_objects {
+            return false;
+        }
+
+        self.selected_objects = replacement;
+        true
+    }
+
+    pub fn begin_viewport_box_selection(&mut self, start: [f32; 2]) {
+        self.viewport_box_selection = Some(ViewportBoxSelection {
+            start,
+            current: start,
+        });
+    }
+
+    pub fn update_viewport_box_selection(&mut self, current: [f32; 2]) {
+        if let Some(selection) = self.viewport_box_selection.as_mut() {
+            selection.current = current;
+        }
+    }
+
+    #[must_use]
+    pub fn viewport_box_selection(&self) -> Option<([f32; 2], [f32; 2])> {
+        self.viewport_box_selection
+            .map(|selection| (selection.start, selection.current))
+    }
+
+    pub fn take_viewport_box_selection(&mut self) -> Option<([f32; 2], [f32; 2])> {
+        self.viewport_box_selection
+            .take()
+            .map(|selection| (selection.start, selection.current))
     }
 
     #[must_use]
@@ -1162,6 +1209,31 @@ mod tests {
         assert!(session.replace_object_selection(None));
         assert!(session.selected_object_ids().is_empty());
         assert!(!session.replace_object_selection(None));
+    }
+
+    #[test]
+    fn viewport_box_selection_lifecycle_and_multi_replace_are_stable() {
+        let first = ObjectId::new(31).expect("object id");
+        let second = ObjectId::new(32).expect("object id");
+        let mut session = EditorSession::default();
+
+        session.begin_viewport_box_selection([10.0, 20.0]);
+        session.update_viewport_box_selection([80.0, 90.0]);
+        assert_eq!(
+            session.viewport_box_selection(),
+            Some(([10.0, 20.0], [80.0, 90.0]))
+        );
+        assert_eq!(
+            session.take_viewport_box_selection(),
+            Some(([10.0, 20.0], [80.0, 90.0]))
+        );
+        assert!(session.viewport_box_selection().is_none());
+
+        assert!(session.replace_object_selection_many([first, second]));
+        assert!(session.is_object_selected(first));
+        assert!(session.is_object_selected(second));
+        assert_eq!(session.selected_object_ids().len(), 2);
+        assert!(!session.replace_object_selection_many([second, first]));
     }
 
     #[test]
