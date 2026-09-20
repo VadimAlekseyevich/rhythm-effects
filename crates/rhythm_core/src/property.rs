@@ -453,17 +453,28 @@ pub(crate) fn set_property_keyframe_interpolation(
     keyframe_id: KeyframeId,
     interpolation: Interpolation,
 ) -> Result<Option<Interpolation>, PropertyAccessError> {
-    let keyframe = match animated_mut(project, object_id, property)? {
-        AnimatedMut::Scalar(animated) => animated.keyframe_by_id_mut(keyframe_id),
-        AnimatedMut::Vec2(animated) => animated.keyframe_by_id_mut(keyframe_id),
-        AnimatedMut::Color(animated) => animated.keyframe_by_id_mut(keyframe_id),
-    };
+    fn replace_interpolation<T>(
+        keyframe: Option<&mut Keyframe<T>>,
+        interpolation: Interpolation,
+    ) -> Option<Interpolation> {
+        keyframe.map(|keyframe| {
+            let before = keyframe.interpolation;
+            keyframe.interpolation = interpolation;
+            before
+        })
+    }
 
-    Ok(keyframe.map(|keyframe| {
-        let before = keyframe.interpolation;
-        keyframe.interpolation = interpolation;
-        before
-    }))
+    Ok(match animated_mut(project, object_id, property)? {
+        AnimatedMut::Scalar(animated) => {
+            replace_interpolation(animated.keyframe_by_id_mut(keyframe_id), interpolation)
+        }
+        AnimatedMut::Vec2(animated) => {
+            replace_interpolation(animated.keyframe_by_id_mut(keyframe_id), interpolation)
+        }
+        AnimatedMut::Color(animated) => {
+            replace_interpolation(animated.keyframe_by_id_mut(keyframe_id), interpolation)
+        }
+    })
 }
 
 fn animated_ref(
