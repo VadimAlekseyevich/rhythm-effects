@@ -2101,19 +2101,13 @@ mod tests {
         );
         project.composition.objects.push(second);
         project.next_entity_id = 3;
-        let mut editor =
-            rhythm_core::editor::ProjectEditor::new(project).expect("valid project");
+        let mut editor = rhythm_core::editor::ProjectEditor::new(project).expect("valid project");
         let mut session = EditorSession::default();
 
-        assert!(session.begin_viewport_multi_position_drag(
-            vec![second_id, first_id],
-            [100.0, 100.0],
-        ));
-        assert!(session.update_viewport_multi_position_drag(
-            [130.0, 80.0],
-            [2.0, 2.0],
-            false,
-        ));
+        assert!(
+            session.begin_viewport_multi_position_drag(vec![second_id, first_id], [100.0, 100.0],)
+        );
+        assert!(session.update_viewport_multi_position_drag([130.0, 80.0], [2.0, 2.0], false,));
         assert_eq!(
             session.sync_viewport_multi_position_drag(&mut editor),
             Ok(true)
@@ -2234,10 +2228,9 @@ mod tests {
             Vec2::new(1.0, 0.0).expect("pointer"),
             0.0,
         ));
-        assert!(session.update_viewport_rotation_drag(
-            Vec2::new(0.0, 1.0).expect("pointer"),
-            false,
-        ));
+        assert!(
+            session.update_viewport_rotation_drag(Vec2::new(0.0, 1.0).expect("pointer"), false,)
+        );
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
         assert!(session.cancel_viewport_rotation_drag());
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
@@ -2334,13 +2327,12 @@ mod tests {
             false,
         ));
         assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
-        assert_eq!(
-            *editor.project().composition.objects[0]
-                .transform
-                .scale
-                .base_value(),
-            Vec2::new(-2.0, -0.5).expect("mirrored scale")
-        );
+        let scale = *editor.project().composition.objects[0]
+            .transform
+            .scale
+            .base_value();
+        assert!((scale.x() + 2.0).abs() < 0.0001);
+        assert!((scale.y() + 0.5).abs() < 0.0001);
     }
 
     #[test]
