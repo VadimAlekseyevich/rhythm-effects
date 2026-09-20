@@ -291,6 +291,7 @@ pub fn draw_editor_shell(
             };
 
             if response.clicked()
+                && !session.viewport_multi_position_drag_active()
                 && let Some(pointer) = response.interact_pointer_pos()
                 && let Some(composition_point) = screen_to_composition(pointer)
                 && let Ok(scene) =
@@ -324,7 +325,8 @@ pub fn draw_editor_shell(
                     rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
             {
                 let ctrl = ui.input(|input| input.modifiers.ctrl);
-                let selected = session.selected_object_ids();
+                let mut selected = session.selected_object_ids();
+                selected.sort_by_key(|object_id| object_id.get());
                 let overlay = if selected.len() == 1 {
                     selection_overlay_geometry(&scene, &selected, |_, _| None)
                 } else {
@@ -407,7 +409,32 @@ pub fn draw_editor_shell(
                 {
                     let picked =
                         pick_topmost_object(project, &scene, composition_origin, |_, _| None);
-                    if !ctrl
+                    let multi_move_started = if !ctrl
+                        && selected.len() > 1
+                        && picked.is_some_and(|object_id| selected.contains(&object_id))
+                        && selected.iter().all(|selected_id| {
+                            project
+                                .composition
+                                .objects
+                                .iter()
+                                .find(|object| object.id == *selected_id)
+                                .is_some_and(|object| {
+                                    object.visible
+                                        && !object.locked
+                                        && object.transform.position.keyframes().is_empty()
+                                })
+                        })
+                    {
+                        session.begin_viewport_multi_position_drag(
+                            selected.clone(),
+                            [origin.x, origin.y],
+                        )
+                    } else {
+                        false
+                    };
+
+                    if !multi_move_started
+                        && !ctrl
                         && selected.len() == 1
                         && picked == selected.first().copied()
                         && let Some(object_id) = picked
@@ -423,7 +450,7 @@ pub fn draw_editor_shell(
                             [origin.x, origin.y],
                             *object.transform.position.base_value(),
                         );
-                    } else if picked.is_none() {
+                    } else if !multi_move_started && picked.is_none() {
                         session.begin_viewport_box_selection([origin.x, origin.y]);
                     }
                 }
@@ -449,6 +476,18 @@ pub fn draw_editor_shell(
                         ui.input(|input| input.modifiers.shift),
                     );
                 }
+            } else if primary_down
+                && let Some(pointer) = pointer_pos
+                && session.viewport_multi_position_drag_active()
+            {
+                session.update_viewport_multi_position_drag(
+                    [pointer.x, pointer.y],
+                    [
+                        composition_size.x / response.rect.width(),
+                        composition_size.y / response.rect.height(),
+                    ],
+                    ui.input(|input| input.modifiers.shift),
+                );
             } else if primary_down
                 && let Some(pointer) = pointer_pos
                 && session.viewport_position_drag_active()
@@ -521,9 +560,28 @@ pub fn draw_editor_shell(
                 session.finish_viewport_scale_drag();
             }
 
+            let multi_position_drag_released = primary_released
+                && !rotation_drag_released
+                && !scale_drag_released
+                && session.viewport_multi_position_drag_active();
+            if multi_position_drag_released {
+                if let Some(pointer) = pointer_pos {
+                    session.update_viewport_multi_position_drag(
+                        [pointer.x, pointer.y],
+                        [
+                            composition_size.x / response.rect.width(),
+                            composition_size.y / response.rect.height(),
+                        ],
+                        ui.input(|input| input.modifiers.shift),
+                    );
+                }
+                session.finish_viewport_multi_position_drag();
+            }
+
             let position_drag_released = primary_released
                 && !rotation_drag_released
                 && !scale_drag_released
+                && !multi_position_drag_released
                 && session.viewport_position_drag_active();
             if position_drag_released {
                 if let Some(pointer) = pointer_pos {
@@ -542,6 +600,7 @@ pub fn draw_editor_shell(
             if primary_released
                 && !rotation_drag_released
                 && !scale_drag_released
+                && !multi_position_drag_released
                 && !position_drag_released
                 && let Some((start, current)) = session.take_viewport_box_selection()
             {
