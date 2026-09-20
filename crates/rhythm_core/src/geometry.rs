@@ -61,7 +61,8 @@ pub fn hit_test_ellipse(
         return false;
     }
 
-    let Some(local_point) = inverse_object_transform_point(composition_point, transform, size) else {
+    let Some(local_point) = inverse_object_transform_point(composition_point, transform, size)
+    else {
         return false;
     };
 
@@ -87,8 +88,7 @@ pub fn hit_test_rectangle(
         return false;
     };
 
-    (0.0..=size.x()).contains(&local_point.x())
-        && (0.0..=size.y()).contains(&local_point.y())
+    (0.0..=size.x()).contains(&local_point.x()) && (0.0..=size.y()).contains(&local_point.y())
 }
 
 #[cfg(test)]
