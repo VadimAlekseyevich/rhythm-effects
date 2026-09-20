@@ -11,6 +11,7 @@ use rhythm_core::{
 };
 use rhythm_engine::scene_eval::{EvaluatedObject, EvaluatedObjectContent, EvaluatedScene};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RuntimeHitBounds {
     ImageIntrinsicSize(Vec2),
