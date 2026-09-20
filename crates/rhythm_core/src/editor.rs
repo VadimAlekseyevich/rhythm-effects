@@ -4,7 +4,10 @@ use crate::{
     animation::{AnimationInvariantError, Interpolation, Keyframe},
     domain::Vec2,
     ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
-    project::{Object, Project, ProjectValidationError},
+    project::{
+        FontStyle, FontWeight, Object, ObjectContent, Project, ProjectValidationError, TextAlignment,
+        TextObject,
+    },
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
         insert_property_keyframe, locate_property_keyframe, property_base_value,
@@ -131,6 +134,30 @@ pub enum EditCommand {
         object_id: ObjectId,
         name: String,
     },
+    SetTextContent {
+        object_id: ObjectId,
+        text: String,
+    },
+    SetTextFontFamily {
+        object_id: ObjectId,
+        family: String,
+    },
+    SetTextFontWeight {
+        object_id: ObjectId,
+        weight: FontWeight,
+    },
+    SetTextFontStyle {
+        object_id: ObjectId,
+        style: FontStyle,
+    },
+    SetTextFontSize {
+        object_id: ObjectId,
+        font_size: f32,
+    },
+    SetTextAlignment {
+        object_id: ObjectId,
+        alignment: TextAlignment,
+    },
     SetObjectVisible {
         object_id: ObjectId,
         visible: bool,
@@ -191,6 +218,12 @@ impl EditCommand {
             Self::AddObject { .. } => "AddObject",
             Self::DeleteObject { .. } => "DeleteObject",
             Self::RenameObject { .. } => "RenameObject",
+            Self::SetTextContent { .. } => "SetTextContent",
+            Self::SetTextFontFamily { .. } => "SetTextFontFamily",
+            Self::SetTextFontWeight { .. } => "SetTextFontWeight",
+            Self::SetTextFontStyle { .. } => "SetTextFontStyle",
+            Self::SetTextFontSize { .. } => "SetTextFontSize",
+            Self::SetTextAlignment { .. } => "SetTextAlignment",
             Self::SetObjectVisible { .. } => "SetObjectVisible",
             Self::SetObjectLocked { .. } => "SetObjectLocked",
             Self::SetPropertyBase { .. } => "SetPropertyBase",
@@ -222,6 +255,36 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         before: String,
         after: String,
+    },
+    TextContentChanged {
+        object_id: ObjectId,
+        before: String,
+        after: String,
+    },
+    TextFontFamilyChanged {
+        object_id: ObjectId,
+        before: String,
+        after: String,
+    },
+    TextFontWeightChanged {
+        object_id: ObjectId,
+        before: FontWeight,
+        after: FontWeight,
+    },
+    TextFontStyleChanged {
+        object_id: ObjectId,
+        before: FontStyle,
+        after: FontStyle,
+    },
+    TextFontSizeChanged {
+        object_id: ObjectId,
+        before: f32,
+        after: f32,
+    },
+    TextAlignmentChanged {
+        object_id: ObjectId,
+        before: TextAlignment,
+        after: TextAlignment,
     },
     ObjectVisibilityChanged {
         object_id: ObjectId,
@@ -1597,6 +1660,117 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetTextContent { object_id, text } => {
+                let before = self.text_object(object_id)?.text.clone();
+                if before == text {
+                    return Ok(None);
+                }
+
+                self.text_object_mut(object_id)?.text = text.clone();
+                Ok(Some(PendingHistoryEntry::new(
+                    "Edit Text",
+                    HistoryPayload::TextContentChanged {
+                        object_id,
+                        before,
+                        after: text,
+                    },
+                )))
+            }
+            EditCommand::SetTextFontFamily { object_id, family } => {
+                let before = self.text_object(object_id)?.font.family.clone();
+                if before == family {
+                    return Ok(None);
+                }
+
+                self.text_object_mut(object_id)?.font.family = family.clone();
+                Ok(Some(PendingHistoryEntry::new(
+                    "Change Font",
+                    HistoryPayload::TextFontFamilyChanged {
+                        object_id,
+                        before,
+                        after: family,
+                    },
+                )))
+            }
+            EditCommand::SetTextFontWeight { object_id, weight } => {
+                let before = self.text_object(object_id)?.font.weight;
+                if before == weight {
+                    return Ok(None);
+                }
+
+                self.text_object_mut(object_id)?.font.weight = weight;
+                Ok(Some(PendingHistoryEntry::new(
+                    "Change Font Weight",
+                    HistoryPayload::TextFontWeightChanged {
+                        object_id,
+                        before,
+                        after: weight,
+                    },
+                )))
+            }
+            EditCommand::SetTextFontStyle { object_id, style } => {
+                let before = self.text_object(object_id)?.font.style;
+                if before == style {
+                    return Ok(None);
+                }
+
+                self.text_object_mut(object_id)?.font.style = style;
+                Ok(Some(PendingHistoryEntry::new(
+                    "Change Font Style",
+                    HistoryPayload::TextFontStyleChanged {
+                        object_id,
+                        before,
+                        after: style,
+                    },
+                )))
+            }
+            EditCommand::SetTextFontSize {
+                object_id,
+                font_size,
+            } => {
+                if !font_size.is_finite() || font_size <= 0.0 {
+                    return Err(EditError::InvalidValue("text font size"));
+                }
+
+                let before = self.text_object(object_id)?.font_size;
+                if before == font_size {
+                    return Ok(None);
+                }
+
+                self.text_object_mut(object_id)?.font_size = font_size;
+                if let Err(error) = self.project.validate() {
+                    self.text_object_mut(object_id)?.font_size = before;
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Change Font Size",
+                    HistoryPayload::TextFontSizeChanged {
+                        object_id,
+                        before,
+                        after: font_size,
+                    },
+                )))
+            }
+            EditCommand::SetTextAlignment {
+                object_id,
+                alignment,
+            } => {
+                let before = self.text_object(object_id)?.alignment;
+                if before == alignment {
+                    return Ok(None);
+                }
+
+                self.text_object_mut(object_id)?.alignment = alignment;
+                Ok(Some(PendingHistoryEntry::new(
+                    "Change Text Alignment",
+                    HistoryPayload::TextAlignmentChanged {
+                        object_id,
+                        before,
+                        after: alignment,
+                    },
+                )))
+            }
             EditCommand::SetObjectVisible { object_id, visible } => {
                 let index = self.object_index(object_id)?;
                 let before = self.project.composition.objects[index].visible;
@@ -2380,6 +2554,67 @@ impl ProjectEditor {
                 self.project.composition.objects[index].name = value.clone();
             }
             (
+                HistoryPayload::TextContentChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                self.text_object_mut(*object_id)?.text = direction.pick(before, after).clone();
+            }
+            (
+                HistoryPayload::TextFontFamilyChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                self.text_object_mut(*object_id)?.font.family =
+                    direction.pick(before, after).clone();
+            }
+            (
+                HistoryPayload::TextFontWeightChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                self.text_object_mut(*object_id)?.font.weight = *direction.pick(before, after);
+            }
+            (
+                HistoryPayload::TextFontStyleChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                self.text_object_mut(*object_id)?.font.style = *direction.pick(before, after);
+            }
+            (
+                HistoryPayload::TextFontSizeChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                self.text_object_mut(*object_id)?.font_size = *direction.pick(before, after);
+            }
+            (
+                HistoryPayload::TextAlignmentChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                self.text_object_mut(*object_id)?.alignment = *direction.pick(before, after);
+            }
+            (
                 HistoryPayload::ObjectVisibilityChanged {
                     object_id,
                     before,
@@ -2906,6 +3141,22 @@ impl ProjectEditor {
         }
 
         self.project.validate().map_err(EditError::InvalidProject)
+    }
+
+    fn text_object(&self, object_id: ObjectId) -> Result<&TextObject, EditError> {
+        let index = self.object_index(object_id)?;
+        match &self.project.composition.objects[index].content {
+            ObjectContent::Text(text) => Ok(text),
+            _ => Err(EditError::InvalidValue("text edit requires text object")),
+        }
+    }
+
+    fn text_object_mut(&mut self, object_id: ObjectId) -> Result<&mut TextObject, EditError> {
+        let index = self.object_index(object_id)?;
+        match &mut self.project.composition.objects[index].content {
+            ObjectContent::Text(text) => Ok(text),
+            _ => Err(EditError::InvalidValue("text edit requires text object")),
+        }
     }
 
     fn object_index(&self, object_id: ObjectId) -> Result<usize, EditError> {
