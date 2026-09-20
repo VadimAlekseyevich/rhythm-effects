@@ -187,47 +187,47 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-155** — Implement Ctrl+Alt+Left/Right selected-key movement by exactly one beat.
 - [x] **AI-156** — Implement copy packet with property compatibility, values, easing and relative tick offsets.
 - [x] **AI-157** — Implement paste anchored at nearest-grid playhead with fresh KeyframeIds.
-- [ ] **AI-158** — Implement Ctrl+D duplicate of selected keys with duplicates remaining selected.
-- [ ] **AI-159** — Implement Hold/Linear/easing preset context actions for selected outgoing segments.
-- [ ] **AI-160** — Implement Follow Playhead toggle defaulting OFF and edge-follow behavior.
-- [ ] **AI-161** — Add the 10,000-key timeline stress fixture and verify no full-project draw scan.
+- [x] **AI-158** — Implement Ctrl+D duplicate of selected keys with duplicates remaining selected.
+- [x] **AI-159** — Implement Hold/Linear/easing preset context actions for selected outgoing segments.
+- [x] **AI-160** — Implement Follow Playhead toggle defaulting OFF and edge-follow behavior.
+- [x] **AI-161** — Add the 10,000-key timeline stress fixture and verify no full-project draw scan.
 
 ## M7 — Editor core
 
-- [ ] **AI-162** — Implement CPU inverse-transform hit testing for Rectangle.
-- [ ] **AI-163** — Implement CPU inverse-transform hit testing for Ellipse.
-- [ ] **AI-164** — Implement CPU bounds hit testing for Image.
-- [ ] **AI-165** — Implement CPU layout-bounds hit testing hook for Text.
-- [ ] **AI-166** — Select the topmost visible unlocked viewport object on click.
-- [ ] **AI-167** — Implement Ctrl-click object toggle selection in the viewport.
-- [ ] **AI-168** — Implement viewport box selection from empty space.
-- [ ] **AI-169** — Implement middle-mouse viewport pan.
-- [ ] **AI-170** — Implement mouse-wheel viewport zoom around pointer.
-- [ ] **AI-171** — Implement Fit Composition and Frame Selection actions.
-- [ ] **AI-172** — Render selected-object bounds and center anchor marker as editor-only overlays.
-- [ ] **AI-173** — Implement Position direct drag as one transaction.
-- [ ] **AI-174** — Implement Shift axis constraint for Position drag.
-- [ ] **AI-175** — Implement Scale corner handles for a single object.
-- [ ] **AI-176** — Implement Shift uniform Scale constraint.
-- [ ] **AI-177** — Implement Rotation handle around Anchor.
-- [ ] **AI-178** — Implement Shift 15-degree Rotation snapping.
-- [ ] **AI-179** — Implement multi-object move by shared composition-space delta.
-- [ ] **AI-180** — Implement animated direct-transform edits using the accepted property-keyframing behavior.
-- [ ] **AI-181** — Implement the Object list with visible/locked/name state.
-- [ ] **AI-182** — Synchronize Object list, Viewport and Inspector selection.
-- [ ] **AI-183** — Implement standard Inspector animatable property row.
-- [ ] **AI-184** — Implement numeric edit commit on Enter/focus-loss and Escape restore.
-- [ ] **AI-185** — Implement static property edit to base_value.
-- [ ] **AI-186** — Implement animated off-key property edit to create/update nearest-grid key and move playhead.
-- [ ] **AI-187** — Implement final-key removal returning the property to static using removed-key value.
-- [ ] **AI-188** — Implement multi-selection mixed-value transform rows.
-- [ ] **AI-189** — Implement Rectangle Inspector controls.
-- [ ] **AI-190** — Implement Ellipse Inspector controls.
-- [ ] **AI-191** — Implement Image source/intrinsic-dimensions/Relink Inspector controls.
-- [ ] **AI-192** — Implement Text content/font/weight/style/size/alignment/color Inspector controls.
-- [ ] **AI-193** — Implement Effect stack Inspector with enable/reorder/remove.
-- [ ] **AI-194** — Implement Add Effect shallow searchable popover.
-- [ ] **AI-195** — Implement physical-key shortcut dispatcher for P/S/R/O/K.
+- [x] **AI-162** — Implement CPU inverse-transform hit testing for Rectangle.
+- [x] **AI-163** — Implement CPU inverse-transform hit testing for Ellipse.
+- [x] **AI-164** — Implement CPU bounds hit testing for Image.
+- [x] **AI-165** — Implement CPU layout-bounds hit testing hook for Text.
+- [x] **AI-166** — Select the topmost visible unlocked viewport object on click.
+- [x] **AI-167** — Implement Ctrl-click object toggle selection in the viewport.
+- [x] **AI-168** — Implement viewport box selection from empty space.
+- [x] **AI-169** — Implement middle-mouse viewport pan.
+- [x] **AI-170** — Implement mouse-wheel viewport zoom around pointer.
+- [x] **AI-171** — Implement Fit Composition and Frame Selection actions.
+- [x] **AI-172** — Render selected-object bounds and center anchor marker as editor-only overlays.
+- [x] **AI-173** — Implement Position direct drag as one transaction.
+- [x] **AI-174** — Implement Shift axis constraint for Position drag.
+- [x] **AI-175** — Implement Scale corner handles for a single object.
+- [x] **AI-176** — Implement Shift uniform Scale constraint.
+- [x] **AI-177** — Implement Rotation handle around Anchor.
+- [x] **AI-178** — Implement Shift 15-degree Rotation snapping.
+- [x] **AI-179** — Implement multi-object move by shared composition-space delta.
+- [x] **AI-180** — Implement animated direct-transform edits using the accepted property-keyframing behavior.
+- [x] **AI-181** — Implement the Object list with visible/locked/name state.
+- [x] **AI-182** — Synchronize Object list, Viewport and Inspector selection.
+- [x] **AI-183** — Implement standard Inspector animatable property row.
+- [x] **AI-184** — Implement numeric edit commit on Enter/focus-loss and Escape restore.
+- [x] **AI-185** — Implement static property edit to base_value.
+- [x] **AI-186** — Implement animated off-key property edit to create/update nearest-grid key and move playhead.
+- [x] **AI-187** — Implement final-key removal returning the property to static using removed-key value.
+- [x] **AI-188** — Implement multi-selection mixed-value transform rows.
+- [x] **AI-189** — Implement Rectangle Inspector controls.
+- [x] **AI-190** — Implement Ellipse Inspector controls.
+- [x] **AI-191** — Implement Image source/intrinsic-dimensions/Relink Inspector controls.
+- [x] **AI-192** — Implement Text content/font/weight/style/size/alignment/color Inspector controls.
+- [x] **AI-193** — Implement Effect stack Inspector with enable/reorder/remove.
+- [x] **AI-194** — Implement Add Effect shallow searchable popover.
+- [x] **AI-195** — Implement physical-key shortcut dispatcher for P/S/R/O/K.
 - [ ] **AI-196** — Implement Space Play/Pause without Space viewport-pan behavior.
 - [ ] **AI-197** — Implement Ctrl+K command search surface.
 - [ ] **AI-198** — Implement focus routing so active text/numeric controls suppress editor letter shortcuts.
