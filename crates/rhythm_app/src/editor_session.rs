@@ -596,7 +596,7 @@ impl EditorSession {
     }
 
     #[must_use]
-    pub const fn effect_picker_open_for(&self, object_id: ObjectId) -> bool {
+    pub fn effect_picker_open_for(&self, object_id: ObjectId) -> bool {
         self.effect_picker_object == Some(object_id)
     }
 
