@@ -217,6 +217,33 @@ pub struct FocusedProperty {
     pub property: AnimatableProperty,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectorNumericComponent {
+    Scalar,
+    X,
+    Y,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InspectorNumericTarget {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub component: InspectorNumericComponent,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InspectorNumericEdit {
+    target: InspectorNumericTarget,
+    original_value: f32,
+    buffer: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InspectorNumericCommit {
+    pub target: InspectorNumericTarget,
+    pub value: f32,
+}
+
 #[derive(Debug)]
 pub struct EditorSession {
     pub preview_quality: PreviewQuality,
@@ -236,6 +263,8 @@ pub struct EditorSession {
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     pending_focused_keyframe_action: bool,
+    inspector_numeric_edit: Option<InspectorNumericEdit>,
+    pending_inspector_numeric_commit: Option<InspectorNumericCommit>,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
     pending_keyframe_interpolation: Option<Interpolation>,
@@ -264,6 +293,8 @@ impl Default for EditorSession {
             selected_keyframes: HashSet::new(),
             focused_property: None,
             pending_focused_keyframe_action: false,
+            inspector_numeric_edit: None,
+            pending_inspector_numeric_commit: None,
             keyframe_drag: None,
             pending_keyframe_move: None,
             pending_keyframe_interpolation: None,
@@ -1327,6 +1358,97 @@ impl EditorSession {
         });
     }
 
+    pub fn begin_inspector_numeric_edit(
+        &mut self,
+        target: InspectorNumericTarget,
+        value: f32,
+        display_value: String,
+    ) {
+        if !value.is_finite() {
+            return;
+        }
+
+        self.focus_property(target.object_id, target.property);
+        self.inspector_numeric_edit = Some(InspectorNumericEdit {
+            target,
+            original_value: value,
+            buffer: display_value,
+        });
+    }
+
+    #[must_use]
+    pub fn inspector_numeric_edit_buffer(
+        &self,
+        target: InspectorNumericTarget,
+    ) -> Option<&str> {
+        self.inspector_numeric_edit
+            .as_ref()
+            .filter(|edit| edit.target == target)
+            .map(|edit| edit.buffer.as_str())
+    }
+
+    pub fn update_inspector_numeric_edit_buffer(
+        &mut self,
+        target: InspectorNumericTarget,
+        buffer: String,
+    ) -> bool {
+        let Some(edit) = self.inspector_numeric_edit.as_mut() else {
+            return false;
+        };
+        if edit.target != target || edit.buffer == buffer {
+            return false;
+        }
+        edit.buffer = buffer;
+        true
+    }
+
+    pub fn commit_inspector_numeric_edit(&mut self, target: InspectorNumericTarget) -> bool {
+        let Some(edit) = self.inspector_numeric_edit.as_ref() else {
+            return false;
+        };
+        if edit.target != target {
+            return false;
+        }
+
+        let Ok(value) = edit.buffer.trim().parse::<f32>() else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
+        }
+
+        self.pending_inspector_numeric_commit = Some(InspectorNumericCommit { target, value });
+        self.inspector_numeric_edit = None;
+        true
+    }
+
+    pub fn cancel_inspector_numeric_edit(&mut self, target: InspectorNumericTarget) -> bool {
+        let Some(edit) = self.inspector_numeric_edit.as_ref() else {
+            return false;
+        };
+        if edit.target != target {
+            return false;
+        }
+
+        self.inspector_numeric_edit = None;
+        true
+    }
+
+    #[must_use]
+    pub fn inspector_numeric_edit_original_value(
+        &self,
+        target: InspectorNumericTarget,
+    ) -> Option<f32> {
+        self.inspector_numeric_edit
+            .as_ref()
+            .filter(|edit| edit.target == target)
+            .map(|edit| edit.original_value)
+    }
+
+    pub const fn take_inspector_numeric_commit(&mut self) -> Option<InspectorNumericCommit> {
+        self.pending_inspector_numeric_commit.take()
+    }
+
     pub fn request_focused_keyframe_action(
         &mut self,
         object_id: ObjectId,
@@ -2238,6 +2360,36 @@ mod tests {
             Some(([10.0, 20.0], [30.0, 40.0], true))
         );
         assert!(session.timeline_box_selection().is_none());
+    }
+
+    #[test]
+    fn inspector_numeric_edit_commits_finite_values_and_escape_discards_buffer() {
+        let target = InspectorNumericTarget {
+            object_id: ObjectId::new(1).expect("object id"),
+            property: AnimatableProperty::Rotation,
+            component: InspectorNumericComponent::Scalar,
+        };
+        let mut session = EditorSession::default();
+
+        session.begin_inspector_numeric_edit(target, 15.0, "15.0".to_owned());
+        assert_eq!(session.inspector_numeric_edit_buffer(target), Some("15.0"));
+        assert!(session.update_inspector_numeric_edit_buffer(target, "22.5".to_owned()));
+        assert!(session.commit_inspector_numeric_edit(target));
+        assert_eq!(
+            session.take_inspector_numeric_commit(),
+            Some(InspectorNumericCommit {
+                target,
+                value: 22.5,
+            })
+        );
+
+        session.begin_inspector_numeric_edit(target, 22.5, "22.5".to_owned());
+        assert!(session.update_inspector_numeric_edit_buffer(target, "-".to_owned()));
+        assert!(!session.commit_inspector_numeric_edit(target));
+        assert_eq!(session.inspector_numeric_edit_original_value(target), Some(22.5));
+        assert!(session.cancel_inspector_numeric_edit(target));
+        assert_eq!(session.inspector_numeric_edit_buffer(target), None);
+        assert_eq!(session.take_inspector_numeric_commit(), None);
     }
 
     #[test]
