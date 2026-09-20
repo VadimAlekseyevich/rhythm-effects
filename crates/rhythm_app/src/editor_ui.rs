@@ -413,11 +413,7 @@ pub fn draw_editor_shell(
                                 .objects
                                 .iter()
                                 .find(|object| object.id == *selected_id)
-                                .is_some_and(|object| {
-                                    object.visible
-                                        && !object.locked
-                                        && object.transform.position.keyframes().is_empty()
-                                })
+                                .is_some_and(|object| object.visible && !object.locked)
                         }) {
                         session.begin_viewport_multi_position_drag(
                             selected.clone(),
