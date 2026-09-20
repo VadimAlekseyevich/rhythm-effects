@@ -70,7 +70,6 @@ pub struct PropertyKeyframeMoveRecord {
     pub replaced: Option<PropertyKeyframe>,
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PropertyKeyframeDeleteRecord {
     pub object_id: ObjectId,
@@ -887,9 +886,8 @@ impl ProjectEditor {
                     Vec::new();
 
                 for located_keyframe in located {
-                    if let Some((_, _, keys)) = grouped
-                        .iter_mut()
-                        .find(|(object_id, property, _)| {
+                    if let Some((_, _, keys)) =
+                        grouped.iter_mut().find(|(object_id, property, _)| {
                             *object_id == located_keyframe.object_id
                                 && *property == located_keyframe.property
                         })
@@ -909,8 +907,7 @@ impl ProjectEditor {
 
                 for (object_id, property, mut keys) in grouped {
                     keys.sort_by_key(|keyframe| keyframe.tick);
-                    let total_before =
-                        property_keyframe_count(&self.project, object_id, property)?;
+                    let total_before = property_keyframe_count(&self.project, object_id, property)?;
                     let base_before = property_base_value(&self.project, object_id, property)?;
 
                     for keyframe in &keys {
@@ -930,16 +927,8 @@ impl ProjectEditor {
                     }
 
                     if keys.len() == total_before {
-                        let after = keys
-                            .last()
-                            .expect("non-empty delete group")
-                            .value;
-                        set_property_base_value(
-                            &mut self.project,
-                            object_id,
-                            property,
-                            after,
-                        )?;
+                        let after = keys.last().expect("non-empty delete group").value;
+                        set_property_base_value(&mut self.project, object_id, property, after)?;
                         base_changes.push(PropertyBaseChange {
                             object_id,
                             property,
@@ -1368,64 +1357,63 @@ impl ProjectEditor {
                 }
             },
             (HistoryPayload::PropertyKeyframesMoved { records }, direction) => match direction {
-                    HistoryDirection::Undo => {
-                        for record in records.iter().rev() {
-                            remove_property_keyframe_by_id(
-                                &mut self.project,
-                                record.object_id,
-                                record.property,
-                                record.after.id,
-                            )?
-                            .ok_or(EditError::KeyframeNotFound(record.after.id))?;
-                            if let Some(replaced) = record.replaced {
-                                insert_property_keyframe(
-                                    &mut self.project,
-                                    record.object_id,
-                                    record.property,
-                                    replaced,
-                                )?;
-                            }
-                        }
-                        for record in records {
+                HistoryDirection::Undo => {
+                    for record in records.iter().rev() {
+                        remove_property_keyframe_by_id(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.after.id,
+                        )?
+                        .ok_or(EditError::KeyframeNotFound(record.after.id))?;
+                        if let Some(replaced) = record.replaced {
                             insert_property_keyframe(
                                 &mut self.project,
                                 record.object_id,
                                 record.property,
-                                record.before,
+                                replaced,
                             )?;
                         }
                     }
-                    HistoryDirection::Redo => {
-                        for record in records {
-                            remove_property_keyframe_by_id(
-                                &mut self.project,
-                                record.object_id,
-                                record.property,
-                                record.before.id,
-                            )?
-                            .ok_or(EditError::KeyframeNotFound(record.before.id))?;
-                        }
-                        for record in records {
-                            let replaced = crate::property::remove_property_keyframe_at_tick(
-                                &mut self.project,
-                                record.object_id,
-                                record.property,
-                                record.after.tick,
-                            )?;
-                            if replaced != record.replaced {
-                                return Err(EditError::HistoryInvariant(
-                                    "redo collision payload mismatch",
-                                ));
-                            }
-                            insert_property_keyframe(
-                                &mut self.project,
-                                record.object_id,
-                                record.property,
-                                record.after,
-                            )?;
-                        }
+                    for record in records {
+                        insert_property_keyframe(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.before,
+                        )?;
                     }
-
+                }
+                HistoryDirection::Redo => {
+                    for record in records {
+                        remove_property_keyframe_by_id(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.before.id,
+                        )?
+                        .ok_or(EditError::KeyframeNotFound(record.before.id))?;
+                    }
+                    for record in records {
+                        let replaced = crate::property::remove_property_keyframe_at_tick(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.after.tick,
+                        )?;
+                        if replaced != record.replaced {
+                            return Err(EditError::HistoryInvariant(
+                                "redo collision payload mismatch",
+                            ));
+                        }
+                        insert_property_keyframe(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.after,
+                        )?;
+                    }
+                }
             },
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();

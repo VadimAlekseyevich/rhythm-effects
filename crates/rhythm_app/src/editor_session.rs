@@ -366,10 +366,7 @@ impl EditorSession {
         self.move_selected_keyframes_by_ticks(editor, delta)
     }
 
-    pub fn copy_selected_keyframes(
-        &mut self,
-        project: &rhythm_core::project::Project,
-    ) -> bool {
+    pub fn copy_selected_keyframes(&mut self, project: &rhythm_core::project::Project) -> bool {
         let mut located = Vec::with_capacity(self.selected_keyframes.len());
         for keyframe_id in self.selected_keyframe_ids() {
             let Some(keyframe) = locate_property_keyframe(project, keyframe_id) else {
