@@ -3192,7 +3192,8 @@ mod tests {
         domain::{LinearRgba, Vec2},
         ids::{KeyframeId, ObjectId},
         project::{
-            Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
+            FontReference, FontStyle, FontWeight, Object, ObjectContent, Project, ProjectSettings,
+            RectangleObject, TextAlignment, TextObject, TransformAnimation,
         },
         property::{AnimatableProperty, PropertyValue, property_base_value},
         time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
@@ -3229,6 +3230,91 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn static_text_edits_are_typed_and_undoable() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = editor_with_object().into_project();
+        project.composition.objects[0].content = ObjectContent::Text(TextObject {
+            text: "Hello".to_owned(),
+            font: FontReference {
+                family: "Inter".to_owned(),
+                weight: FontWeight::Normal,
+                style: FontStyle::Normal,
+            },
+            font_size: 48.0,
+            color: Animated::new_static(LinearRgba::black_opaque()),
+            alignment: TextAlignment::Left,
+        });
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+
+        assert_eq!(
+            editor.execute(EditCommand::SetTextContent {
+                object_id,
+                text: "Привет".to_owned(),
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            editor.execute(EditCommand::SetTextFontFamily {
+                object_id,
+                family: "Noto Sans".to_owned(),
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            editor.execute(EditCommand::SetTextFontWeight {
+                object_id,
+                weight: FontWeight::Bold,
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            editor.execute(EditCommand::SetTextFontStyle {
+                object_id,
+                style: FontStyle::Italic,
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            editor.execute(EditCommand::SetTextFontSize {
+                object_id,
+                font_size: 72.0,
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            editor.execute(EditCommand::SetTextAlignment {
+                object_id,
+                alignment: TextAlignment::Center,
+            }),
+            Ok(true)
+        );
+
+        let ObjectContent::Text(text) = &editor.project().composition.objects[0].content else {
+            panic!("object should be text");
+        };
+        assert_eq!(text.text, "Привет");
+        assert_eq!(text.font.family, "Noto Sans");
+        assert_eq!(text.font.weight, FontWeight::Bold);
+        assert_eq!(text.font.style, FontStyle::Italic);
+        assert_eq!(text.font_size, 72.0);
+        assert_eq!(text.alignment, TextAlignment::Center);
+        assert_eq!(editor.history_len(), 6);
+
+        for _ in 0..6 {
+            assert_eq!(editor.undo(), Ok(true));
+        }
+        let ObjectContent::Text(text) = &editor.project().composition.objects[0].content else {
+            panic!("object should be text");
+        };
+        assert_eq!(text.text, "Hello");
+        assert_eq!(text.font.family, "Inter");
+        assert_eq!(text.font.weight, FontWeight::Normal);
+        assert_eq!(text.font.style, FontStyle::Normal);
+        assert_eq!(text.font_size, 48.0);
+        assert_eq!(text.alignment, TextAlignment::Left);
     }
 
     #[test]
