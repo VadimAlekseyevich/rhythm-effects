@@ -278,7 +278,9 @@ impl ApplicationHandler for RhythmApp {
                             }
                         }
                     } else if !control && !shift && !alt && !super_key && code == KeyCode::Escape {
-                        self.session.cancel_keyframe_drag()
+                        let cancelled_keyframe_drag = self.session.cancel_keyframe_drag();
+                        let cancelled_position_drag = self.session.cancel_viewport_position_drag();
+                        cancelled_keyframe_drag || cancelled_position_drag
                     } else if !control && !alt && !super_key && code == KeyCode::KeyF {
                         let action = if shift {
                             ViewportCameraAction::FitComposition
@@ -371,6 +373,14 @@ impl ApplicationHandler for RhythmApp {
                             );
                         }
                     });
+                    match self
+                        .session
+                        .sync_viewport_position_drag(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "viewport position drag failed"),
+                    }
                     match self
                         .session
                         .commit_pending_keyframe_interpolation(&mut self.project_editor)
