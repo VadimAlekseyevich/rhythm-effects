@@ -440,9 +440,10 @@ impl EditorSession {
             packet.entries[0].source_object_id,
             packet.entries[0].source_property,
         );
-        let single_source = packet.entries.iter().all(|entry| {
-            (entry.source_object_id, entry.source_property) == first_source
-        });
+        let single_source = packet
+            .entries
+            .iter()
+            .all(|entry| (entry.source_object_id, entry.source_property) == first_source);
         let remap_target = self.focused_property.filter(|focused| {
             single_source
                 && packet
@@ -519,10 +520,14 @@ impl EditorSession {
 
         let pattern_span = last_tick
             .checked_sub(first_tick)
-            .ok_or(EditError::HistoryInvariant("duplicate pattern span overflow"))?;
+            .ok_or(EditError::HistoryInvariant(
+                "duplicate pattern span overflow",
+            ))?;
         let offset = pattern_span
             .checked_add(self.authoring_division.ticks_per_step())
-            .ok_or(EditError::HistoryInvariant("duplicate keyframe offset overflow"))?;
+            .ok_or(EditError::HistoryInvariant(
+                "duplicate keyframe offset overflow",
+            ))?;
 
         located.sort_by_key(|located| {
             (
@@ -534,12 +539,9 @@ impl EditorSession {
 
         let mut drafts = Vec::with_capacity(located.len());
         for located in located {
-            let target_tick = located
-                .keyframe
-                .tick
-                .get()
-                .checked_add(offset)
-                .ok_or(EditError::HistoryInvariant("duplicate keyframe tick overflow"))?;
+            let target_tick = located.keyframe.tick.get().checked_add(offset).ok_or(
+                EditError::HistoryInvariant("duplicate keyframe tick overflow"),
+            )?;
             drafts.push(PropertyKeyframeDraft {
                 object_id: located.object_id,
                 property: located.property,
@@ -1111,10 +1113,7 @@ mod tests {
         session.replace_keyframe_selection([first, second]);
         assert!(session.keyframe_clipboard().is_none());
 
-        assert_eq!(
-            session.duplicate_selected_keyframes(&mut editor),
-            Ok(true)
-        );
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
 
         let source_first = property_keyframe_at_tick(
             editor.project(),
