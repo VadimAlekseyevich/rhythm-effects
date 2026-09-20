@@ -434,8 +434,10 @@ pub fn draw_editor_shell(
                             .iter()
                             .find(|object| object.id == object_id)
                             .is_some_and(|object| object.visible && !object.locked)
-                        && let Some(evaluated) =
-                            scene.objects.iter().find(|evaluated| evaluated.id == object_id)
+                        && let Some(evaluated) = scene
+                            .objects
+                            .iter()
+                            .find(|evaluated| evaluated.id == object_id)
                     {
                         session.begin_viewport_position_drag(
                             object_id,
