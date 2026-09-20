@@ -200,7 +200,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-165** — Implement CPU layout-bounds hit testing hook for Text.
 - [x] **AI-166** — Select the topmost visible unlocked viewport object on click.
 - [x] **AI-167** — Implement Ctrl-click object toggle selection in the viewport.
-- [ ] **AI-168** — Implement viewport box selection from empty space.
+- [x] **AI-168** — Implement viewport box selection from empty space.
 - [ ] **AI-169** — Implement middle-mouse viewport pan.
 - [ ] **AI-170** — Implement mouse-wheel viewport zoom around pointer.
 - [ ] **AI-171** — Implement Fit Composition and Frame Selection actions.
