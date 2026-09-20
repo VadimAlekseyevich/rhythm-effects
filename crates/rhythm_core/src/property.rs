@@ -446,6 +446,47 @@ pub(crate) fn remove_property_keyframe_by_id(
     })
 }
 
+pub(crate) fn set_property_keyframe_value(
+    project: &mut Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    keyframe_id: KeyframeId,
+    value: PropertyValue,
+) -> Result<Option<PropertyValue>, PropertyAccessError> {
+    if !property_value_compatible(property, value) {
+        return Err(if value.is_finite() {
+            PropertyAccessError::IncompatibleValue
+        } else {
+            PropertyAccessError::NonFiniteValue
+        });
+    }
+
+    match (animated_mut(project, object_id, property)?, value) {
+        (AnimatedMut::Scalar(animated), PropertyValue::Scalar(value)) => {
+            Ok(animated.keyframe_by_id_mut(keyframe_id).map(|keyframe| {
+                let before = keyframe.value;
+                keyframe.value = value;
+                PropertyValue::Scalar(before)
+            }))
+        }
+        (AnimatedMut::Vec2(animated), PropertyValue::Vec2(value)) => {
+            Ok(animated.keyframe_by_id_mut(keyframe_id).map(|keyframe| {
+                let before = keyframe.value;
+                keyframe.value = value;
+                PropertyValue::Vec2(before)
+            }))
+        }
+        (AnimatedMut::Color(animated), PropertyValue::Color(value)) => {
+            Ok(animated.keyframe_by_id_mut(keyframe_id).map(|keyframe| {
+                let before = keyframe.value;
+                keyframe.value = value;
+                PropertyValue::Color(before)
+            }))
+        }
+        _ => Err(PropertyAccessError::IncompatibleValue),
+    }
+}
+
 pub(crate) fn set_property_keyframe_interpolation(
     project: &mut Project,
     object_id: ObjectId,
