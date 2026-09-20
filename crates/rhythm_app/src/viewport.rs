@@ -11,6 +11,7 @@ use rhythm_core::{
 };
 use rhythm_engine::scene_eval::{EvaluatedObject, EvaluatedObjectContent, EvaluatedScene};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RuntimeHitBounds {
     ImageIntrinsicSize(Vec2),
@@ -69,10 +70,7 @@ fn bounds_intersect(a: LocalBounds2d, b: LocalBounds2d) -> bool {
     let b_max_x = b.min.x() + b.size.x();
     let b_max_y = b.min.y() + b.size.y();
 
-    a.min.x() <= b_max_x
-        && a_max_x >= b.min.x()
-        && a.min.y() <= b_max_y
-        && a_max_y >= b.min.y()
+    a.min.x() <= b_max_x && a_max_x >= b.min.x() && a.min.y() <= b_max_y && a_max_y >= b.min.y()
 }
 
 fn evaluated_local_bounds<F>(
@@ -87,7 +85,9 @@ where
         EvaluatedObjectContent::Rectangle { size, .. }
         | EvaluatedObjectContent::Ellipse { size, .. } => Some(LocalBounds2d::from_size(*size)),
         EvaluatedObjectContent::Image { .. } => match runtime_bounds(object_id, content) {
-            Some(RuntimeHitBounds::ImageIntrinsicSize(size)) => Some(LocalBounds2d::from_size(size)),
+            Some(RuntimeHitBounds::ImageIntrinsicSize(size)) => {
+                Some(LocalBounds2d::from_size(size))
+            }
             _ => None,
         },
         EvaluatedObjectContent::Text { .. } => match runtime_bounds(object_id, content) {
@@ -107,8 +107,11 @@ pub fn objects_intersecting_box<F>(
 where
     F: FnMut(ObjectId, &EvaluatedObjectContent) -> Option<RuntimeHitBounds>,
 {
-    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> =
-        scene.objects.iter().map(|object| (object.id, object)).collect();
+    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> = scene
+        .objects
+        .iter()
+        .map(|object| (object.id, object))
+        .collect();
     let mut selected = Vec::new();
 
     for object in &project.composition.objects {
@@ -153,8 +156,11 @@ pub fn pick_topmost_object<F>(
 where
     F: FnMut(ObjectId, &EvaluatedObjectContent) -> Option<RuntimeHitBounds>,
 {
-    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> =
-        scene.objects.iter().map(|object| (object.id, object)).collect();
+    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> = scene
+        .objects
+        .iter()
+        .map(|object| (object.id, object))
+        .collect();
 
     for object in project.composition.objects.iter().rev() {
         if !object.visible || object.locked {
