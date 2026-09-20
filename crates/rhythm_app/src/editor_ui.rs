@@ -325,9 +325,11 @@ pub fn draw_editor_shell(
             {
                 let ctrl = ui.input(|input| input.modifiers.ctrl);
                 let selected = session.selected_object_ids();
-                let overlay = (selected.len() == 1)
-                    .then(|| selection_overlay_geometry(&scene, &selected, |_, _| None))
-                    .flatten();
+                let overlay = if selected.len() == 1 {
+                    selection_overlay_geometry(&scene, &selected, |_, _| None)
+                } else {
+                    None
+                };
                 const SCALE_HANDLE_HIT_RADIUS: f32 = 9.0;
                 const ROTATION_HANDLE_HIT_RADIUS: f32 = 10.0;
 
@@ -344,27 +346,20 @@ pub fn draw_editor_shell(
                                 && object.transform.rotation_degrees.keyframes().is_empty()
                         })
                         .and_then(|object| {
-                            overlay.and_then(|overlay| {
-                                let corners = overlay.corners.map(composition_to_screen);
-                                let (_, handle) = rotation_handle_points(corners);
-                                (handle.distance(origin) <= ROTATION_HANDLE_HIT_RADIUS)
-                                    .then(|| {
-                                        screen_to_composition_unclamped(origin).map(
-                                            |composition_pointer| {
-                                                session.begin_viewport_rotation_drag(
-                                                    object_id,
-                                                    overlay.anchor,
-                                                    composition_pointer,
-                                                    *object
-                                                        .transform
-                                                        .rotation_degrees
-                                                        .base_value(),
-                                                )
-                                            },
-                                        )
-                                    })
-                                    .flatten()
-                            })
+                            let overlay = overlay?;
+                            let corners = overlay.corners.map(composition_to_screen);
+                            let (_, handle) = rotation_handle_points(corners);
+                            if handle.distance(origin) > ROTATION_HANDLE_HIT_RADIUS {
+                                return None;
+                            }
+                            let composition_pointer =
+                                screen_to_composition_unclamped(origin)?;
+                            Some(session.begin_viewport_rotation_drag(
+                                object_id,
+                                overlay.anchor,
+                                composition_pointer,
+                                *object.transform.rotation_degrees.base_value(),
+                            ))
                         })
                         .unwrap_or(false)
                 } else {
@@ -385,31 +380,21 @@ pub fn draw_editor_shell(
                                     && object.transform.scale.keyframes().is_empty()
                             })
                             .and_then(|object| {
-                                overlay.and_then(|overlay| {
-                                    overlay
-                                        .corners
-                                        .iter()
-                                        .copied()
-                                        .find(|corner| {
-                                            composition_to_screen(*corner).distance(origin)
-                                                <= SCALE_HANDLE_HIT_RADIUS
-                                        })
-                                        .and_then(|handle_start| {
-                                            scene
-                                                .objects
-                                                .iter()
-                                                .find(|evaluated| evaluated.id == object_id)
-                                                .map(|evaluated| {
-                                                    session.begin_viewport_scale_drag(
-                                                        object_id,
-                                                        overlay.anchor,
-                                                        handle_start,
-                                                        *object.transform.scale.base_value(),
-                                                        evaluated.transform.rotation_degrees,
-                                                    )
-                                                })
-                                        })
-                                })
+                                let overlay = overlay?;
+                                let handle_start =
+                                    overlay.corners.iter().copied().find(|corner| {
+                                        composition_to_screen(*corner).distance(origin)
+                                            <= SCALE_HANDLE_HIT_RADIUS
+                                    })?;
+                                let evaluated =
+                                    scene.objects.iter().find(|evaluated| evaluated.id == object_id)?;
+                                Some(session.begin_viewport_scale_drag(
+                                    object_id,
+                                    overlay.anchor,
+                                    handle_start,
+                                    *object.transform.scale.base_value(),
+                                    evaluated.transform.rotation_degrees,
+                                ))
                             })
                             .unwrap_or(false)
                     } else {
@@ -615,8 +600,11 @@ pub fn draw_editor_shell(
                         let (rotation_stem, rotation_handle) = rotation_handle_points(corners);
                         ui.painter()
                             .line_segment([rotation_stem, rotation_handle], stroke);
-                        ui.painter()
-                            .circle_filled(rotation_handle, 5.0, ui.visuals().window_fill());
+                        ui.painter().circle_filled(
+                            rotation_handle,
+                            5.0,
+                            ui.visuals().window_fill(),
+                        );
                         ui.painter().circle_stroke(rotation_handle, 5.0, stroke);
                     }
 
