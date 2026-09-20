@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    animation::{AnimationInvariantError, Keyframe},
+    animation::{AnimationInvariantError, Interpolation, Keyframe},
     domain::Vec2,
     ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{Object, Project, ProjectValidationError},
@@ -9,7 +9,7 @@ use crate::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
         insert_property_keyframe, locate_property_keyframe, property_base_value,
         property_keyframe_by_id, property_keyframe_count, remove_property_keyframe_by_id,
-        set_property_base_value,
+        set_property_base_value, set_property_keyframe_interpolation,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -102,6 +102,15 @@ pub struct PropertyBaseChange {
     pub after: PropertyValue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PropertyKeyframeInterpolationRecord {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub keyframe_id: KeyframeId,
+    pub before: Interpolation,
+    pub after: Interpolation,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     AddObject {
@@ -145,6 +154,10 @@ pub enum EditCommand {
     MovePropertyKeyframes {
         moves: Vec<PropertyKeyframeMove>,
     },
+    SetPropertyKeyframeInterpolations {
+        keyframe_ids: Vec<KeyframeId>,
+        interpolation: Interpolation,
+    },
     SetTempoMap {
         tempo_map: TempoMap,
     },
@@ -165,6 +178,7 @@ impl EditCommand {
             Self::InsertPropertyKeyframes { .. } => "InsertPropertyKeyframes",
             Self::DeletePropertyKeyframes { .. } => "DeletePropertyKeyframes",
             Self::MovePropertyKeyframes { .. } => "MovePropertyKeyframes",
+            Self::SetPropertyKeyframeInterpolations { .. } => "SetPropertyKeyframeInterpolations",
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
     }
@@ -189,6 +203,19 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         before: Vec2,
         after: Vec2,
+    },
+    PositionsBaseChanged {
+        changes: Vec<(ObjectId, Vec2, Vec2)>,
+    },
+    ScaleBaseChanged {
+        object_id: ObjectId,
+        before: Vec2,
+        after: Vec2,
+    },
+    RotationBaseChanged {
+        object_id: ObjectId,
+        before: f32,
+        after: f32,
     },
     OpacityBaseChanged {
         object_id: ObjectId,
@@ -220,6 +247,9 @@ pub enum HistoryPayload {
     },
     PropertyKeyframesMoved {
         records: Vec<PropertyKeyframeMoveRecord>,
+    },
+    PropertyKeyframeInterpolationsChanged {
+        records: Vec<PropertyKeyframeInterpolationRecord>,
     },
     TempoMapChanged {
         before: TempoMap,
@@ -363,7 +393,10 @@ impl History {
 
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
-    ObjectPosition { object_id: ObjectId, before: Vec2 },
+    Position { object_id: ObjectId, before: Vec2 },
+    Positions { before: Vec<(ObjectId, Vec2)> },
+    Scale { object_id: ObjectId, before: Vec2 },
+    Rotation { object_id: ObjectId, before: f32 },
 }
 
 #[derive(Debug)]
@@ -543,6 +576,17 @@ impl ProjectEditor {
         self.execute(EditCommand::MovePropertyKeyframes { moves })
     }
 
+    pub fn set_property_keyframe_interpolations(
+        &mut self,
+        keyframe_ids: Vec<KeyframeId>,
+        interpolation: Interpolation,
+    ) -> Result<bool, EditError> {
+        self.execute(EditCommand::SetPropertyKeyframeInterpolations {
+            keyframe_ids,
+            interpolation,
+        })
+    }
+
     pub fn execute(&mut self, command: EditCommand) -> Result<bool, EditError> {
         if self.transaction.is_some() {
             return Err(EditError::HistoryInvariant(
@@ -568,14 +612,14 @@ impl ProjectEditor {
             .position
             .base_value();
 
-        self.transaction = Some(ActiveTransaction::ObjectPosition { object_id, before });
+        self.transaction = Some(ActiveTransaction::Position { object_id, before });
         Ok(())
     }
 
     pub fn update_position_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectPosition { object_id, .. }) => object_id,
-            None => {
+            Some(ActiveTransaction::Position { object_id, .. }) => object_id,
+            _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active position transaction",
                 ));
@@ -590,13 +634,135 @@ impl ProjectEditor {
         Ok(())
     }
 
+    pub fn begin_multi_position_transaction(
+        &mut self,
+        object_ids: &[ObjectId],
+    ) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+        if object_ids.is_empty() {
+            return Err(EditError::HistoryInvariant(
+                "multi-position transaction requires objects",
+            ));
+        }
+
+        let mut object_ids = object_ids.to_vec();
+        object_ids.sort_by_key(|object_id| object_id.get());
+        object_ids.dedup();
+
+        let mut before = Vec::with_capacity(object_ids.len());
+        for object_id in object_ids {
+            let index = self.object_index(object_id)?;
+            before.push((
+                object_id,
+                *self.project.composition.objects[index]
+                    .transform
+                    .position
+                    .base_value(),
+            ));
+        }
+
+        self.transaction = Some(ActiveTransaction::Positions { before });
+        Ok(())
+    }
+
+    pub fn update_multi_position_transaction(&mut self, delta: Vec2) -> Result<(), EditError> {
+        let before = match &self.transaction {
+            Some(ActiveTransaction::Positions { before }) => before.clone(),
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active multi-position transaction",
+                ));
+            }
+        };
+
+        for (object_id, position) in before {
+            let index = self.object_index(object_id)?;
+            *self.project.composition.objects[index]
+                .transform
+                .position
+                .base_value_mut() = Vec2::new(position.x() + delta.x(), position.y() + delta.y())
+                .map_err(|_| EditError::InvalidValue("position"))?;
+        }
+        Ok(())
+    }
+
+    pub fn begin_scale_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let index = self.object_index(object_id)?;
+        let before = *self.project.composition.objects[index]
+            .transform
+            .scale
+            .base_value();
+
+        self.transaction = Some(ActiveTransaction::Scale { object_id, before });
+        Ok(())
+    }
+
+    pub fn update_scale_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
+        let object_id = match self.transaction {
+            Some(ActiveTransaction::Scale { object_id, .. }) => object_id,
+            _ => {
+                return Err(EditError::HistoryInvariant("no active scale transaction"));
+            }
+        };
+
+        let index = self.object_index(object_id)?;
+        *self.project.composition.objects[index]
+            .transform
+            .scale
+            .base_value_mut() = value;
+        Ok(())
+    }
+
+    pub fn begin_rotation_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let index = self.object_index(object_id)?;
+        let before = *self.project.composition.objects[index]
+            .transform
+            .rotation_degrees
+            .base_value();
+
+        self.transaction = Some(ActiveTransaction::Rotation { object_id, before });
+        Ok(())
+    }
+
+    pub fn update_rotation_transaction(&mut self, value: f32) -> Result<(), EditError> {
+        if !value.is_finite() {
+            return Err(EditError::InvalidValue("rotation"));
+        }
+
+        let object_id = match self.transaction {
+            Some(ActiveTransaction::Rotation { object_id, .. }) => object_id,
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active rotation transaction",
+                ));
+            }
+        };
+
+        let index = self.object_index(object_id)?;
+        *self.project.composition.objects[index]
+            .transform
+            .rotation_degrees
+            .base_value_mut() = value;
+        Ok(())
+    }
+
     pub fn commit_transaction(&mut self) -> Result<bool, EditError> {
         let Some(transaction) = self.transaction.take() else {
             return Ok(false);
         };
 
         match transaction {
-            ActiveTransaction::ObjectPosition { object_id, before } => {
+            ActiveTransaction::Position { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -617,6 +783,72 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::Positions { before } => {
+                let mut changes = Vec::with_capacity(before.len());
+                for (object_id, before_position) in before {
+                    let index = self.object_index(object_id)?;
+                    let after = *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value();
+                    if before_position != after {
+                        changes.push((object_id, before_position, after));
+                    }
+                }
+
+                if changes.is_empty() {
+                    return Ok(false);
+                }
+
+                let count = changes.len();
+                self.history.push(PendingHistoryEntry::new(
+                    &format!("Move {count} Objects"),
+                    HistoryPayload::PositionsBaseChanged { changes },
+                ));
+                Ok(true)
+            }
+            ActiveTransaction::Scale { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                let after = *self.project.composition.objects[index]
+                    .transform
+                    .scale
+                    .base_value();
+
+                if before == after {
+                    return Ok(false);
+                }
+
+                self.history.push(PendingHistoryEntry::new(
+                    "Scale Object",
+                    HistoryPayload::ScaleBaseChanged {
+                        object_id,
+                        before,
+                        after,
+                    },
+                ));
+                Ok(true)
+            }
+            ActiveTransaction::Rotation { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                let after = *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
+                    .base_value();
+
+                if before == after {
+                    return Ok(false);
+                }
+
+                self.history.push(PendingHistoryEntry::new(
+                    "Rotate Object",
+                    HistoryPayload::RotationBaseChanged {
+                        object_id,
+                        before,
+                        after,
+                    },
+                ));
+                Ok(true)
+            }
         }
     }
 
@@ -626,11 +858,34 @@ impl ProjectEditor {
         };
 
         match transaction {
-            ActiveTransaction::ObjectPosition { object_id, before } => {
+            ActiveTransaction::Position { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
                     .position
+                    .base_value_mut() = before;
+            }
+            ActiveTransaction::Positions { before } => {
+                for (object_id, position) in before {
+                    let index = self.object_index(object_id)?;
+                    *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value_mut() = position;
+                }
+            }
+            ActiveTransaction::Scale { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .scale
+                    .base_value_mut() = before;
+            }
+            ActiveTransaction::Rotation { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
                     .base_value_mut() = before;
             }
         }
@@ -1277,6 +1532,112 @@ impl ProjectEditor {
                     HistoryPayload::PropertyKeyframesMoved { records },
                 )))
             }
+            EditCommand::SetPropertyKeyframeInterpolations {
+                keyframe_ids,
+                interpolation,
+            } => {
+                let mut unique_ids = HashSet::with_capacity(keyframe_ids.len());
+                let mut records = Vec::with_capacity(keyframe_ids.len());
+
+                for keyframe_id in keyframe_ids {
+                    if !unique_ids.insert(keyframe_id) {
+                        continue;
+                    }
+
+                    let located = locate_property_keyframe(&self.project, keyframe_id)
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                    if located.keyframe.interpolation == interpolation {
+                        continue;
+                    }
+
+                    records.push(PropertyKeyframeInterpolationRecord {
+                        object_id: located.object_id,
+                        property: located.property,
+                        keyframe_id,
+                        before: located.keyframe.interpolation,
+                        after: interpolation,
+                    });
+                }
+
+                if records.is_empty() {
+                    return Ok(None);
+                }
+
+                for (index, record) in records.iter().enumerate() {
+                    match set_property_keyframe_interpolation(
+                        &mut self.project,
+                        record.object_id,
+                        record.property,
+                        record.keyframe_id,
+                        record.after,
+                    ) {
+                        Ok(Some(before)) if before == record.before => {}
+                        Ok(Some(before)) => {
+                            let _ = set_property_keyframe_interpolation(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.keyframe_id,
+                                before,
+                            );
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::HistoryInvariant(
+                                "keyframe interpolation source mismatch",
+                            ));
+                        }
+                        Ok(None) => {
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::KeyframeNotFound(record.keyframe_id));
+                        }
+                        Err(error) => {
+                            for applied in records[..index].iter().rev() {
+                                let _ = set_property_keyframe_interpolation(
+                                    &mut self.project,
+                                    applied.object_id,
+                                    applied.property,
+                                    applied.keyframe_id,
+                                    applied.before,
+                                );
+                            }
+                            return Err(EditError::PropertyAccess(error));
+                        }
+                    }
+                }
+
+                if let Err(error) = self.project.validate() {
+                    for record in records.iter().rev() {
+                        let _ = set_property_keyframe_interpolation(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.keyframe_id,
+                            record.before,
+                        );
+                    }
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Change Keyframe Easing",
+                    HistoryPayload::PropertyKeyframeInterpolationsChanged { records },
+                )))
+            }
             EditCommand::SetTempoMap { tempo_map } => {
                 let before = self.project.tempo_map.clone();
                 if before == tempo_map {
@@ -1356,6 +1717,46 @@ impl ProjectEditor {
                     .position
                     .base_value_mut() = value;
             }
+            (HistoryPayload::PositionsBaseChanged { changes }, direction) => {
+                for (object_id, before, after) in changes {
+                    let value = *direction.pick(before, after);
+                    let index = self.object_index(*object_id)?;
+                    *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value_mut() = value;
+                }
+            }
+            (
+                HistoryPayload::ScaleBaseChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let value = *direction.pick(before, after);
+                let index = self.object_index(*object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .scale
+                    .base_value_mut() = value;
+            }
+            (
+                HistoryPayload::RotationBaseChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let value = *direction.pick(before, after);
+                let index = self.object_index(*object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
+                    .base_value_mut() = value;
+            }
             (
                 HistoryPayload::OpacityBaseChanged {
                     object_id,
@@ -1430,7 +1831,7 @@ impl ProjectEditor {
                     property,
                     keyframe,
                     base_before,
-                    base_after,
+                    base_after: _,
                 },
                 HistoryDirection::Undo,
             ) => {
@@ -1465,10 +1866,7 @@ impl ProjectEditor {
                     set_property_base_value(&mut self.project, *object_id, *property, *base_after)?;
                 }
             }
-            (
-                HistoryPayload::PropertyKeyframesInserted { records },
-                direction,
-            ) => match direction {
+            (HistoryPayload::PropertyKeyframesInserted { records }, direction) => match direction {
                 HistoryDirection::Undo => {
                     for record in records.iter().rev() {
                         remove_property_keyframe_by_id(
@@ -1614,6 +2012,27 @@ impl ProjectEditor {
                     }
                 }
             },
+            (HistoryPayload::PropertyKeyframeInterpolationsChanged { records }, direction) => {
+                for record in records {
+                    let (expected, target) = match direction {
+                        HistoryDirection::Undo => (record.after, record.before),
+                        HistoryDirection::Redo => (record.before, record.after),
+                    };
+                    let observed = set_property_keyframe_interpolation(
+                        &mut self.project,
+                        record.object_id,
+                        record.property,
+                        record.keyframe_id,
+                        target,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(record.keyframe_id))?;
+                    if observed != expected {
+                        return Err(EditError::HistoryInvariant(
+                            "keyframe interpolation history mismatch",
+                        ));
+                    }
+                }
+            }
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
             }
@@ -1757,6 +2176,92 @@ mod tests {
             )
             .expect("property")
             .is_none()
+        );
+    }
+
+    #[test]
+    fn batch_keyframe_interpolation_change_is_one_undoable_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                crate::property::PropertyValue::Scalar(0.1),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                crate::property::PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("second");
+        let third = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                crate::property::PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("third");
+        let history_before = editor.history_len();
+
+        assert_eq!(
+            editor.set_property_keyframe_interpolations(vec![first, second], Interpolation::Hold,),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), history_before + 1);
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), second)
+                .expect("second")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), third)
+                .expect("third")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), second)
+                .expect("second")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
         );
     }
 
@@ -2215,6 +2720,200 @@ mod tests {
                 .x(),
             0.0
         );
+    }
+
+    #[test]
+    fn multi_position_drag_applies_shared_delta_as_one_history_entry() {
+        let mut project = Project::new(
+            "Untitled",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut first = object(1, "A");
+        first.transform.position =
+            Animated::new_static(Vec2::new(10.0, 20.0).expect("first position"));
+        let mut second = object(2, "B");
+        second.transform.position =
+            Animated::new_static(Vec2::new(-5.0, 40.0).expect("second position"));
+        project.composition.objects.extend([first, second]);
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+
+        editor
+            .begin_multi_position_transaction(&[
+                ObjectId::new(2).expect("second"),
+                ObjectId::new(1).expect("first"),
+            ])
+            .expect("begin multi-position transaction");
+        editor
+            .update_multi_position_transaction(Vec2::new(30.0, -10.0).expect("delta"))
+            .expect("preview move");
+        assert_eq!(editor.history_len(), 0);
+
+        assert_eq!(editor.commit_transaction(), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(40.0, 10.0).expect("first moved")
+        );
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(25.0, 30.0).expect("second moved")
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(10.0, 20.0).expect("first restored")
+        );
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(-5.0, 40.0).expect("second restored")
+        );
+    }
+
+    #[test]
+    fn one_rotation_drag_transaction_creates_one_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_rotation_transaction(object_id)
+            .expect("begin rotation transaction");
+        for rotation in [15.0, 45.0, 190.0, 405.0] {
+            editor
+                .update_rotation_transaction(rotation)
+                .expect("preview rotation");
+        }
+
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(editor.commit_transaction(), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            405.0
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            0.0
+        );
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            405.0
+        );
+    }
+
+    #[test]
+    fn cancelled_rotation_transaction_restores_before_state() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_rotation_transaction(object_id)
+            .expect("begin rotation transaction");
+        editor
+            .update_rotation_transaction(-123.5)
+            .expect("preview rotation");
+        assert_eq!(editor.cancel_transaction(), Ok(true));
+
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            0.0
+        );
+        assert_eq!(editor.history_len(), 0);
+    }
+
+    #[test]
+    fn one_scale_drag_transaction_creates_one_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_scale_transaction(object_id)
+            .expect("begin scale transaction");
+        for scale in [(1.25, 0.75), (1.5, 0.5), (-2.0, 1.25)] {
+            editor
+                .update_scale_transaction(Vec2::new(scale.0, scale.1).expect("finite scale"))
+                .expect("preview scale");
+        }
+
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(editor.commit_transaction(), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(-2.0, 1.25).expect("committed scale")
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(1.0, 1.0).expect("restored scale")
+        );
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(-2.0, 1.25).expect("redone scale")
+        );
+    }
+
+    #[test]
+    fn cancelled_scale_transaction_restores_before_state() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+
+        editor
+            .begin_scale_transaction(object_id)
+            .expect("begin scale transaction");
+        editor
+            .update_scale_transaction(Vec2::new(3.0, -0.5).expect("finite scale"))
+            .expect("preview scale");
+        assert_eq!(editor.cancel_transaction(), Ok(true));
+
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(1.0, 1.0).expect("restored scale")
+        );
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]
