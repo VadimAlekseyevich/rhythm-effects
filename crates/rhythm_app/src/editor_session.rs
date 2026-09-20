@@ -747,7 +747,7 @@ impl EditorSession {
             .is_some_and(|drag| drag.phase == ViewportTransformDragPhase::Active)
     }
 
-    pub fn update_viewport_rotation_drag(&mut self, pointer: Vec2) -> bool {
+    pub fn update_viewport_rotation_drag(&mut self, pointer: Vec2, snap_15_degrees: bool) -> bool {
         let Some(drag) = self.viewport_rotation_drag.as_mut() else {
             return false;
         };
@@ -772,7 +772,12 @@ impl EditorSession {
 
         drag.pointer_angle_degrees = current_angle;
         drag.accumulated_delta_degrees += delta;
-        let current_rotation = drag.rotation_start + drag.accumulated_delta_degrees;
+        let raw_rotation = drag.rotation_start + drag.accumulated_delta_degrees;
+        let current_rotation = if snap_15_degrees {
+            (raw_rotation / 15.0).round() * 15.0
+        } else {
+            raw_rotation
+        };
         if !current_rotation.is_finite()
             || (current_rotation - drag.current_rotation).abs() < f32::EPSILON
         {
@@ -1943,7 +1948,8 @@ mod tests {
             0.0,
         ));
         assert!(session.update_viewport_rotation_drag(
-            Vec2::new(-0.9848077, -0.1736482).expect("-170 degree pointer")
+            Vec2::new(-0.9848077, -0.1736482).expect("-170 degree pointer"),
+            false,
         ));
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
         let rotation = *editor.project().composition.objects[0]
@@ -1953,7 +1959,8 @@ mod tests {
         assert!((rotation - 20.0).abs() < 0.001);
 
         assert!(session.update_viewport_rotation_drag(
-            Vec2::new(0.0, -1.0).expect("-90 degree pointer")
+            Vec2::new(0.0, -1.0).expect("-90 degree pointer"),
+            false,
         ));
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
         let rotation = *editor.project().composition.objects[0]
@@ -1965,6 +1972,39 @@ mod tests {
         assert!(session.finish_viewport_rotation_drag());
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
         assert_eq!(editor.history_len(), 1);
+    }
+
+    #[test]
+    fn viewport_rotation_drag_shift_snaps_preview_to_15_degrees() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_rotation_drag(
+            object_id,
+            Vec2::new(0.0, 0.0).expect("anchor"),
+            Vec2::new(1.0, 0.0).expect("pointer"),
+            0.0,
+        ));
+        let radians = 22.0_f32.to_radians();
+        let pointer = Vec2::new(radians.cos(), radians.sin()).expect("pointer");
+        assert!(session.update_viewport_rotation_drag(pointer, true));
+        assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            15.0
+        );
+
+        assert!(session.update_viewport_rotation_drag(pointer, false));
+        assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
+        let rotation = *editor.project().composition.objects[0]
+            .transform
+            .rotation_degrees
+            .base_value();
+        assert!((rotation - 22.0).abs() < 0.001);
     }
 
     #[test]
@@ -1980,7 +2020,8 @@ mod tests {
             0.0,
         ));
         assert!(session.update_viewport_rotation_drag(
-            Vec2::new(0.0, 1.0).expect("pointer")
+            Vec2::new(0.0, 1.0).expect("pointer"),
+            false,
         ));
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
         assert!(session.cancel_viewport_rotation_drag());
