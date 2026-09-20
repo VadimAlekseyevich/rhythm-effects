@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
+    animation::{BezierEasing, Interpolation},
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
-        property_keyframe_at_tick, property_keyframe_count, property_value_compatible,
+        property_keyframe_at_tick, property_keyframe_count, property_keyframe_has_successor,
+        property_value_compatible,
     },
     time::{
         BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
@@ -32,6 +34,53 @@ impl PreviewQuality {
             Self::Full => "Full",
             Self::Half => "Half",
             Self::Quarter => "Quarter",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyframeInterpolationPreset {
+    Hold,
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+
+impl KeyframeInterpolationPreset {
+    pub const ALL: [Self; 5] = [
+        Self::Hold,
+        Self::Linear,
+        Self::EaseIn,
+        Self::EaseOut,
+        Self::EaseInOut,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Hold => "Hold",
+            Self::Linear => "Linear",
+            Self::EaseIn => "Ease In",
+            Self::EaseOut => "Ease Out",
+            Self::EaseInOut => "Ease In-Out",
+        }
+    }
+
+    #[must_use]
+    pub fn interpolation(self) -> Interpolation {
+        match self {
+            Self::Hold => Interpolation::Hold,
+            Self::Linear => Interpolation::Linear,
+            Self::EaseIn => Interpolation::CubicBezier(
+                BezierEasing::new(0.42, 0.0, 1.0, 1.0).expect("valid ease-in preset"),
+            ),
+            Self::EaseOut => Interpolation::CubicBezier(
+                BezierEasing::new(0.0, 0.0, 0.58, 1.0).expect("valid ease-out preset"),
+            ),
+            Self::EaseInOut => Interpolation::CubicBezier(
+                BezierEasing::new(0.42, 0.0, 0.58, 1.0).expect("valid ease-in-out preset"),
+            ),
         }
     }
 }
@@ -100,6 +149,7 @@ pub struct EditorSession {
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
+    pending_keyframe_interpolation: Option<Interpolation>,
     keyframe_clipboard: Option<KeyframeCopyPacket>,
     timeline_box_selection: Option<TimelineBoxSelection>,
 }
@@ -115,6 +165,7 @@ impl Default for EditorSession {
             focused_property: None,
             keyframe_drag: None,
             pending_keyframe_move: None,
+            pending_keyframe_interpolation: None,
             keyframe_clipboard: None,
             timeline_box_selection: None,
         }
