@@ -107,7 +107,7 @@ pub enum ViewportCameraAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ViewportPositionDragPhase {
+enum ViewportTransformDragPhase {
     Active,
     CommitRequested,
     CancelRequested,
@@ -119,7 +119,19 @@ struct ViewportPositionDrag {
     pointer_start: [f32; 2],
     position_start: Vec2,
     current_position: Vec2,
-    phase: ViewportPositionDragPhase,
+    phase: ViewportTransformDragPhase,
+    transaction_started: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportScaleDrag {
+    object_id: ObjectId,
+    anchor: Vec2,
+    handle_start: Vec2,
+    scale_start: Vec2,
+    rotation_degrees: f32,
+    current_scale: Vec2,
+    phase: ViewportTransformDragPhase,
     transaction_started: bool,
 }
 
@@ -185,6 +197,7 @@ pub struct EditorSession {
     viewport_zoom: f32,
     pending_viewport_camera_action: Option<ViewportCameraAction>,
     viewport_position_drag: Option<ViewportPositionDrag>,
+    viewport_scale_drag: Option<ViewportScaleDrag>,
     selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
@@ -208,6 +221,7 @@ impl Default for EditorSession {
             viewport_zoom: 1.0,
             pending_viewport_camera_action: None,
             viewport_position_drag: None,
+            viewport_scale_drag: None,
             selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
@@ -393,6 +407,7 @@ impl EditorSession {
         position_start: Vec2,
     ) -> bool {
         if self.viewport_position_drag.is_some()
+            || self.viewport_scale_drag.is_some()
             || !pointer_start[0].is_finite()
             || !pointer_start[1].is_finite()
         {
@@ -404,7 +419,7 @@ impl EditorSession {
             pointer_start,
             position_start,
             current_position: position_start,
-            phase: ViewportPositionDragPhase::Active,
+            phase: ViewportTransformDragPhase::Active,
             transaction_started: false,
         });
         true
@@ -413,7 +428,7 @@ impl EditorSession {
     #[must_use]
     pub fn viewport_position_drag_active(&self) -> bool {
         self.viewport_position_drag
-            .is_some_and(|drag| drag.phase == ViewportPositionDragPhase::Active)
+            .is_some_and(|drag| drag.phase == ViewportTransformDragPhase::Active)
     }
 
     pub fn update_viewport_position_drag(
@@ -425,7 +440,7 @@ impl EditorSession {
         let Some(drag) = self.viewport_position_drag.as_mut() else {
             return false;
         };
-        if drag.phase != ViewportPositionDragPhase::Active
+        if drag.phase != ViewportTransformDragPhase::Active
             || !pointer[0].is_finite()
             || !pointer[1].is_finite()
             || !composition_units_per_point[0].is_finite()
@@ -463,11 +478,11 @@ impl EditorSession {
         let Some(drag) = self.viewport_position_drag.as_mut() else {
             return false;
         };
-        if drag.phase != ViewportPositionDragPhase::Active {
+        if drag.phase != ViewportTransformDragPhase::Active {
             return false;
         }
 
-        drag.phase = ViewportPositionDragPhase::CommitRequested;
+        drag.phase = ViewportTransformDragPhase::CommitRequested;
         true
     }
 
@@ -475,11 +490,11 @@ impl EditorSession {
         let Some(drag) = self.viewport_position_drag.as_mut() else {
             return false;
         };
-        if drag.phase == ViewportPositionDragPhase::CancelRequested {
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
             return false;
         }
 
-        drag.phase = ViewportPositionDragPhase::CancelRequested;
+        drag.phase = ViewportTransformDragPhase::CancelRequested;
         true
     }
 
@@ -491,7 +506,7 @@ impl EditorSession {
             return Ok(false);
         };
 
-        if drag.phase == ViewportPositionDragPhase::CancelRequested && !drag.transaction_started {
+        if drag.phase == ViewportTransformDragPhase::CancelRequested && !drag.transaction_started {
             self.viewport_position_drag = None;
             return Ok(true);
         }
@@ -504,7 +519,7 @@ impl EditorSession {
             drag.transaction_started = true;
         }
 
-        if drag.phase == ViewportPositionDragPhase::CancelRequested {
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
             let changed = editor.cancel_transaction()?;
             self.viewport_position_drag = None;
             return Ok(changed);
@@ -512,9 +527,148 @@ impl EditorSession {
 
         editor.update_position_transaction(drag.current_position)?;
 
-        if drag.phase == ViewportPositionDragPhase::CommitRequested {
+        if drag.phase == ViewportTransformDragPhase::CommitRequested {
             let changed = editor.commit_transaction()?;
             self.viewport_position_drag = None;
+            return Ok(changed);
+        }
+
+        Ok(true)
+    }
+
+    pub fn begin_viewport_scale_drag(
+        &mut self,
+        object_id: ObjectId,
+        anchor: Vec2,
+        handle_start: Vec2,
+        scale_start: Vec2,
+        rotation_degrees: f32,
+    ) -> bool {
+        if self.viewport_position_drag.is_some()
+            || self.viewport_scale_drag.is_some()
+            || !rotation_degrees.is_finite()
+        {
+            return false;
+        }
+
+        self.viewport_scale_drag = Some(ViewportScaleDrag {
+            object_id,
+            anchor,
+            handle_start,
+            scale_start,
+            rotation_degrees,
+            current_scale: scale_start,
+            phase: ViewportTransformDragPhase::Active,
+            transaction_started: false,
+        });
+        true
+    }
+
+    #[must_use]
+    pub fn viewport_scale_drag_active(&self) -> bool {
+        self.viewport_scale_drag
+            .is_some_and(|drag| drag.phase == ViewportTransformDragPhase::Active)
+    }
+
+    pub fn update_viewport_scale_drag(&mut self, pointer: Vec2) -> bool {
+        let Some(drag) = self.viewport_scale_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportTransformDragPhase::Active {
+            return false;
+        }
+
+        let radians = drag.rotation_degrees.to_radians();
+        let (sin, cos) = radians.sin_cos();
+        let unrotate = |point: Vec2| {
+            let translated_x = point.x() - drag.anchor.x();
+            let translated_y = point.y() - drag.anchor.y();
+            (
+                cos * translated_x + sin * translated_y,
+                -sin * translated_x + cos * translated_y,
+            )
+        };
+        let (start_x, start_y) = unrotate(drag.handle_start);
+        let (current_x, current_y) = unrotate(pointer);
+        const HANDLE_AXIS_EPSILON: f32 = 0.0001;
+
+        let scale_x = if start_x.abs() > HANDLE_AXIS_EPSILON {
+            drag.scale_start.x() * current_x / start_x
+        } else {
+            drag.scale_start.x()
+        };
+        let scale_y = if start_y.abs() > HANDLE_AXIS_EPSILON {
+            drag.scale_start.y() * current_y / start_y
+        } else {
+            drag.scale_start.y()
+        };
+        let Ok(current_scale) = Vec2::new(scale_x, scale_y) else {
+            return false;
+        };
+
+        if current_scale == drag.current_scale {
+            return false;
+        }
+        drag.current_scale = current_scale;
+        true
+    }
+
+    pub fn finish_viewport_scale_drag(&mut self) -> bool {
+        let Some(drag) = self.viewport_scale_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportTransformDragPhase::Active {
+            return false;
+        }
+
+        drag.phase = ViewportTransformDragPhase::CommitRequested;
+        true
+    }
+
+    pub fn cancel_viewport_scale_drag(&mut self) -> bool {
+        let Some(drag) = self.viewport_scale_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
+            return false;
+        }
+
+        drag.phase = ViewportTransformDragPhase::CancelRequested;
+        true
+    }
+
+    pub fn sync_viewport_scale_drag(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(drag) = self.viewport_scale_drag.as_mut() else {
+            return Ok(false);
+        };
+
+        if drag.phase == ViewportTransformDragPhase::CancelRequested && !drag.transaction_started {
+            self.viewport_scale_drag = None;
+            return Ok(true);
+        }
+
+        if !drag.transaction_started {
+            if let Err(error) = editor.begin_scale_transaction(drag.object_id) {
+                self.viewport_scale_drag = None;
+                return Err(error);
+            }
+            drag.transaction_started = true;
+        }
+
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
+            let changed = editor.cancel_transaction()?;
+            self.viewport_scale_drag = None;
+            return Ok(changed);
+        }
+
+        editor.update_scale_transaction(drag.current_scale)?;
+
+        if drag.phase == ViewportTransformDragPhase::CommitRequested {
+            let changed = editor.commit_transaction()?;
+            self.viewport_scale_drag = None;
             return Ok(changed);
         }
 
@@ -1603,6 +1757,71 @@ mod tests {
                 .position
                 .base_value(),
             Vec2::new(0.0, 80.0).expect("y constrained position")
+        );
+    }
+
+    #[test]
+    fn viewport_scale_drag_updates_both_axes_and_commits_one_history_entry() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_scale_drag(
+            object_id,
+            Vec2::new(0.0, 0.0).expect("anchor"),
+            Vec2::new(50.0, 50.0).expect("handle"),
+            Vec2::new(1.0, 1.0).expect("scale"),
+            0.0,
+        ));
+        assert!(session.update_viewport_scale_drag(
+            Vec2::new(100.0, 25.0).expect("pointer")
+        ));
+        assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(2.0, 0.5).expect("preview scale")
+        );
+
+        assert!(session.finish_viewport_scale_drag());
+        assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(1.0, 1.0).expect("restored scale")
+        );
+    }
+
+    #[test]
+    fn viewport_scale_drag_respects_object_rotation_and_crossing_anchor() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_scale_drag(
+            object_id,
+            Vec2::new(0.0, 0.0).expect("anchor"),
+            Vec2::new(-50.0, 50.0).expect("rotated handle"),
+            Vec2::new(1.0, 1.0).expect("scale"),
+            90.0,
+        ));
+        assert!(session.update_viewport_scale_drag(
+            Vec2::new(25.0, -100.0).expect("pointer across anchor")
+        ));
+        assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(-2.0, -0.5).expect("mirrored scale")
         );
     }
 
