@@ -2746,6 +2746,7 @@ mod tests {
         domain::{LinearRgba, Vec2},
         editor::ProjectEditor,
         ids::{KeyframeId, ObjectId},
+        project::ObjectContent,
         property::{
             AnimatableProperty, PropertyValue, property_base_value, property_keyframe_at_tick,
         },
@@ -2976,6 +2977,85 @@ mod tests {
                 AnimatableProperty::RectangleFill,
             ),
             Ok(PropertyValue::Color(LinearRgba::black_opaque()))
+        );
+    }
+
+    #[test]
+    fn inspector_animated_fill_channel_commit_creates_nearest_grid_color_key() {
+        use rhythm_core::animation::{Animated, Interpolation, Keyframe};
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.tempo_map = tempo_120();
+        let first = LinearRgba::new(0.0, 0.2, 0.4, 1.0).expect("color");
+        let second = LinearRgba::new(1.0, 0.2, 0.4, 1.0).expect("color");
+        let ObjectContent::Rectangle(rectangle) = &mut project.composition.objects[0].content else {
+            panic!("test object should be rectangle");
+        };
+        rectangle.fill = Animated::with_keyframes(
+            first,
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(2).expect("keyframe id"),
+                    MusicalTick::new(0),
+                    first,
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(3).expect("keyframe id"),
+                    MusicalTick::new(480),
+                    second,
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("animated fill");
+        project.next_entity_id = 4;
+
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(130_000_000));
+        let target = InspectorNumericTarget {
+            object_id,
+            property: AnimatableProperty::RectangleFill,
+            component: InspectorNumericComponent::G,
+        };
+
+        session.begin_inspector_numeric_edit(target, 0.2, "20.0".to_owned());
+        assert!(session.update_inspector_numeric_edit_buffer(target, "70.0".to_owned()));
+        assert!(session.commit_inspector_numeric_edit(target));
+        assert_eq!(
+            session.commit_pending_inspector_animated_property_edit(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+
+        let key = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::RectangleFill,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("nearest-grid fill key");
+        let PropertyValue::Color(color) = key.value else {
+            panic!("fill key should be color");
+        };
+        assert!((color.r() - 0.5).abs() < 0.001);
+        assert!((color.g() - 0.7).abs() < f32::EPSILON);
+        assert!((color.b() - 0.4).abs() < f32::EPSILON);
+        assert_eq!(color.a(), 1.0);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::RectangleFill,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_none()
         );
     }
 
