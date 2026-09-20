@@ -302,12 +302,45 @@ pub fn draw_editor_shell(
                 && let Some(composition_origin) = screen_to_composition(origin)
                 && let Ok(scene) =
                     rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
-                && pick_topmost_object(project, &scene, composition_origin, |_, _| None).is_none()
             {
-                session.begin_viewport_box_selection([origin.x, origin.y]);
+                let picked =
+                    pick_topmost_object(project, &scene, composition_origin, |_, _| None);
+                let ctrl = ui.input(|input| input.modifiers.ctrl);
+                let selected = session.selected_object_ids();
+
+                if !ctrl
+                    && selected.len() == 1
+                    && picked == selected.first().copied()
+                    && let Some(object_id) = picked
+                    && let Some(object) = project
+                        .composition
+                        .objects
+                        .iter()
+                        .find(|object| object.id == object_id)
+                    && object.transform.position.keyframes().is_empty()
+                {
+                    session.begin_viewport_position_drag(
+                        object_id,
+                        [origin.x, origin.y],
+                        *object.transform.position.base_value(),
+                    );
+                } else if picked.is_none() {
+                    session.begin_viewport_box_selection([origin.x, origin.y]);
+                }
             }
 
             if primary_down
+                && let Some(pointer) = pointer_pos
+                && session.viewport_position_drag_active()
+            {
+                session.update_viewport_position_drag(
+                    [pointer.x, pointer.y],
+                    [
+                        composition_size.x / response.rect.width(),
+                        composition_size.y / response.rect.height(),
+                    ],
+                );
+            } else if primary_down
                 && let Some(pointer) = pointer_pos
                 && session.viewport_box_selection().is_some()
             {
@@ -339,7 +372,23 @@ pub fn draw_editor_shell(
                 }
             }
 
+            let position_drag_released =
+                primary_released && session.viewport_position_drag_active();
+            if position_drag_released {
+                if let Some(pointer) = pointer_pos {
+                    session.update_viewport_position_drag(
+                        [pointer.x, pointer.y],
+                        [
+                            composition_size.x / response.rect.width(),
+                            composition_size.y / response.rect.height(),
+                        ],
+                    );
+                }
+                session.finish_viewport_position_drag();
+            }
+
             if primary_released
+                && !position_drag_released
                 && let Some((start, current)) = session.take_viewport_box_selection()
             {
                 let screen_rect = egui::Rect::from_two_pos(
