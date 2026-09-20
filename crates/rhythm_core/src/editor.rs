@@ -682,11 +682,8 @@ impl ProjectEditor {
             *self.project.composition.objects[index]
                 .transform
                 .position
-                .base_value_mut() = Vec2::new(
-                position.x() + delta.x(),
-                position.y() + delta.y(),
-            )
-            .map_err(|_| EditError::InvalidValue("position"))?;
+                .base_value_mut() = Vec2::new(position.x() + delta.x(), position.y() + delta.y())
+                .map_err(|_| EditError::InvalidValue("position"))?;
         }
         Ok(())
     }
