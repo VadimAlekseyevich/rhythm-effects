@@ -3,6 +3,7 @@ use rhythm_core::{
     animation::Animated,
     ids::{EffectId, KeyframeId, ObjectId},
     project::{EffectKind, ObjectContent, Project},
+    property::{AnimatableProperty, EffectAnimatableProperty},
     time::{
         BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
         floor_tick_position_to_grid,
@@ -111,6 +112,53 @@ pub enum TimelineProperty {
 }
 
 impl TimelineProperty {
+    #[must_use]
+    pub const fn animatable_property(self) -> AnimatableProperty {
+        match self {
+            Self::Position => AnimatableProperty::Position,
+            Self::Scale => AnimatableProperty::Scale,
+            Self::Rotation => AnimatableProperty::Rotation,
+            Self::Anchor => AnimatableProperty::Anchor,
+            Self::Opacity => AnimatableProperty::Opacity,
+            Self::RectangleSize => AnimatableProperty::RectangleSize,
+            Self::RectangleFill => AnimatableProperty::RectangleFill,
+            Self::RectangleCornerRadius => AnimatableProperty::RectangleCornerRadius,
+            Self::EllipseSize => AnimatableProperty::EllipseSize,
+            Self::EllipseFill => AnimatableProperty::EllipseFill,
+            Self::TextColor => AnimatableProperty::TextColor,
+            Self::Effect {
+                effect_id,
+                property,
+            } => AnimatableProperty::Effect {
+                effect_id,
+                property: match property {
+                    TimelineEffectProperty::BlurRadius => EffectAnimatableProperty::BlurRadius,
+                    TimelineEffectProperty::GlowRadius => EffectAnimatableProperty::GlowRadius,
+                    TimelineEffectProperty::GlowIntensity => {
+                        EffectAnimatableProperty::GlowIntensity
+                    }
+                    TimelineEffectProperty::GlowThreshold => {
+                        EffectAnimatableProperty::GlowThreshold
+                    }
+                    TimelineEffectProperty::GlowColor => EffectAnimatableProperty::GlowColor,
+                    TimelineEffectProperty::TintColor => EffectAnimatableProperty::TintColor,
+                    TimelineEffectProperty::TintAmount => EffectAnimatableProperty::TintAmount,
+                    TimelineEffectProperty::NoiseAmount => EffectAnimatableProperty::NoiseAmount,
+                    TimelineEffectProperty::NoiseSize => EffectAnimatableProperty::NoiseSize,
+                    TimelineEffectProperty::NoiseEvolution => {
+                        EffectAnimatableProperty::NoiseEvolution
+                    }
+                    TimelineEffectProperty::RgbSplitAmount => {
+                        EffectAnimatableProperty::RgbSplitAmount
+                    }
+                    TimelineEffectProperty::RgbSplitAngle => {
+                        EffectAnimatableProperty::RgbSplitAngle
+                    }
+                },
+            },
+        }
+    }
+
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -753,6 +801,30 @@ fn draw_timeline_rows(
                         property,
                         keyframe_count,
                     } => {
+                        let animatable_property = property.animatable_property();
+                        let row_response = ui.interact(
+                            rect,
+                            egui::Id::new((
+                                "timeline_property_row",
+                                object_id.get(),
+                                *property,
+                            )),
+                            egui::Sense::click(),
+                        );
+                        if row_response.clicked() {
+                            session.focus_property(*object_id, animatable_property);
+                        }
+                        if session.focused_property().is_some_and(|focused| {
+                            focused.object_id == *object_id
+                                && focused.property == animatable_property
+                        }) {
+                            ui.painter().rect_filled(
+                                rect,
+                                0.0,
+                                ui.visuals().selection.bg_fill.gamma_multiply(0.28),
+                            );
+                        }
+
                         ui.painter().text(
                             egui::pos2(rect.left() + 18.0, rect.center().y),
                             egui::Align2::LEFT_CENTER,
@@ -785,6 +857,7 @@ fn draw_timeline_rows(
                                     egui::Sense::click_and_drag(),
                                 );
                                 if response.clicked() {
+                                    session.focus_property(*object_id, animatable_property);
                                     let ctrl = ui.input(|input| input.modifiers.ctrl);
                                     if ctrl {
                                         session.toggle_keyframe_selection(keyframe.id);

@@ -206,7 +206,6 @@ impl ApplicationHandler for RhythmApp {
                         .is_some_and(egui::Context::wants_keyboard_input)
                     && let PhysicalKey::Code(code) = event.physical_key
                 {
-                    let project = self.project_editor.project();
                     let control = self.modifiers.control_key();
                     let shift = self.modifiers.shift_key();
                     let alt = self.modifiers.alt_key();
@@ -217,7 +216,21 @@ impl ApplicationHandler for RhythmApp {
                         _ => 0,
                     };
 
-                    let handled = if direction != 0 && !alt && !super_key {
+                    let handled = if !control
+                        && !shift
+                        && !alt
+                        && !super_key
+                        && code == KeyCode::KeyK
+                    {
+                        match self.session.keyframe_action(&mut self.project_editor) {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "keyframe action failed");
+                                false
+                            }
+                        }
+                    } else if direction != 0 && !alt && !super_key {
+                        let project = self.project_editor.project();
                         if control && shift {
                             self.session.step_playhead_bar(
                                 &project.tempo_map,

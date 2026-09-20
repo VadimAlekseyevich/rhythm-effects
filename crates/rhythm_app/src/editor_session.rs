@@ -1,9 +1,12 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
-    ids::KeyframeId,
+    editor::{EditError, ProjectEditor},
+    ids::{KeyframeId, ObjectId},
+    property::AnimatableProperty,
     time::{
         BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
+        snap_tick_position_to_grid,
     },
 };
 
@@ -43,6 +46,12 @@ struct TimelineView {
     end: ProjectTimeNs,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FocusedProperty {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+}
+
 #[derive(Debug)]
 pub struct EditorSession {
     pub preview_quality: PreviewQuality,
@@ -50,6 +59,7 @@ pub struct EditorSession {
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
     selected_keyframes: HashSet<KeyframeId>,
+    focused_property: Option<FocusedProperty>,
     timeline_box_selection: Option<TimelineBoxSelection>,
 }
 
@@ -61,6 +71,7 @@ impl Default for EditorSession {
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
             selected_keyframes: HashSet::new(),
+            focused_property: None,
             timeline_box_selection: None,
         }
     }
@@ -79,6 +90,57 @@ impl EditorSession {
     #[must_use]
     pub const fn authoring_division(&self) -> BeatDivision {
         self.authoring_division
+    }
+
+    #[must_use]
+    pub const fn focused_property(&self) -> Option<FocusedProperty> {
+        self.focused_property
+    }
+
+    pub const fn focus_property(&mut self, object_id: ObjectId, property: AnimatableProperty) {
+        self.focused_property = Some(FocusedProperty {
+            object_id,
+            property,
+        });
+    }
+
+    pub fn keyframe_action(&mut self, editor: &mut ProjectEditor) -> Result<bool, EditError> {
+        let Some(focused) = self.focused_property else {
+            return Ok(false);
+        };
+
+        let resolved = {
+            let project = editor.project();
+            let Ok(continuous_tick) = project
+                .tempo_map
+                .continuous_tick_position(self.playhead)
+            else {
+                return Ok(false);
+            };
+            let Ok(tick) =
+                snap_tick_position_to_grid(continuous_tick, self.authoring_division)
+            else {
+                return Ok(false);
+            };
+            let Ok(project_time) = project.tempo_map.project_time_for_tick(tick) else {
+                return Ok(false);
+            };
+
+            (tick, project_time)
+        };
+
+        let Some(keyframe_id) = editor.create_first_property_keyframe(
+            focused.object_id,
+            focused.property,
+            resolved.0,
+        )?
+        else {
+            return Ok(false);
+        };
+
+        self.playhead = resolved.1;
+        self.select_only_keyframe(keyframe_id);
+        Ok(true)
     }
 
     #[must_use]
@@ -455,6 +517,70 @@ mod tests {
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000),)
         );
+    }
+
+    #[test]
+    fn k_on_static_focused_property_creates_first_key_and_moves_playhead() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            ids::ObjectId,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            property::{AnimatableProperty, property_keyframe_at_tick},
+            time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = Project::new(
+            "Key Test",
+            ProjectSettings::default(),
+            TempoMap::with_initial_tempo(
+                GridOffsetNs::new(0),
+                BpmMicros::new(120_000_000).expect("valid BPM"),
+                TimeSignature::default(),
+            ),
+        );
+        project.composition.objects.push(Object {
+            id: object_id,
+            name: "Rectangle".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(Vec2::new(10.0, 20.0).expect("position")),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(100.0, 100.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+
+        let mut editor = rhythm_core::editor::ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(70_000_000));
+        session.focus_property(object_id, AnimatableProperty::Position);
+
+        assert_eq!(session.keyframe_action(&mut editor), Ok(true));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        let keyframe = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Position,
+            MusicalTick::new(240),
+        )
+        .expect("property access")
+        .expect("first keyframe");
+        assert_eq!(keyframe.id.get(), 2);
+        assert!(session.is_keyframe_selected(keyframe.id));
     }
 
     #[test]
