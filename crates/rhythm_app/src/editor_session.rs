@@ -5,7 +5,7 @@ use rhythm_core::{
     domain::{LinearRgba, Vec2},
     editor::{EditCommand, EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     geometry::LocalBounds2d,
-    ids::{KeyframeId, ObjectId},
+    ids::{AssetId, KeyframeId, ObjectId},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
         property_base_value, property_keyframe_at_tick, property_keyframe_count,
@@ -279,6 +279,7 @@ pub struct EditorSession {
     viewport_zoom: f32,
     pending_viewport_camera_action: Option<ViewportCameraAction>,
     pending_object_list_actions: Vec<ObjectListAction>,
+    pending_image_relink_asset: Option<AssetId>,
     viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_multi_position_drag: Option<ViewportMultiPositionDrag>,
     viewport_scale_drag: Option<ViewportScaleDrag>,
@@ -311,6 +312,7 @@ impl Default for EditorSession {
             viewport_zoom: 1.0,
             pending_viewport_camera_action: None,
             pending_object_list_actions: Vec::new(),
+            pending_image_relink_asset: None,
             viewport_position_drag: None,
             viewport_multi_position_drag: None,
             viewport_scale_drag: None,
@@ -416,6 +418,20 @@ impl EditorSession {
 
     pub const fn take_viewport_camera_action(&mut self) -> Option<ViewportCameraAction> {
         self.pending_viewport_camera_action.take()
+    }
+
+    pub fn request_image_relink(&mut self, asset_id: AssetId) -> bool {
+        if self.pending_image_relink_asset == Some(asset_id) {
+            return false;
+        }
+
+        self.pending_image_relink_asset = Some(asset_id);
+        true
+    }
+
+    #[must_use]
+    pub fn image_relink_requested(&self, asset_id: AssetId) -> bool {
+        self.pending_image_relink_asset == Some(asset_id)
     }
 
     pub fn queue_object_visibility(&mut self, object_id: ObjectId, visible: bool) {
@@ -3391,6 +3407,22 @@ mod tests {
             .expect("property")
             .is_some()
         );
+    }
+
+    #[test]
+    fn image_relink_request_tracks_stable_asset_id() {
+        use rhythm_core::ids::AssetId;
+
+        let first = AssetId::new(11).expect("asset id");
+        let second = AssetId::new(12).expect("asset id");
+        let mut session = EditorSession::default();
+
+        assert!(session.request_image_relink(first));
+        assert!(session.image_relink_requested(first));
+        assert!(!session.request_image_relink(first));
+        assert!(session.request_image_relink(second));
+        assert!(!session.image_relink_requested(first));
+        assert!(session.image_relink_requested(second));
     }
 
     #[test]
