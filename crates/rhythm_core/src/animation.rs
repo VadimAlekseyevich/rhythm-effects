@@ -188,9 +188,7 @@ impl<T> Animated<T> {
     }
 
     pub fn keyframe_by_id_mut(&mut self, id: KeyframeId) -> Option<&mut Keyframe<T>> {
-        self.keyframes
-            .iter_mut()
-            .find(|keyframe| keyframe.id == id)
+        self.keyframes.iter_mut().find(|keyframe| keyframe.id == id)
     }
 
     #[must_use]
