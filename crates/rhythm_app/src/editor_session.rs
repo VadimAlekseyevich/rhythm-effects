@@ -270,27 +270,27 @@ struct InspectorTextEdit {
 
 #[derive(Debug, Clone, PartialEq)]
 enum TextInspectorAction {
-    SetContent {
+    Content {
         object_id: ObjectId,
         text: String,
     },
-    SetFontFamily {
+    FontFamily {
         object_id: ObjectId,
         family: String,
     },
-    SetFontSize {
+    FontSize {
         object_id: ObjectId,
         font_size: f32,
     },
-    SetFontWeight {
+    FontWeight {
         object_id: ObjectId,
         weight: FontWeight,
     },
-    SetFontStyle {
+    FontStyle {
         object_id: ObjectId,
         style: FontStyle,
     },
-    SetAlignment {
+    Alignment {
         object_id: ObjectId,
         alignment: TextAlignment,
     },
@@ -2017,11 +2017,11 @@ impl EditorSession {
         }
 
         let action = match target.field {
-            InspectorTextField::Content => TextInspectorAction::SetContent {
+            InspectorTextField::Content => TextInspectorAction::Content {
                 object_id: target.object_id,
                 text: edit.buffer.clone(),
             },
-            InspectorTextField::FontFamily => TextInspectorAction::SetFontFamily {
+            InspectorTextField::FontFamily => TextInspectorAction::FontFamily {
                 object_id: target.object_id,
                 family: edit.buffer.clone(),
             },
@@ -2032,7 +2032,7 @@ impl EditorSession {
                 if !font_size.is_finite() || font_size <= 0.0 {
                     return false;
                 }
-                TextInspectorAction::SetFontSize {
+                TextInspectorAction::FontSize {
                     object_id: target.object_id,
                     font_size,
                 }
@@ -2058,17 +2058,17 @@ impl EditorSession {
 
     pub fn queue_text_font_weight(&mut self, object_id: ObjectId, weight: FontWeight) {
         self.pending_text_inspector_actions
-            .push(TextInspectorAction::SetFontWeight { object_id, weight });
+            .push(TextInspectorAction::FontWeight { object_id, weight });
     }
 
     pub fn queue_text_font_style(&mut self, object_id: ObjectId, style: FontStyle) {
         self.pending_text_inspector_actions
-            .push(TextInspectorAction::SetFontStyle { object_id, style });
+            .push(TextInspectorAction::FontStyle { object_id, style });
     }
 
     pub fn queue_text_alignment(&mut self, object_id: ObjectId, alignment: TextAlignment) {
         self.pending_text_inspector_actions
-            .push(TextInspectorAction::SetAlignment {
+            .push(TextInspectorAction::Alignment {
                 object_id,
                 alignment,
             });
@@ -2086,26 +2086,26 @@ impl EditorSession {
         let mut changed = false;
         for action in actions {
             let action_changed = match action {
-                TextInspectorAction::SetContent { object_id, text } => {
+                TextInspectorAction::Content { object_id, text } => {
                     editor.execute(EditCommand::SetTextContent { object_id, text })?
                 }
-                TextInspectorAction::SetFontFamily { object_id, family } => {
+                TextInspectorAction::FontFamily { object_id, family } => {
                     editor.execute(EditCommand::SetTextFontFamily { object_id, family })?
                 }
-                TextInspectorAction::SetFontSize {
+                TextInspectorAction::FontSize {
                     object_id,
                     font_size,
                 } => editor.execute(EditCommand::SetTextFontSize {
                     object_id,
                     font_size,
                 })?,
-                TextInspectorAction::SetFontWeight { object_id, weight } => {
+                TextInspectorAction::FontWeight { object_id, weight } => {
                     editor.execute(EditCommand::SetTextFontWeight { object_id, weight })?
                 }
-                TextInspectorAction::SetFontStyle { object_id, style } => {
+                TextInspectorAction::FontStyle { object_id, style } => {
                     editor.execute(EditCommand::SetTextFontStyle { object_id, style })?
                 }
-                TextInspectorAction::SetAlignment {
+                TextInspectorAction::Alignment {
                     object_id,
                     alignment,
                 } => editor.execute(EditCommand::SetTextAlignment {
