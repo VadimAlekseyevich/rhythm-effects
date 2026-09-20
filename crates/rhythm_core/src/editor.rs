@@ -393,10 +393,10 @@ impl History {
 
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
-    ObjectPosition { object_id: ObjectId, before: Vec2 },
-    ObjectPositions { before: Vec<(ObjectId, Vec2)> },
-    ObjectScale { object_id: ObjectId, before: Vec2 },
-    ObjectRotation { object_id: ObjectId, before: f32 },
+    Position { object_id: ObjectId, before: Vec2 },
+    Positions { before: Vec<(ObjectId, Vec2)> },
+    Scale { object_id: ObjectId, before: Vec2 },
+    Rotation { object_id: ObjectId, before: f32 },
 }
 
 #[derive(Debug)]
@@ -612,13 +612,13 @@ impl ProjectEditor {
             .position
             .base_value();
 
-        self.transaction = Some(ActiveTransaction::ObjectPosition { object_id, before });
+        self.transaction = Some(ActiveTransaction::Position { object_id, before });
         Ok(())
     }
 
     pub fn update_position_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectPosition { object_id, .. }) => object_id,
+            Some(ActiveTransaction::Position { object_id, .. }) => object_id,
             _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active position transaction",
@@ -663,13 +663,13 @@ impl ProjectEditor {
             ));
         }
 
-        self.transaction = Some(ActiveTransaction::ObjectPositions { before });
+        self.transaction = Some(ActiveTransaction::Positions { before });
         Ok(())
     }
 
     pub fn update_multi_position_transaction(&mut self, delta: Vec2) -> Result<(), EditError> {
         let before = match &self.transaction {
-            Some(ActiveTransaction::ObjectPositions { before }) => before.clone(),
+            Some(ActiveTransaction::Positions { before }) => before.clone(),
             _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active multi-position transaction",
@@ -699,13 +699,13 @@ impl ProjectEditor {
             .scale
             .base_value();
 
-        self.transaction = Some(ActiveTransaction::ObjectScale { object_id, before });
+        self.transaction = Some(ActiveTransaction::Scale { object_id, before });
         Ok(())
     }
 
     pub fn update_scale_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectScale { object_id, .. }) => object_id,
+            Some(ActiveTransaction::Scale { object_id, .. }) => object_id,
             _ => {
                 return Err(EditError::HistoryInvariant("no active scale transaction"));
             }
@@ -730,7 +730,7 @@ impl ProjectEditor {
             .rotation_degrees
             .base_value();
 
-        self.transaction = Some(ActiveTransaction::ObjectRotation { object_id, before });
+        self.transaction = Some(ActiveTransaction::Rotation { object_id, before });
         Ok(())
     }
 
@@ -740,7 +740,7 @@ impl ProjectEditor {
         }
 
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectRotation { object_id, .. }) => object_id,
+            Some(ActiveTransaction::Rotation { object_id, .. }) => object_id,
             _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active rotation transaction",
@@ -762,7 +762,7 @@ impl ProjectEditor {
         };
 
         match transaction {
-            ActiveTransaction::ObjectPosition { object_id, before } => {
+            ActiveTransaction::Position { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -783,7 +783,7 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
-            ActiveTransaction::ObjectPositions { before } => {
+            ActiveTransaction::Positions { before } => {
                 let mut changes = Vec::with_capacity(before.len());
                 for (object_id, before_position) in before {
                     let index = self.object_index(object_id)?;
@@ -807,7 +807,7 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
-            ActiveTransaction::ObjectScale { object_id, before } => {
+            ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -828,7 +828,7 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
-            ActiveTransaction::ObjectRotation { object_id, before } => {
+            ActiveTransaction::Rotation { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -858,14 +858,14 @@ impl ProjectEditor {
         };
 
         match transaction {
-            ActiveTransaction::ObjectPosition { object_id, before } => {
+            ActiveTransaction::Position { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
                     .position
                     .base_value_mut() = before;
             }
-            ActiveTransaction::ObjectPositions { before } => {
+            ActiveTransaction::Positions { before } => {
                 for (object_id, position) in before {
                     let index = self.object_index(object_id)?;
                     *self.project.composition.objects[index]
@@ -874,14 +874,14 @@ impl ProjectEditor {
                         .base_value_mut() = position;
                 }
             }
-            ActiveTransaction::ObjectScale { object_id, before } => {
+            ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
                     .scale
                     .base_value_mut() = before;
             }
-            ActiveTransaction::ObjectRotation { object_id, before } => {
+            ActiveTransaction::Rotation { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
