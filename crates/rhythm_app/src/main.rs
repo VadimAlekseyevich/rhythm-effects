@@ -4,6 +4,7 @@ mod editor_session;
 mod editor_ui;
 mod gpu;
 mod timeline;
+mod viewport;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -203,7 +204,7 @@ impl ApplicationHandler for RhythmApp {
                     && !self
                         .egui_context
                         .as_ref()
-                        .is_some_and(egui::Context::wants_keyboard_input)
+                        .is_some_and(|context| context.egui_wants_keyboard_input())
                     && let PhysicalKey::Code(code) = event.physical_key
                 {
                     let control = self.modifiers.control_key();
@@ -224,12 +225,7 @@ impl ApplicationHandler for RhythmApp {
                     {
                         self.session
                             .copy_selected_keyframes(self.project_editor.project())
-                    } else if control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::KeyV
-                    {
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyV {
                         match self
                             .session
                             .paste_keyframe_clipboard(&mut self.project_editor)
@@ -237,6 +233,17 @@ impl ApplicationHandler for RhythmApp {
                             Ok(changed) => changed,
                             Err(error) => {
                                 warn!(?error, "paste keyframes failed");
+                                false
+                            }
+                        }
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyD {
+                        match self
+                            .session
+                            .duplicate_selected_keyframes(&mut self.project_editor)
+                        {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "duplicate selected keyframes failed");
                                 false
                             }
                         }
@@ -356,6 +363,14 @@ impl ApplicationHandler for RhythmApp {
                             );
                         }
                     });
+                    match self
+                        .session
+                        .commit_pending_keyframe_interpolation(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "keyframe interpolation change failed"),
+                    }
                     match self
                         .session
                         .commit_pending_keyframe_move(&mut self.project_editor)

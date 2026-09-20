@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
+    animation::{BezierEasing, Interpolation},
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
-        property_keyframe_at_tick, property_keyframe_count, property_value_compatible,
+        property_keyframe_at_tick, property_keyframe_count, property_keyframe_has_successor,
+        property_value_compatible,
     },
     time::{
         BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
@@ -32,6 +34,53 @@ impl PreviewQuality {
             Self::Full => "Full",
             Self::Half => "Half",
             Self::Quarter => "Quarter",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyframeInterpolationPreset {
+    Hold,
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+
+impl KeyframeInterpolationPreset {
+    pub const ALL: [Self; 5] = [
+        Self::Hold,
+        Self::Linear,
+        Self::EaseIn,
+        Self::EaseOut,
+        Self::EaseInOut,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Hold => "Hold",
+            Self::Linear => "Linear",
+            Self::EaseIn => "Ease In",
+            Self::EaseOut => "Ease Out",
+            Self::EaseInOut => "Ease In-Out",
+        }
+    }
+
+    #[must_use]
+    pub fn interpolation(self) -> Interpolation {
+        match self {
+            Self::Hold => Interpolation::Hold,
+            Self::Linear => Interpolation::Linear,
+            Self::EaseIn => Interpolation::CubicBezier(
+                BezierEasing::new(0.42, 0.0, 1.0, 1.0).expect("valid ease-in preset"),
+            ),
+            Self::EaseOut => Interpolation::CubicBezier(
+                BezierEasing::new(0.0, 0.0, 0.58, 1.0).expect("valid ease-out preset"),
+            ),
+            Self::EaseInOut => Interpolation::CubicBezier(
+                BezierEasing::new(0.42, 0.0, 0.58, 1.0).expect("valid ease-in-out preset"),
+            ),
         }
     }
 }
@@ -96,10 +145,13 @@ pub struct EditorSession {
     playhead: ProjectTimeNs,
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
+    follow_playhead: bool,
+    selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
+    pending_keyframe_interpolation: Option<Interpolation>,
     keyframe_clipboard: Option<KeyframeCopyPacket>,
     timeline_box_selection: Option<TimelineBoxSelection>,
 }
@@ -111,10 +163,13 @@ impl Default for EditorSession {
             playhead: ProjectTimeNs::new(0),
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
+            follow_playhead: false,
+            selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
             pending_keyframe_move: None,
+            pending_keyframe_interpolation: None,
             keyframe_clipboard: None,
             timeline_box_selection: None,
         }
@@ -134,6 +189,60 @@ impl EditorSession {
     #[must_use]
     pub const fn authoring_division(&self) -> BeatDivision {
         self.authoring_division
+    }
+
+    #[must_use]
+    pub const fn follow_playhead(&self) -> bool {
+        self.follow_playhead
+    }
+
+    pub const fn set_follow_playhead(&mut self, enabled: bool) {
+        self.follow_playhead = enabled;
+    }
+
+    #[allow(dead_code)]
+    pub fn update_playhead_during_playback(
+        &mut self,
+        project_time: ProjectTimeNs,
+        duration: DurationNs,
+    ) {
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX);
+        self.playhead = ProjectTimeNs::new(project_time.get().clamp(0, duration_ns));
+        if self.follow_playhead {
+            self.follow_playhead_to_viewport_edge(duration);
+        }
+    }
+
+    #[must_use]
+    pub fn selected_object_ids(&self) -> Vec<ObjectId> {
+        self.selected_objects.iter().copied().collect()
+    }
+
+    #[must_use]
+    pub fn is_object_selected(&self, object_id: ObjectId) -> bool {
+        self.selected_objects.contains(&object_id)
+    }
+
+    pub fn replace_object_selection(&mut self, object_id: Option<ObjectId>) -> bool {
+        let already_selected = object_id.is_some_and(|id| {
+            self.selected_objects.len() == 1 && self.selected_objects.contains(&id)
+        });
+        if already_selected || (object_id.is_none() && self.selected_objects.is_empty()) {
+            return false;
+        }
+
+        self.selected_objects.clear();
+        if let Some(object_id) = object_id {
+            self.selected_objects.insert(object_id);
+        }
+        true
+    }
+
+    pub fn toggle_object_selection(&mut self, object_id: ObjectId) -> bool {
+        if !self.selected_objects.remove(&object_id) {
+            self.selected_objects.insert(object_id);
+        }
+        true
     }
 
     #[must_use]
@@ -406,6 +515,7 @@ impl EditorSession {
         true
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn keyframe_clipboard(&self) -> Option<&KeyframeCopyPacket> {
         self.keyframe_clipboard.as_ref()
@@ -440,9 +550,10 @@ impl EditorSession {
             packet.entries[0].source_object_id,
             packet.entries[0].source_property,
         );
-        let single_source = packet.entries.iter().all(|entry| {
-            (entry.source_object_id, entry.source_property) == first_source
-        });
+        let single_source = packet
+            .entries
+            .iter()
+            .all(|entry| (entry.source_object_id, entry.source_property) == first_source);
         let remap_target = self.focused_property.filter(|focused| {
             single_source
                 && packet
@@ -486,6 +597,79 @@ impl EditorSession {
         Ok(true)
     }
 
+    pub fn duplicate_selected_keyframes(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        if self.selected_keyframes.is_empty() {
+            return Ok(false);
+        }
+
+        let mut located = Vec::with_capacity(self.selected_keyframes.len());
+        for keyframe_id in self.selected_keyframe_ids() {
+            let Some(keyframe) = locate_property_keyframe(editor.project(), keyframe_id) else {
+                return Err(EditError::KeyframeNotFound(keyframe_id));
+            };
+            located.push(keyframe);
+        }
+
+        let Some(first_tick) = located
+            .iter()
+            .map(|located| located.keyframe.tick.get())
+            .min()
+        else {
+            return Ok(false);
+        };
+        let Some(last_tick) = located
+            .iter()
+            .map(|located| located.keyframe.tick.get())
+            .max()
+        else {
+            return Ok(false);
+        };
+
+        let pattern_span = last_tick
+            .checked_sub(first_tick)
+            .ok_or(EditError::HistoryInvariant(
+                "duplicate pattern span overflow",
+            ))?;
+        let offset = pattern_span
+            .checked_add(self.authoring_division.ticks_per_step())
+            .ok_or(EditError::HistoryInvariant(
+                "duplicate keyframe offset overflow",
+            ))?;
+
+        located.sort_by_key(|located| {
+            (
+                located.keyframe.tick.get(),
+                located.object_id.get(),
+                format!("{:?}", located.property),
+            )
+        });
+
+        let mut drafts = Vec::with_capacity(located.len());
+        for located in located {
+            let target_tick = located.keyframe.tick.get().checked_add(offset).ok_or(
+                EditError::HistoryInvariant("duplicate keyframe tick overflow"),
+            )?;
+            drafts.push(PropertyKeyframeDraft {
+                object_id: located.object_id,
+                property: located.property,
+                tick: MusicalTick::new(target_tick),
+                value: located.keyframe.value,
+                interpolation: located.keyframe.interpolation,
+            });
+        }
+
+        let new_ids = editor.insert_property_keyframes(drafts)?;
+        if new_ids.is_empty() {
+            return Ok(false);
+        }
+
+        self.replace_keyframe_selection(new_ids);
+        Ok(true)
+    }
+
     pub fn delete_selected_keyframes(
         &mut self,
         editor: &mut ProjectEditor,
@@ -500,6 +684,45 @@ impl EditorSession {
             self.clear_keyframe_selection();
         }
         Ok(changed)
+    }
+
+    pub fn queue_selected_keyframe_interpolation(
+        &mut self,
+        preset: KeyframeInterpolationPreset,
+    ) -> bool {
+        if self.selected_keyframes.is_empty() {
+            return false;
+        }
+
+        self.pending_keyframe_interpolation = Some(preset.interpolation());
+        true
+    }
+
+    pub fn commit_pending_keyframe_interpolation(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(interpolation) = self.pending_keyframe_interpolation.take() else {
+            return Ok(false);
+        };
+
+        let mut outgoing_ids = Vec::with_capacity(self.selected_keyframes.len());
+        for keyframe_id in self.selected_keyframe_ids() {
+            let Some(located) = locate_property_keyframe(editor.project(), keyframe_id) else {
+                return Err(EditError::KeyframeNotFound(keyframe_id));
+            };
+            if property_keyframe_has_successor(
+                editor.project(),
+                located.object_id,
+                located.property,
+                keyframe_id,
+            )? {
+                outgoing_ids.push(keyframe_id);
+            }
+        }
+
+        outgoing_ids.sort_by_key(|keyframe_id| keyframe_id.get());
+        editor.set_property_keyframe_interpolations(outgoing_ids, interpolation)
     }
 
     pub fn commit_pending_keyframe_move(
@@ -523,6 +746,7 @@ impl EditorSession {
         self.selected_keyframes.contains(&keyframe_id)
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn selected_keyframe_count(&self) -> usize {
         self.selected_keyframes.len()
@@ -586,6 +810,7 @@ impl EditorSession {
             .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
     }
 
+    #[cfg(test)]
     pub const fn set_authoring_division(&mut self, division: BeatDivision) {
         self.authoring_division = division;
     }
@@ -728,7 +953,48 @@ impl EditorSession {
             start: ProjectTimeNs::new(new_start),
             end: ProjectTimeNs::new(new_start.saturating_add(span)),
         });
+        self.follow_playhead = false;
         true
+    }
+
+    fn follow_playhead_to_viewport_edge(&mut self, duration: DurationNs) {
+        const EDGE_FRACTION: f64 = 0.10;
+        const RIGHT_EDGE_TARGET_FRACTION: f64 = 0.25;
+        const LEFT_EDGE_TARGET_FRACTION: f64 = 0.75;
+
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let Some(view) = self.timeline_view else {
+            return;
+        };
+        let span = (view.end.get() - view.start.get()).clamp(1, duration_ns);
+        if span >= duration_ns {
+            return;
+        }
+
+        let edge_margin = ((span as f64) * EDGE_FRACTION).round() as i64;
+        let left_edge = view.start.get().saturating_add(edge_margin);
+        let right_edge = view.end.get().saturating_sub(edge_margin);
+        let playhead = self.playhead.get();
+
+        let target_fraction = if playhead >= right_edge {
+            Some(RIGHT_EDGE_TARGET_FRACTION)
+        } else if playhead <= left_edge {
+            Some(LEFT_EDGE_TARGET_FRACTION)
+        } else {
+            None
+        };
+        let Some(target_fraction) = target_fraction else {
+            return;
+        };
+
+        let target_offset = ((span as f64) * target_fraction).round() as i64;
+        let new_start = playhead
+            .saturating_sub(target_offset)
+            .clamp(0, duration_ns - span);
+        self.timeline_view = Some(TimelineView {
+            start: ProjectTimeNs::new(new_start),
+            end: ProjectTimeNs::new(new_start.saturating_add(span)),
+        });
     }
 
     pub fn change_authoring_division(&mut self, finer: bool) -> bool {
@@ -796,9 +1062,14 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSession, PreviewQuality};
-    use rhythm_core::time::{
-        BeatDivision, BpmMicros, DurationNs, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
+    use super::{EditorSession, KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality};
+    use rhythm_core::{
+        ids::{KeyframeId, ObjectId},
+        property::AnimatableProperty,
+        time::{
+            BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
+            TempoMap, TimeSignature,
+        },
     };
 
     fn tempo_120() -> TempoMap {
@@ -875,6 +1146,43 @@ mod tests {
     }
 
     #[test]
+    fn viewport_single_selection_replaces_and_clears_object_selection() {
+        let first = ObjectId::new(11).expect("object id");
+        let second = ObjectId::new(12).expect("object id");
+        let mut session = EditorSession::default();
+
+        assert!(session.replace_object_selection(Some(first)));
+        assert!(session.is_object_selected(first));
+        assert_eq!(session.selected_object_ids().len(), 1);
+
+        assert!(session.replace_object_selection(Some(second)));
+        assert!(!session.is_object_selected(first));
+        assert!(session.is_object_selected(second));
+
+        assert!(session.replace_object_selection(None));
+        assert!(session.selected_object_ids().is_empty());
+        assert!(!session.replace_object_selection(None));
+    }
+
+    #[test]
+    fn viewport_ctrl_toggle_adds_and_removes_objects_without_replacing_others() {
+        let first = ObjectId::new(21).expect("object id");
+        let second = ObjectId::new(22).expect("object id");
+        let mut session = EditorSession::default();
+
+        assert!(session.replace_object_selection(Some(first)));
+        assert!(session.toggle_object_selection(second));
+        assert!(session.is_object_selected(first));
+        assert!(session.is_object_selected(second));
+        assert_eq!(session.selected_object_ids().len(), 2);
+
+        assert!(session.toggle_object_selection(first));
+        assert!(!session.is_object_selected(first));
+        assert!(session.is_object_selected(second));
+        assert_eq!(session.selected_object_ids().len(), 1);
+    }
+
+    #[test]
     fn single_and_ctrl_toggle_keyframe_selection_use_stable_ids() {
         let first = rhythm_core::ids::KeyframeId::new(11).expect("key id");
         let second = rhythm_core::ids::KeyframeId::new(12).expect("key id");
@@ -896,6 +1204,46 @@ mod tests {
         session.toggle_keyframe_selection(second);
         assert!(!session.is_keyframe_selected(second));
         assert_eq!(session.selected_keyframe_count(), 1);
+    }
+
+    #[test]
+    fn follow_playhead_defaults_off_and_scrolls_only_near_view_edges() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+
+        assert!(!session.follow_playhead());
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 2.0));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000))
+        );
+
+        session.set_follow_playhead(true);
+        session.update_playhead_during_playback(ProjectTimeNs::new(3_000_000_000), duration);
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000))
+        );
+
+        session.update_playhead_during_playback(ProjectTimeNs::new(4_600_000_000), duration);
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(3_350_000_000),
+                ProjectTimeNs::new(8_350_000_000),
+            )
+        );
+    }
+
+    #[test]
+    fn manual_timeline_pan_disables_follow_playhead() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(5_000_000_000), 2.0));
+        session.set_follow_playhead(true);
+
+        assert!(session.pan_timeline_points(duration, -100.0, 1_000.0));
+        assert!(!session.follow_playhead());
     }
 
     #[test]
@@ -1005,6 +1353,157 @@ mod tests {
         assert!(pasted_first.id.get() > second.get());
         assert!(session.is_keyframe_selected(pasted_first.id));
         assert!(session.is_keyframe_selected(pasted_second.id));
+    }
+
+    #[test]
+    fn interpolation_preset_targets_selected_outgoing_segments_only() {
+        use rhythm_core::{
+            animation::Interpolation,
+            property::{AnimatableProperty, PropertyValue, locate_property_keyframe},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.1),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("second");
+        let terminal = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("terminal");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, second, terminal]);
+        assert!(session.queue_selected_keyframe_interpolation(KeyframeInterpolationPreset::Hold));
+        assert_eq!(
+            session.commit_pending_keyframe_interpolation(&mut editor),
+            Ok(true)
+        );
+
+        assert_eq!(
+            locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            locate_property_keyframe(editor.project(), second)
+                .expect("second")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            locate_property_keyframe(editor.project(), terminal)
+                .expect("terminal")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+        assert_eq!(session.selected_keyframe_count(), 3);
+    }
+
+    #[test]
+    fn duplicate_repeats_pattern_after_current_grid_gap_and_selects_duplicates() {
+        use rhythm_core::{
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.25),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+                PropertyValue::Scalar(0.75),
+            )
+            .expect("insert")
+            .expect("second");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, second]);
+        assert!(session.keyframe_clipboard().is_none());
+
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
+
+        let source_first = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("source first");
+        let source_second = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(720),
+        )
+        .expect("property")
+        .expect("source second");
+        let duplicate_first = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(960),
+        )
+        .expect("property")
+        .expect("duplicate first");
+        let duplicate_second = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(1_440),
+        )
+        .expect("property")
+        .expect("duplicate second");
+
+        assert_eq!(source_first.id, first);
+        assert_eq!(source_second.id, second);
+        assert_eq!(duplicate_first.value, PropertyValue::Scalar(0.25));
+        assert_eq!(duplicate_second.value, PropertyValue::Scalar(0.75));
+        assert!(duplicate_first.id.get() > second.get());
+        assert!(duplicate_second.id.get() > duplicate_first.id.get());
+        assert!(!session.is_keyframe_selected(first));
+        assert!(!session.is_keyframe_selected(second));
+        assert!(session.is_keyframe_selected(duplicate_first.id));
+        assert!(session.is_keyframe_selected(duplicate_second.id));
+        assert_eq!(session.selected_keyframe_count(), 2);
+        assert!(session.keyframe_clipboard().is_none());
     }
 
     #[test]
