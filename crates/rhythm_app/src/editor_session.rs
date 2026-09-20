@@ -1661,10 +1661,11 @@ impl EditorSession {
     pub fn inspector_multi_numeric_edit_buffer(
         &self,
         target: InspectorMultiNumericTarget,
+        object_ids: &[ObjectId],
     ) -> Option<&str> {
         self.inspector_multi_numeric_edit
             .as_ref()
-            .filter(|edit| edit.target == target)
+            .filter(|edit| edit.target == target && edit.object_ids == object_ids)
             .map(|edit| edit.buffer.as_str())
     }
 
@@ -2979,6 +2980,105 @@ mod tests {
         .expect("property")
         .expect("restored key");
         assert_eq!(restored.value, PropertyValue::Scalar(0.5));
+    }
+
+    #[test]
+    fn inspector_multi_numeric_commit_edits_mixed_static_and_animated_members_once() {
+        use rhythm_core::animation::{Animated, Interpolation, Keyframe};
+
+        let first_id = ObjectId::new(1).expect("first object");
+        let second_id = ObjectId::new(2).expect("second object");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.tempo_map = tempo_120();
+
+        let mut second = project.composition.objects[0].clone();
+        second.id = second_id;
+        second.transform.scale = Animated::with_keyframes(
+            Vec2::new(1.0, 2.0).expect("base scale"),
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(3).expect("keyframe id"),
+                    MusicalTick::new(0),
+                    Vec2::new(1.0, 2.0).expect("scale"),
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(4).expect("keyframe id"),
+                    MusicalTick::new(480),
+                    Vec2::new(3.0, 2.0).expect("scale"),
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("animated scale");
+        project.composition.objects.push(second);
+        project.next_entity_id = 5;
+
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(130_000_000));
+        let target = super::InspectorMultiNumericTarget {
+            property: AnimatableProperty::Scale,
+            component: InspectorNumericComponent::X,
+        };
+        let ids = vec![first_id, second_id];
+
+        assert!(session.begin_inspector_multi_numeric_edit(
+            target,
+            ids.clone(),
+            String::new(),
+        ));
+        assert_eq!(
+            session.inspector_multi_numeric_edit_buffer(target, &ids),
+            Some("")
+        );
+        assert!(session.update_inspector_multi_numeric_edit_buffer(
+            target,
+            "250.0".to_owned(),
+        ));
+        assert!(session.commit_inspector_multi_numeric_edit(target));
+        assert_eq!(
+            session.commit_pending_inspector_multi_property_edit(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            property_base_value(editor.project(), first_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(
+                Vec2::new(2.5, 1.0).expect("static edited scale")
+            ))
+        );
+        let animated = property_keyframe_at_tick(
+            editor.project(),
+            second_id,
+            AnimatableProperty::Scale,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("inserted key");
+        assert_eq!(
+            animated.value,
+            PropertyValue::Vec2(Vec2::new(2.5, 2.0).expect("animated edited scale"))
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            property_base_value(editor.project(), first_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(
+                Vec2::new(1.0, 1.0).expect("static restored scale")
+            ))
+        );
+        assert!(
+            property_keyframe_at_tick(
+                editor.project(),
+                second_id,
+                AnimatableProperty::Scale,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_none()
+        );
     }
 
     #[test]
