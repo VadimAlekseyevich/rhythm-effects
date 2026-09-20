@@ -364,6 +364,14 @@ impl ApplicationHandler for RhythmApp {
                     });
                     match self
                         .session
+                        .commit_pending_keyframe_interpolation(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "keyframe interpolation change failed"),
+                    }
+                    match self
+                        .session
                         .commit_pending_keyframe_move(&mut self.project_editor)
                     {
                         Ok(true) => window.request_redraw(),
