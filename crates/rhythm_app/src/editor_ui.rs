@@ -93,9 +93,7 @@ fn draw_text_inspector(
         session.update_inspector_text_edit_buffer(content_target, buffer);
         let escape = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
         let ctrl_enter = response.has_focus()
-            && ui.input(|input| {
-                input.modifiers.ctrl && input.key_pressed(egui::Key::Enter)
-            });
+            && ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::Enter));
         if escape {
             session.cancel_inspector_text_edit(content_target);
             response.surrender_focus();
@@ -123,10 +121,7 @@ fn draw_text_inspector(
             .inspector_text_edit_buffer(family_target)
             .map(str::to_owned)
         {
-            let response = ui.add_sized(
-                [150.0, 24.0],
-                egui::TextEdit::singleline(&mut buffer),
-            );
+            let response = ui.add_sized([150.0, 24.0], egui::TextEdit::singleline(&mut buffer));
             session.update_inspector_text_edit_buffer(family_target, buffer);
             let escape =
                 response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
@@ -214,11 +209,7 @@ fn draw_text_inspector(
                     TextAlignment::Center,
                     TextAlignment::Right,
                 ] {
-                    ui.selectable_value(
-                        &mut alignment,
-                        candidate,
-                        text_alignment_label(candidate),
-                    );
+                    ui.selectable_value(&mut alignment, candidate, text_alignment_label(candidate));
                 }
             });
         if alignment != text.alignment {
