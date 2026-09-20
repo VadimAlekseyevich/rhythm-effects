@@ -9,7 +9,7 @@ use crate::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
         insert_property_keyframe, locate_property_keyframe, property_base_value,
         property_keyframe_by_id, property_keyframe_count, remove_property_keyframe_by_id,
-        set_property_base_value, set_property_keyframe_interpolation,
+        set_property_base_value, set_property_keyframe_interpolation, set_property_keyframe_value,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -251,6 +251,12 @@ pub enum HistoryPayload {
     PropertyKeyframeInterpolationsChanged {
         records: Vec<PropertyKeyframeInterpolationRecord>,
     },
+    PropertyKeyframeValueChanged {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        before: Option<PropertyKeyframe>,
+        after: PropertyKeyframe,
+    },
     TempoMapChanged {
         before: TempoMap,
         after: TempoMap,
@@ -397,6 +403,13 @@ enum ActiveTransaction {
     ObjectPositions { before: Vec<(ObjectId, Vec2)> },
     ObjectScale { object_id: ObjectId, before: Vec2 },
     ObjectRotation { object_id: ObjectId, before: f32 },
+    PropertyKeyframeValue {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe_id: KeyframeId,
+        before: Option<PropertyKeyframe>,
+        inserted_next_entity_id_before: Option<u64>,
+    },
 }
 
 #[derive(Debug)]
@@ -599,6 +612,92 @@ impl ProjectEditor {
         };
         self.history.push(entry);
         Ok(true)
+    }
+
+    pub fn begin_property_keyframe_value_transaction(
+        &mut self,
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        tick: MusicalTick,
+        initial_value: PropertyValue,
+    ) -> Result<KeyframeId, EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let existing = crate::property::property_keyframe_at_tick(
+            &self.project,
+            object_id,
+            property,
+            tick,
+        )?;
+        let (keyframe_id, inserted_next_entity_id_before) = if let Some(existing) = existing {
+            (existing.id, None)
+        } else {
+            let keyframe_id = self.next_keyframe_id()?;
+            let keyframe = PropertyKeyframe {
+                id: keyframe_id,
+                tick,
+                value: initial_value,
+                interpolation: Interpolation::Linear,
+            };
+            let previous_next_entity_id = self.project.next_entity_id;
+            let next_entity_id = previous_next_entity_id
+                .checked_add(1)
+                .ok_or(EditError::IdAllocation(IdAllocationError::Exhausted))?;
+
+            insert_property_keyframe(&mut self.project, object_id, property, keyframe)?;
+            self.project.next_entity_id = next_entity_id;
+            if let Err(error) = self.project.validate() {
+                let _ = remove_property_keyframe_by_id(
+                    &mut self.project,
+                    object_id,
+                    property,
+                    keyframe_id,
+                );
+                self.project.next_entity_id = previous_next_entity_id;
+                return Err(EditError::InvalidProject(error));
+            }
+            (keyframe_id, Some(previous_next_entity_id))
+        };
+
+        self.transaction = Some(ActiveTransaction::PropertyKeyframeValue {
+            object_id,
+            property,
+            keyframe_id,
+            before: existing,
+            inserted_next_entity_id_before,
+        });
+        Ok(keyframe_id)
+    }
+
+    pub fn update_property_keyframe_value_transaction(
+        &mut self,
+        value: PropertyValue,
+    ) -> Result<(), EditError> {
+        let (object_id, property, keyframe_id) = match self.transaction {
+            Some(ActiveTransaction::PropertyKeyframeValue {
+                object_id,
+                property,
+                keyframe_id,
+                ..
+            }) => (object_id, property, keyframe_id),
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active property keyframe value transaction",
+                ));
+            }
+        };
+
+        set_property_keyframe_value(
+            &mut self.project,
+            object_id,
+            property,
+            keyframe_id,
+            value,
+        )?
+        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+        Ok(())
     }
 
     pub fn begin_position_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
@@ -849,6 +948,57 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::PropertyKeyframeValue {
+                object_id,
+                property,
+                keyframe_id,
+                before,
+                inserted_next_entity_id_before,
+            } => {
+                let after = property_keyframe_by_id(
+                    &self.project,
+                    object_id,
+                    property,
+                    keyframe_id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+
+                if before.as_ref().is_some_and(|before| *before == after) {
+                    return Ok(false);
+                }
+                if before.is_none() && after.value == property_keyframe_by_id(
+                    &self.project,
+                    object_id,
+                    property,
+                    keyframe_id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?
+                .value
+                {
+                    if let Some(previous_next_entity_id) = inserted_next_entity_id_before {
+                        remove_property_keyframe_by_id(
+                            &mut self.project,
+                            object_id,
+                            property,
+                            keyframe_id,
+                        )?
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                        self.project.next_entity_id = previous_next_entity_id;
+                        return Ok(false);
+                    }
+                }
+
+                self.history.push(PendingHistoryEntry::new(
+                    "Edit Animated Property",
+                    HistoryPayload::PropertyKeyframeValueChanged {
+                        object_id,
+                        property,
+                        before,
+                        after,
+                    },
+                ));
+                Ok(true)
+            }
         }
     }
 
@@ -887,6 +1037,35 @@ impl ProjectEditor {
                     .transform
                     .rotation_degrees
                     .base_value_mut() = before;
+            }
+            ActiveTransaction::PropertyKeyframeValue {
+                object_id,
+                property,
+                keyframe_id,
+                before,
+                inserted_next_entity_id_before,
+            } => {
+                if let Some(before) = before {
+                    set_property_keyframe_value(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        keyframe_id,
+                        before.value,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                } else {
+                    remove_property_keyframe_by_id(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        keyframe_id,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                    if let Some(previous_next_entity_id) = inserted_next_entity_id_before {
+                        self.project.next_entity_id = previous_next_entity_id;
+                    }
+                }
             }
         }
 
@@ -2010,6 +2189,53 @@ impl ProjectEditor {
                             record.after,
                         )?;
                     }
+                }
+            },
+            (
+                HistoryPayload::PropertyKeyframeValueChanged {
+                    object_id,
+                    property,
+                    before,
+                    after,
+                },
+                direction,
+            ) => match (before, direction) {
+                (Some(before), HistoryDirection::Undo) => {
+                    set_property_keyframe_value(
+                        &mut self.project,
+                        *object_id,
+                        *property,
+                        before.id,
+                        before.value,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(before.id))?;
+                }
+                (Some(_), HistoryDirection::Redo) => {
+                    set_property_keyframe_value(
+                        &mut self.project,
+                        *object_id,
+                        *property,
+                        after.id,
+                        after.value,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(after.id))?;
+                }
+                (None, HistoryDirection::Undo) => {
+                    remove_property_keyframe_by_id(
+                        &mut self.project,
+                        *object_id,
+                        *property,
+                        after.id,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(after.id))?;
+                }
+                (None, HistoryDirection::Redo) => {
+                    insert_property_keyframe(
+                        &mut self.project,
+                        *object_id,
+                        *property,
+                        *after,
+                    )?;
                 }
             },
             (HistoryPayload::PropertyKeyframeInterpolationsChanged { records }, direction) => {
