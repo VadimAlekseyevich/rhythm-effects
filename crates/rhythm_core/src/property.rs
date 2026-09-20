@@ -134,10 +134,7 @@ enum AnimatedMut<'a> {
 }
 
 #[must_use]
-pub fn property_value_compatible(
-    property: AnimatableProperty,
-    value: PropertyValue,
-) -> bool {
+pub fn property_value_compatible(property: AnimatableProperty, value: PropertyValue) -> bool {
     value.is_compatible_with(property) && value.is_finite()
 }
 
@@ -365,7 +362,9 @@ fn animated_ref_for_object(
             _ => Err(PropertyAccessError::PropertyUnavailable),
         },
         AnimatableProperty::RectangleCornerRadius => match &object.content {
-            ObjectContent::Rectangle(rectangle) => Ok(AnimatedRef::Scalar(&rectangle.corner_radius)),
+            ObjectContent::Rectangle(rectangle) => {
+                Ok(AnimatedRef::Scalar(&rectangle.corner_radius))
+            }
             _ => Err(PropertyAccessError::PropertyUnavailable),
         },
         AnimatableProperty::EllipseSize => match &object.content {
