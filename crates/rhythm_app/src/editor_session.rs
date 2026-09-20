@@ -146,6 +146,7 @@ pub struct EditorSession {
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
     follow_playhead: bool,
+    selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -163,6 +164,7 @@ impl Default for EditorSession {
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
             follow_playhead: false,
+            selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
@@ -198,10 +200,7 @@ impl EditorSession {
         self.follow_playhead = enabled;
     }
 
-    #[expect(
-        dead_code,
-        reason = "wired to transport playback by AI-196; AI-160 defines follow semantics"
-    )]
+    #[allow(dead_code)]
     pub fn update_playhead_during_playback(
         &mut self,
         project_time: ProjectTimeNs,
@@ -212,6 +211,31 @@ impl EditorSession {
         if self.follow_playhead {
             self.follow_playhead_to_viewport_edge(duration);
         }
+    }
+
+    #[must_use]
+    pub fn selected_object_ids(&self) -> Vec<ObjectId> {
+        self.selected_objects.iter().copied().collect()
+    }
+
+    #[must_use]
+    pub fn is_object_selected(&self, object_id: ObjectId) -> bool {
+        self.selected_objects.contains(&object_id)
+    }
+
+    pub fn replace_object_selection(&mut self, object_id: Option<ObjectId>) -> bool {
+        let already_selected = object_id.is_some_and(|id| {
+            self.selected_objects.len() == 1 && self.selected_objects.contains(&id)
+        });
+        if already_selected || (object_id.is_none() && self.selected_objects.is_empty()) {
+            return false;
+        }
+
+        self.selected_objects.clear();
+        if let Some(object_id) = object_id {
+            self.selected_objects.insert(object_id);
+        }
+        true
     }
 
     #[must_use]
@@ -1112,6 +1136,25 @@ mod tests {
             Some(([10.0, 20.0], [30.0, 40.0], true))
         );
         assert!(session.timeline_box_selection().is_none());
+    }
+
+    #[test]
+    fn viewport_single_selection_replaces_and_clears_object_selection() {
+        let first = ObjectId::new(11).expect("object id");
+        let second = ObjectId::new(12).expect("object id");
+        let mut session = EditorSession::default();
+
+        assert!(session.replace_object_selection(Some(first)));
+        assert!(session.is_object_selected(first));
+        assert_eq!(session.selected_object_ids().len(), 1);
+
+        assert!(session.replace_object_selection(Some(second)));
+        assert!(!session.is_object_selected(first));
+        assert!(session.is_object_selected(second));
+
+        assert!(session.replace_object_selection(None));
+        assert!(session.selected_object_ids().is_empty());
+        assert!(!session.replace_object_selection(None));
     }
 
     #[test]
