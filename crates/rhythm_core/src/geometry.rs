@@ -185,7 +185,9 @@ pub fn hit_test_rectangle(
         return false;
     };
 
-    (0.0..=size.x()).contains(&local_point.x()) && (0.0..=size.y()).contains(&local_point.y())
+    const HIT_EPSILON: f32 = 0.0001;
+    (-HIT_EPSILON..=size.x() + HIT_EPSILON).contains(&local_point.x())
+        && (-HIT_EPSILON..=size.y() + HIT_EPSILON).contains(&local_point.y())
 }
 
 #[cfg(test)]
