@@ -52,6 +52,28 @@ pub fn inverse_object_transform_point(
 }
 
 #[must_use]
+pub fn hit_test_ellipse(
+    composition_point: Vec2,
+    transform: ObjectTransform2d,
+    size: Vec2,
+) -> bool {
+    if size.x() <= 0.0 || size.y() <= 0.0 {
+        return false;
+    }
+
+    let Some(local_point) = inverse_object_transform_point(composition_point, transform, size) else {
+        return false;
+    };
+
+    let radius_x = size.x() * 0.5;
+    let radius_y = size.y() * 0.5;
+    let normalized_x = (local_point.x() - radius_x) / radius_x;
+    let normalized_y = (local_point.y() - radius_y) / radius_y;
+
+    normalized_x * normalized_x + normalized_y * normalized_y <= 1.0
+}
+
+#[must_use]
 pub fn hit_test_rectangle(
     composition_point: Vec2,
     transform: ObjectTransform2d,
@@ -71,7 +93,9 @@ pub fn hit_test_rectangle(
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectTransform2d, hit_test_rectangle, inverse_object_transform_point};
+    use super::{
+        ObjectTransform2d, hit_test_ellipse, hit_test_rectangle, inverse_object_transform_point,
+    };
     use crate::domain::Vec2;
 
     fn vec2(x: f32, y: f32) -> Vec2 {
@@ -90,6 +114,36 @@ mod tests {
             rotation_degrees,
             vec2(anchor.0, anchor.1),
         )
+    }
+
+    #[test]
+    fn ellipse_hit_test_uses_local_ellipse_geometry() {
+        let transform = transform((200.0, 100.0), (1.0, 1.0), 0.0, (0.5, 0.5));
+        let size = vec2(100.0, 50.0);
+
+        assert!(hit_test_ellipse(vec2(200.0, 100.0), transform, size));
+        assert!(hit_test_ellipse(vec2(250.0, 100.0), transform, size));
+        assert!(hit_test_ellipse(vec2(200.0, 125.0), transform, size));
+        assert!(!hit_test_ellipse(vec2(250.1, 100.0), transform, size));
+        assert!(!hit_test_ellipse(vec2(250.0, 125.0), transform, size));
+    }
+
+    #[test]
+    fn ellipse_hit_test_respects_rotation_and_negative_scale() {
+        let size = vec2(100.0, 50.0);
+        let rotated = transform((200.0, 100.0), (-2.0, 1.0), 90.0, (0.5, 0.5));
+
+        assert!(hit_test_ellipse(vec2(200.0, 200.0), rotated, size));
+        assert!(hit_test_ellipse(vec2(225.0, 100.0), rotated, size));
+        assert!(!hit_test_ellipse(vec2(225.1, 100.0), rotated, size));
+    }
+
+    #[test]
+    fn ellipse_hit_test_rejects_degenerate_size() {
+        let transform = transform((200.0, 100.0), (1.0, 1.0), 0.0, (0.5, 0.5));
+
+        assert!(!hit_test_ellipse(vec2(200.0, 100.0), transform, vec2(0.0, 50.0)));
+        assert!(!hit_test_ellipse(vec2(200.0, 100.0), transform, vec2(100.0, -50.0)));
     }
 
     #[test]
