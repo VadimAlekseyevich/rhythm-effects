@@ -1509,6 +1509,109 @@ impl EditorSession {
         })
     }
 
+    pub fn commit_pending_inspector_animated_property_edit(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(commit) = self.pending_inspector_numeric_commit else {
+            return Ok(false);
+        };
+
+        if property_keyframe_count(
+            editor.project(),
+            commit.target.object_id,
+            commit.target.property,
+        )? == 0
+        {
+            return Ok(false);
+        }
+
+        self.pending_inspector_numeric_commit = None;
+
+        let project_value = match commit.target.property {
+            AnimatableProperty::Scale
+            | AnimatableProperty::Anchor
+            | AnimatableProperty::Opacity => commit.value / 100.0,
+            _ => commit.value,
+        };
+        if !project_value.is_finite() {
+            return Ok(false);
+        }
+
+        let (resolved_tick, resolved_time, evaluated) = {
+            let project = editor.project();
+            let Ok(continuous_tick) = project.tempo_map.continuous_tick_position(self.playhead)
+            else {
+                return Ok(false);
+            };
+            let Ok(tick) = snap_tick_position_to_grid(continuous_tick, self.authoring_division)
+            else {
+                return Ok(false);
+            };
+            let Ok(project_time) = project.tempo_map.project_time_for_tick(tick) else {
+                return Ok(false);
+            };
+            let value = evaluate_property_at_tick(
+                project,
+                commit.target.object_id,
+                commit.target.property,
+                tick.get() as f64,
+            )?;
+            (tick, project_time, value)
+        };
+
+        let edited = match (evaluated, commit.target.component) {
+            (PropertyValue::Scalar(_), InspectorNumericComponent::Scalar) => {
+                PropertyValue::Scalar(project_value)
+            }
+            (PropertyValue::Vec2(value), InspectorNumericComponent::X) => PropertyValue::Vec2(
+                Vec2::new(project_value, value.y())
+                    .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+            ),
+            (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => PropertyValue::Vec2(
+                Vec2::new(value.x(), project_value)
+                    .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+            ),
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "inspector numeric component does not match property value",
+                ));
+            }
+        };
+
+        let existing = property_keyframe_at_tick(
+            editor.project(),
+            commit.target.object_id,
+            commit.target.property,
+            resolved_tick,
+        )?;
+        let changed = if existing.is_some() {
+            editor.begin_property_keyframe_value_transaction(
+                commit.target.object_id,
+                commit.target.property,
+                resolved_tick,
+                evaluated,
+            )?;
+            if let Err(error) = editor.update_property_keyframe_value_transaction(edited) {
+                let _ = editor.cancel_transaction();
+                return Err(error);
+            }
+            editor.commit_transaction()?
+        } else {
+            editor
+                .create_property_keyframe(
+                    commit.target.object_id,
+                    commit.target.property,
+                    resolved_tick,
+                    edited,
+                )?
+                .is_some()
+        };
+
+        self.playhead = resolved_time;
+        Ok(changed)
+    }
+
     pub fn request_focused_keyframe_action(
         &mut self,
         object_id: ObjectId,
@@ -2530,6 +2633,138 @@ mod tests {
             })
         );
         assert_eq!(editor.history_len(), 0);
+    }
+
+    #[test]
+    fn inspector_animated_off_key_commit_creates_nearest_grid_key_and_moves_playhead() {
+        use rhythm_core::animation::{Animated, Interpolation, Keyframe};
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.tempo_map = tempo_120();
+        project.composition.objects[0].transform.rotation_degrees = Animated::with_keyframes(
+            0.0,
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(2).expect("keyframe id"),
+                    MusicalTick::new(0),
+                    0.0,
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(3).expect("keyframe id"),
+                    MusicalTick::new(480),
+                    40.0,
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("animated rotation");
+        project.next_entity_id = 4;
+
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(130_000_000));
+        let target = InspectorNumericTarget {
+            object_id,
+            property: AnimatableProperty::Rotation,
+            component: InspectorNumericComponent::Scalar,
+        };
+
+        session.begin_inspector_numeric_edit(target, 20.0, "20.0".to_owned());
+        assert!(session.update_inspector_numeric_edit_buffer(target, "30.0".to_owned()));
+        assert!(session.commit_inspector_numeric_edit(target));
+        assert_eq!(
+            session.commit_pending_inspector_static_property_edit(&mut editor),
+            Ok(false)
+        );
+        assert_eq!(
+            session.commit_pending_inspector_animated_property_edit(&mut editor),
+            Ok(true)
+        );
+
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        let inserted = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Rotation,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("nearest-grid key");
+        assert_eq!(inserted.value, PropertyValue::Scalar(30.0));
+        assert_eq!(editor.history_len(), 1);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Rotation,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn inspector_animated_on_key_commit_updates_existing_key() {
+        use rhythm_core::animation::{Animated, Interpolation, Keyframe};
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.tempo_map = tempo_120();
+        project.composition.objects[0].transform.opacity = Animated::with_keyframes(
+            1.0,
+            vec![Keyframe::new(
+                KeyframeId::new(2).expect("keyframe id"),
+                MusicalTick::new(240),
+                0.5,
+                Interpolation::Linear,
+            )],
+        )
+        .expect("animated opacity");
+        project.next_entity_id = 3;
+
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(130_000_000));
+        let target = InspectorNumericTarget {
+            object_id,
+            property: AnimatableProperty::Opacity,
+            component: InspectorNumericComponent::Scalar,
+        };
+
+        session.begin_inspector_numeric_edit(target, 0.5, "50.0".to_owned());
+        assert!(session.update_inspector_numeric_edit_buffer(target, "75.0".to_owned()));
+        assert!(session.commit_inspector_numeric_edit(target));
+        assert_eq!(
+            session.commit_pending_inspector_animated_property_edit(&mut editor),
+            Ok(true)
+        );
+
+        let key = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("existing key");
+        assert_eq!(key.value, PropertyValue::Scalar(0.75));
+        assert_eq!(editor.history_len(), 1);
+
+        assert_eq!(editor.undo(), Ok(true));
+        let restored = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("restored key");
+        assert_eq!(restored.value, PropertyValue::Scalar(0.5));
     }
 
     #[test]
