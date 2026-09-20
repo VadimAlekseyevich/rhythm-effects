@@ -1,6 +1,6 @@
 use crate::{
     editor_session::{
-        EditorSession, InspectorMultiNumericTarget, InspectorNumericComponent,
+        EditorSession, EffectPreset, InspectorMultiNumericTarget, InspectorNumericComponent,
         InspectorNumericTarget, InspectorTextField, InspectorTextTarget, PreviewQuality,
         ViewportCameraAction,
     },
@@ -47,40 +47,84 @@ fn draw_effect_stack(
 
     if effects.is_empty() {
         ui.label("No effects");
-        return;
-    }
+    } else {
+        for (index, effect) in effects.iter().enumerate() {
+            ui.push_id(effect.id.get(), |ui| {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        let mut enabled = effect.enabled;
+                        if ui.toggle_value(&mut enabled, "On").changed() {
+                            session.queue_effect_enabled(object_id, effect.id, enabled);
+                        }
 
-    for (index, effect) in effects.iter().enumerate() {
-        ui.push_id(effect.id.get(), |ui| {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    let mut enabled = effect.enabled;
-                    if ui.toggle_value(&mut enabled, "On").changed() {
-                        session.queue_effect_enabled(object_id, effect.id, enabled);
-                    }
+                        ui.strong(effect_kind_label(&effect.kind));
+                        ui.label(format!("#{}", effect.id.get()));
 
-                    ui.strong(effect_kind_label(&effect.kind));
-                    ui.label(format!("#{}", effect.id.get()));
-
-                    if ui
-                        .add_enabled(index > 0, egui::Button::new("↑"))
-                        .on_hover_text("Move effect earlier")
-                        .clicked()
-                    {
-                        session.queue_effect_move(object_id, effect.id, index - 1);
-                    }
-                    if ui
-                        .add_enabled(index + 1 < effects.len(), egui::Button::new("↓"))
-                        .on_hover_text("Move effect later")
-                        .clicked()
-                    {
-                        session.queue_effect_move(object_id, effect.id, index + 1);
-                    }
-                    if ui.button("Remove").clicked() {
-                        session.queue_effect_remove(object_id, effect.id);
-                    }
+                        if ui
+                            .add_enabled(index > 0, egui::Button::new("↑"))
+                            .on_hover_text("Move effect earlier")
+                            .clicked()
+                        {
+                            session.queue_effect_move(object_id, effect.id, index - 1);
+                        }
+                        if ui
+                            .add_enabled(index + 1 < effects.len(), egui::Button::new("↓"))
+                            .on_hover_text("Move effect later")
+                            .clicked()
+                        {
+                            session.queue_effect_move(object_id, effect.id, index + 1);
+                        }
+                        if ui.button("Remove").clicked() {
+                            session.queue_effect_remove(object_id, effect.id);
+                        }
+                    });
                 });
             });
+        }
+    }
+
+    let picker_open = session.effect_picker_open_for(object_id);
+    if ui
+        .button(if picker_open { "Close Add Effect" } else { "Add Effect" })
+        .clicked()
+    {
+        session.toggle_effect_picker(object_id);
+    }
+
+    if session.effect_picker_open_for(object_id) {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            ui.set_min_width(220.0);
+            let mut query = session.effect_picker_query().to_owned();
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut query)
+                    .hint_text("Search effects")
+                    .desired_width(f32::INFINITY),
+            );
+            if response.changed() {
+                session.update_effect_picker_query(query);
+            }
+
+            ui.separator();
+            let presets = session.effect_presets_matching_query();
+            if presets.is_empty() {
+                ui.label("No matching effects");
+            } else {
+                for preset in presets {
+                    if ui
+                        .selectable_label(false, preset.label())
+                        .on_hover_text(match preset {
+                            EffectPreset::Blur => "Blur",
+                            EffectPreset::Glow => "Glow",
+                            EffectPreset::Tint => "Tint",
+                            EffectPreset::Noise => "Noise",
+                            EffectPreset::RgbSplit => "RGB Split",
+                        })
+                        .clicked()
+                    {
+                        session.choose_effect_preset(object_id, preset);
+                    }
+                }
+            }
         });
     }
 }
