@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    animation::{AnimationInvariantError, Keyframe},
+    animation::{AnimationInvariantError, Interpolation, Keyframe},
     domain::Vec2,
     ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{Object, Project, ProjectValidationError},
@@ -9,7 +9,7 @@ use crate::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
         insert_property_keyframe, locate_property_keyframe, property_base_value,
         property_keyframe_by_id, property_keyframe_count, remove_property_keyframe_by_id,
-        set_property_base_value,
+        set_property_base_value, set_property_keyframe_interpolation,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -102,6 +102,15 @@ pub struct PropertyBaseChange {
     pub after: PropertyValue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PropertyKeyframeInterpolationRecord {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub keyframe_id: KeyframeId,
+    pub before: Interpolation,
+    pub after: Interpolation,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     AddObject {
@@ -145,6 +154,10 @@ pub enum EditCommand {
     MovePropertyKeyframes {
         moves: Vec<PropertyKeyframeMove>,
     },
+    SetPropertyKeyframeInterpolations {
+        keyframe_ids: Vec<KeyframeId>,
+        interpolation: Interpolation,
+    },
     SetTempoMap {
         tempo_map: TempoMap,
     },
@@ -165,6 +178,9 @@ impl EditCommand {
             Self::InsertPropertyKeyframes { .. } => "InsertPropertyKeyframes",
             Self::DeletePropertyKeyframes { .. } => "DeletePropertyKeyframes",
             Self::MovePropertyKeyframes { .. } => "MovePropertyKeyframes",
+            Self::SetPropertyKeyframeInterpolations { .. } => {
+                "SetPropertyKeyframeInterpolations"
+            }
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
     }
@@ -220,6 +236,9 @@ pub enum HistoryPayload {
     },
     PropertyKeyframesMoved {
         records: Vec<PropertyKeyframeMoveRecord>,
+    },
+    PropertyKeyframeInterpolationsChanged {
+        records: Vec<PropertyKeyframeInterpolationRecord>,
     },
     TempoMapChanged {
         before: TempoMap,
@@ -541,6 +560,17 @@ impl ProjectEditor {
         moves: Vec<PropertyKeyframeMove>,
     ) -> Result<bool, EditError> {
         self.execute(EditCommand::MovePropertyKeyframes { moves })
+    }
+
+    pub fn set_property_keyframe_interpolations(
+        &mut self,
+        keyframe_ids: Vec<KeyframeId>,
+        interpolation: Interpolation,
+    ) -> Result<bool, EditError> {
+        self.execute(EditCommand::SetPropertyKeyframeInterpolations {
+            keyframe_ids,
+            interpolation,
+        })
     }
 
     pub fn execute(&mut self, command: EditCommand) -> Result<bool, EditError> {
