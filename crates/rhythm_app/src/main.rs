@@ -223,12 +223,7 @@ impl ApplicationHandler for RhythmApp {
                         && code == KeyCode::Escape
                     {
                         self.session.cancel_keyframe_drag()
-                    } else if !control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::KeyK
-                    {
+                    } else if !control && !shift && !alt && !super_key && code == KeyCode::KeyK {
                         match self.session.keyframe_action(&mut self.project_editor) {
                             Ok(changed) => changed,
                             Err(error) => {

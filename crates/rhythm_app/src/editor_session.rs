@@ -709,7 +709,10 @@ mod tests {
         );
         assert!(session.cancel_keyframe_drag());
         assert_eq!(session.keyframe_drag_preview_tick(keyframe_id), None);
-        assert_eq!(session.commit_pending_keyframe_move(&mut editor_with_object_for_drag()), Ok(false));
+        assert_eq!(
+            session.commit_pending_keyframe_move(&mut editor_with_object_for_drag()),
+            Ok(false)
+        );
     }
 
     #[test]

@@ -819,13 +819,9 @@ impl ProjectEditor {
                 keyframe_id,
                 target_tick,
             } => {
-                let before = property_keyframe_by_id(
-                    &self.project,
-                    object_id,
-                    property,
-                    keyframe_id,
-                )?
-                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                let before =
+                    property_keyframe_by_id(&self.project, object_id, property, keyframe_id)?
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
 
                 if before.tick == target_tick {
                     return Ok(None);
@@ -846,12 +842,8 @@ impl ProjectEditor {
                 if let Err(error) =
                     insert_property_keyframe(&mut self.project, object_id, property, after)
                 {
-                    let _ = insert_property_keyframe(
-                        &mut self.project,
-                        object_id,
-                        property,
-                        before,
-                    );
+                    let _ =
+                        insert_property_keyframe(&mut self.project, object_id, property, before);
                     return Err(EditError::PropertyAccess(error));
                 }
 
@@ -862,12 +854,8 @@ impl ProjectEditor {
                         property,
                         keyframe_id,
                     );
-                    let _ = insert_property_keyframe(
-                        &mut self.project,
-                        object_id,
-                        property,
-                        before,
-                    );
+                    let _ =
+                        insert_property_keyframe(&mut self.project, object_id, property, before);
                     return Err(EditError::InvalidProject(error));
                 }
 
