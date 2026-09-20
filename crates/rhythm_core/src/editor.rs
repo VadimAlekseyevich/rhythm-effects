@@ -873,6 +873,7 @@ impl ProjectEditor {
                     if !unique_ids.insert(keyframe_id) {
                         continue;
                     }
+
                     let located_keyframe = locate_property_keyframe(&self.project, keyframe_id)
                         .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
                     located.push(located_keyframe);
@@ -882,70 +883,17 @@ impl ProjectEditor {
                     return Ok(None);
                 }
 
-                located.sort_by_key(|located| {
-                    (
-                HistoryPayload::PropertyKeyframesDeleted {
-                    records,
-                    base_changes,
-                },
-                direction,
-            ) => {
-                match direction {
-                    HistoryDirection::Undo => {
-                        for change in base_changes {
-                            set_property_base_value(
-                                &mut self.project,
-                                change.object_id,
-                                change.property,
-                                change.before,
-                            )?;
-                        }
-                        for record in records {
-                            insert_property_keyframe(
-                                &mut self.project,
-                                record.object_id,
-                                record.property,
-                                record.keyframe,
-                            )?;
-                        }
-                    }
-                    HistoryDirection::Redo => {
-                        for record in records {
-                            remove_property_keyframe_by_id(
-                                &mut self.project,
-                                record.object_id,
-                                record.property,
-                                record.keyframe.id,
-                            )?
-                            .ok_or(EditError::KeyframeNotFound(record.keyframe.id))?;
-                        }
-                        for change in base_changes {
-                            set_property_base_value(
-                                &mut self.project,
-                                change.object_id,
-                                change.property,
-                                change.after,
-                            )?;
-                        }
-                    }
-                }
-            }
-            (
-                        located.object_id.get(),
-                        format!("{:?}", located.property),
-                        located.keyframe.tick.get(),
-                    )
-                });
-
-                let mut base_changes = Vec::new();
                 let mut grouped: Vec<(ObjectId, AnimatableProperty, Vec<PropertyKeyframe>)> =
                     Vec::new();
 
                 for located_keyframe in located {
-                    if let Some((_, _, keys)) = grouped.iter_mut().find(|(object_id, property, _)| {
-                        *object_id == located_keyframe.object_id
-                            && *property == located_keyframe.property
-                    }) {
+                    if let Some((_, _, keys)) = grouped
+                        .iter_mut()
+                        .find(|(object_id, property, _)| {
+                            *object_id == located_keyframe.object_id
+                                && *property == located_keyframe.property
+                        })
+                    {
                         keys.push(located_keyframe.keyframe);
                     } else {
                         grouped.push((
@@ -957,6 +905,8 @@ impl ProjectEditor {
                 }
 
                 let mut records = Vec::new();
+                let mut base_changes = Vec::new();
+
                 for (object_id, property, mut keys) in grouped {
                     keys.sort_by_key(|keyframe| keyframe.tick);
                     let total_before =
@@ -971,6 +921,7 @@ impl ProjectEditor {
                             keyframe.id,
                         )?
                         .ok_or(EditError::KeyframeNotFound(keyframe.id))?;
+
                         records.push(PropertyKeyframeDeleteRecord {
                             object_id,
                             property,
@@ -1371,6 +1322,51 @@ impl ProjectEditor {
                     set_property_base_value(&mut self.project, *object_id, *property, *base_after)?;
                 }
             }
+            (
+                HistoryPayload::PropertyKeyframesDeleted {
+                    records,
+                    base_changes,
+                },
+                direction,
+            ) => match direction {
+                HistoryDirection::Undo => {
+                    for change in base_changes {
+                        set_property_base_value(
+                            &mut self.project,
+                            change.object_id,
+                            change.property,
+                            change.before,
+                        )?;
+                    }
+                    for record in records {
+                        insert_property_keyframe(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.keyframe,
+                        )?;
+                    }
+                }
+                HistoryDirection::Redo => {
+                    for record in records {
+                        remove_property_keyframe_by_id(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.keyframe.id,
+                        )?
+                        .ok_or(EditError::KeyframeNotFound(record.keyframe.id))?;
+                    }
+                    for change in base_changes {
+                        set_property_base_value(
+                            &mut self.project,
+                            change.object_id,
+                            change.property,
+                            change.after,
+                        )?;
+                    }
+                }
+            },
             (HistoryPayload::PropertyKeyframesMoved { records }, direction) => match direction {
                     HistoryDirection::Undo => {
                         for record in records.iter().rev() {
