@@ -2446,7 +2446,9 @@ mod tests {
         domain::Vec2,
         editor::ProjectEditor,
         ids::{KeyframeId, ObjectId},
-        property::{AnimatableProperty, PropertyValue, property_base_value},
+        property::{
+            AnimatableProperty, PropertyValue, property_base_value, property_keyframe_at_tick,
+        },
         time::{
             BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
             TempoMap, TimeSignature,
