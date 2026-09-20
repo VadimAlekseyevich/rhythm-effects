@@ -423,6 +423,14 @@ impl ApplicationHandler for RhythmApp {
                     }
                     match self
                         .session
+                        .commit_pending_inspector_static_property_edit(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector static property edit failed"),
+                    }
+                    match self
+                        .session
                         .commit_pending_focused_keyframe_action(&mut self.project_editor)
                     {
                         Ok(true) => window.request_redraw(),
