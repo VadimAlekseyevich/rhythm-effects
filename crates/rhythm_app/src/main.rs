@@ -415,6 +415,14 @@ impl ApplicationHandler for RhythmApp {
                     }
                     match self
                         .session
+                        .commit_pending_object_list_actions(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "object list state edit failed"),
+                    }
+                    match self
+                        .session
                         .commit_pending_keyframe_interpolation(&mut self.project_editor)
                     {
                         Ok(true) => window.request_redraw(),
