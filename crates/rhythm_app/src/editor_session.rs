@@ -436,10 +436,8 @@ impl EditorSession {
             return false;
         }
 
-        let mut delta_x =
-            (pointer[0] - drag.pointer_start[0]) * composition_units_per_point[0];
-        let mut delta_y =
-            (pointer[1] - drag.pointer_start[1]) * composition_units_per_point[1];
+        let mut delta_x = (pointer[0] - drag.pointer_start[0]) * composition_units_per_point[0];
+        let mut delta_y = (pointer[1] - drag.pointer_start[1]) * composition_units_per_point[1];
         if constrain_axis {
             if delta_x.abs() >= delta_y.abs() {
                 delta_y = 0.0;
