@@ -1377,10 +1377,7 @@ impl EditorSession {
     }
 
     #[must_use]
-    pub fn inspector_numeric_edit_buffer(
-        &self,
-        target: InspectorNumericTarget,
-    ) -> Option<&str> {
+    pub fn inspector_numeric_edit_buffer(&self, target: InspectorNumericTarget) -> Option<&str> {
         self.inspector_numeric_edit
             .as_ref()
             .filter(|edit| edit.target == target)
@@ -2386,7 +2383,10 @@ mod tests {
         session.begin_inspector_numeric_edit(target, 22.5, "22.5".to_owned());
         assert!(session.update_inspector_numeric_edit_buffer(target, "-".to_owned()));
         assert!(!session.commit_inspector_numeric_edit(target));
-        assert_eq!(session.inspector_numeric_edit_original_value(target), Some(22.5));
+        assert_eq!(
+            session.inspector_numeric_edit_original_value(target),
+            Some(22.5)
+        );
         assert!(session.cancel_inspector_numeric_edit(target));
         assert_eq!(session.inspector_numeric_edit_buffer(target), None);
         assert_eq!(session.take_inspector_numeric_commit(), None);
