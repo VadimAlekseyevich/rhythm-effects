@@ -240,6 +240,22 @@ impl ApplicationHandler for RhythmApp {
                                 false
                             }
                         }
+                    } else if control
+                        && !shift
+                        && !alt
+                        && !super_key
+                        && code == KeyCode::KeyD
+                    {
+                        match self
+                            .session
+                            .duplicate_selected_keyframes(&mut self.project_editor)
+                        {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "duplicate selected keyframes failed");
+                                false
+                            }
+                        }
                     } else if direction != 0 && alt && !shift && !super_key {
                         let result = if control {
                             self.session.move_selected_keyframes_by_beat(
