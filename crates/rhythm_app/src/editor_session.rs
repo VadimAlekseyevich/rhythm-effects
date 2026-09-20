@@ -135,6 +135,18 @@ struct ViewportScaleDrag {
     transaction_started: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportRotationDrag {
+    object_id: ObjectId,
+    anchor: Vec2,
+    pointer_angle_degrees: f32,
+    rotation_start: f32,
+    accumulated_delta_degrees: f32,
+    current_rotation: f32,
+    phase: ViewportTransformDragPhase,
+    transaction_started: bool,
+}
+
 const MIN_VIEWPORT_ZOOM: f32 = 0.1;
 const MAX_VIEWPORT_ZOOM: f32 = 8.0;
 const FRAME_SELECTION_PADDING_POINTS: f32 = 32.0;
@@ -198,6 +210,7 @@ pub struct EditorSession {
     pending_viewport_camera_action: Option<ViewportCameraAction>,
     viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_scale_drag: Option<ViewportScaleDrag>,
+    viewport_rotation_drag: Option<ViewportRotationDrag>,
     selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
@@ -222,6 +235,7 @@ impl Default for EditorSession {
             pending_viewport_camera_action: None,
             viewport_position_drag: None,
             viewport_scale_drag: None,
+            viewport_rotation_drag: None,
             selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
@@ -408,6 +422,7 @@ impl EditorSession {
     ) -> bool {
         if self.viewport_position_drag.is_some()
             || self.viewport_scale_drag.is_some()
+            || self.viewport_rotation_drag.is_some()
             || !pointer_start[0].is_finite()
             || !pointer_start[1].is_finite()
         {
@@ -546,6 +561,7 @@ impl EditorSession {
     ) -> bool {
         if self.viewport_position_drag.is_some()
             || self.viewport_scale_drag.is_some()
+            || self.viewport_rotation_drag.is_some()
             || !rotation_degrees.is_finite()
         {
             return false;
@@ -684,6 +700,145 @@ impl EditorSession {
         if drag.phase == ViewportTransformDragPhase::CommitRequested {
             let changed = editor.commit_transaction()?;
             self.viewport_scale_drag = None;
+            return Ok(changed);
+        }
+
+        Ok(true)
+    }
+
+    pub fn begin_viewport_rotation_drag(
+        &mut self,
+        object_id: ObjectId,
+        anchor: Vec2,
+        pointer_start: Vec2,
+        rotation_start: f32,
+    ) -> bool {
+        if self.viewport_position_drag.is_some()
+            || self.viewport_scale_drag.is_some()
+            || self.viewport_rotation_drag.is_some()
+            || !rotation_start.is_finite()
+        {
+            return false;
+        }
+
+        let delta_x = pointer_start.x() - anchor.x();
+        let delta_y = pointer_start.y() - anchor.y();
+        if delta_x.abs() < f32::EPSILON && delta_y.abs() < f32::EPSILON {
+            return false;
+        }
+        let pointer_angle_degrees = delta_y.atan2(delta_x).to_degrees();
+
+        self.viewport_rotation_drag = Some(ViewportRotationDrag {
+            object_id,
+            anchor,
+            pointer_angle_degrees,
+            rotation_start,
+            accumulated_delta_degrees: 0.0,
+            current_rotation: rotation_start,
+            phase: ViewportTransformDragPhase::Active,
+            transaction_started: false,
+        });
+        true
+    }
+
+    #[must_use]
+    pub fn viewport_rotation_drag_active(&self) -> bool {
+        self.viewport_rotation_drag
+            .is_some_and(|drag| drag.phase == ViewportTransformDragPhase::Active)
+    }
+
+    pub fn update_viewport_rotation_drag(&mut self, pointer: Vec2) -> bool {
+        let Some(drag) = self.viewport_rotation_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportTransformDragPhase::Active {
+            return false;
+        }
+
+        let delta_x = pointer.x() - drag.anchor.x();
+        let delta_y = pointer.y() - drag.anchor.y();
+        if delta_x.abs() < f32::EPSILON && delta_y.abs() < f32::EPSILON {
+            return false;
+        }
+
+        let current_angle = delta_y.atan2(delta_x).to_degrees();
+        let mut delta = current_angle - drag.pointer_angle_degrees;
+        while delta > 180.0 {
+            delta -= 360.0;
+        }
+        while delta <= -180.0 {
+            delta += 360.0;
+        }
+
+        drag.pointer_angle_degrees = current_angle;
+        drag.accumulated_delta_degrees += delta;
+        let current_rotation = drag.rotation_start + drag.accumulated_delta_degrees;
+        if !current_rotation.is_finite()
+            || (current_rotation - drag.current_rotation).abs() < f32::EPSILON
+        {
+            return false;
+        }
+
+        drag.current_rotation = current_rotation;
+        true
+    }
+
+    pub fn finish_viewport_rotation_drag(&mut self) -> bool {
+        let Some(drag) = self.viewport_rotation_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportTransformDragPhase::Active {
+            return false;
+        }
+
+        drag.phase = ViewportTransformDragPhase::CommitRequested;
+        true
+    }
+
+    pub fn cancel_viewport_rotation_drag(&mut self) -> bool {
+        let Some(drag) = self.viewport_rotation_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
+            return false;
+        }
+
+        drag.phase = ViewportTransformDragPhase::CancelRequested;
+        true
+    }
+
+    pub fn sync_viewport_rotation_drag(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(drag) = self.viewport_rotation_drag.as_mut() else {
+            return Ok(false);
+        };
+
+        if drag.phase == ViewportTransformDragPhase::CancelRequested && !drag.transaction_started {
+            self.viewport_rotation_drag = None;
+            return Ok(true);
+        }
+
+        if !drag.transaction_started {
+            if let Err(error) = editor.begin_rotation_transaction(drag.object_id) {
+                self.viewport_rotation_drag = None;
+                return Err(error);
+            }
+            drag.transaction_started = true;
+        }
+
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
+            let changed = editor.cancel_transaction()?;
+            self.viewport_rotation_drag = None;
+            return Ok(changed);
+        }
+
+        editor.update_rotation_transaction(drag.current_rotation)?;
+
+        if drag.phase == ViewportTransformDragPhase::CommitRequested {
+            let changed = editor.commit_transaction()?;
+            self.viewport_rotation_drag = None;
             return Ok(changed);
         }
 
@@ -1773,6 +1928,71 @@ mod tests {
                 .base_value(),
             Vec2::new(0.0, 80.0).expect("y constrained position")
         );
+    }
+
+    #[test]
+    fn viewport_rotation_drag_accumulates_across_angle_wrap() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_rotation_drag(
+            object_id,
+            Vec2::new(0.0, 0.0).expect("anchor"),
+            Vec2::new(-0.9848077, 0.1736482).expect("170 degree pointer"),
+            0.0,
+        ));
+        assert!(session.update_viewport_rotation_drag(
+            Vec2::new(-0.9848077, -0.1736482).expect("-170 degree pointer")
+        ));
+        assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
+        let rotation = *editor.project().composition.objects[0]
+            .transform
+            .rotation_degrees
+            .base_value();
+        assert!((rotation - 20.0).abs() < 0.001);
+
+        assert!(session.update_viewport_rotation_drag(
+            Vec2::new(0.0, -1.0).expect("-90 degree pointer")
+        ));
+        assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
+        let rotation = *editor.project().composition.objects[0]
+            .transform
+            .rotation_degrees
+            .base_value();
+        assert!((rotation - 100.0).abs() < 0.001);
+
+        assert!(session.finish_viewport_rotation_drag());
+        assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+    }
+
+    #[test]
+    fn viewport_rotation_drag_cancel_restores_rotation_without_history() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_rotation_drag(
+            object_id,
+            Vec2::new(0.0, 0.0).expect("anchor"),
+            Vec2::new(1.0, 0.0).expect("pointer"),
+            0.0,
+        ));
+        assert!(session.update_viewport_rotation_drag(
+            Vec2::new(0.0, 1.0).expect("pointer")
+        ));
+        assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
+        assert!(session.cancel_viewport_rotation_drag());
+        assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value(),
+            0.0
+        );
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]
