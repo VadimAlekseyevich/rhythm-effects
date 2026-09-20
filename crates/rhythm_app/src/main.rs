@@ -280,10 +280,13 @@ impl ApplicationHandler for RhythmApp {
                     } else if !control && !shift && !alt && !super_key && code == KeyCode::Escape {
                         let cancelled_keyframe_drag = self.session.cancel_keyframe_drag();
                         let cancelled_position_drag = self.session.cancel_viewport_position_drag();
+                        let cancelled_multi_position_drag =
+                            self.session.cancel_viewport_multi_position_drag();
                         let cancelled_scale_drag = self.session.cancel_viewport_scale_drag();
                         let cancelled_rotation_drag = self.session.cancel_viewport_rotation_drag();
                         cancelled_keyframe_drag
                             || cancelled_position_drag
+                            || cancelled_multi_position_drag
                             || cancelled_scale_drag
                             || cancelled_rotation_drag
                     } else if !control && !alt && !super_key && code == KeyCode::KeyF {
@@ -385,6 +388,14 @@ impl ApplicationHandler for RhythmApp {
                         Ok(true) => window.request_redraw(),
                         Ok(false) => {}
                         Err(error) => warn!(?error, "viewport position drag failed"),
+                    }
+                    match self
+                        .session
+                        .sync_viewport_multi_position_drag(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "viewport multi-position drag failed"),
                     }
                     match self
                         .session
