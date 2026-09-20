@@ -220,7 +220,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-185** — Implement static property edit to base_value.
 - [x] **AI-186** — Implement animated off-key property edit to create/update nearest-grid key and move playhead.
 - [x] **AI-187** — Implement final-key removal returning the property to static using removed-key value.
-- [ ] **AI-188** — Implement multi-selection mixed-value transform rows.
+- [x] **AI-188** — Implement multi-selection mixed-value transform rows.
 - [ ] **AI-189** — Implement Rectangle Inspector controls.
 - [ ] **AI-190** — Implement Ellipse Inspector controls.
 - [ ] **AI-191** — Implement Image source/intrinsic-dimensions/Relink Inspector controls.
