@@ -994,10 +994,31 @@ fn resample_decoded_audio(
         .process_all(&input, frame_count, None)
         .map_err(|error| AudioDecodeError::Resample(error.to_string()))?;
 
+    let expected_frames_numerator = (frame_count as u128)
+        .checked_mul(u128::from(output_sample_rate))
+        .ok_or(AudioDecodeError::DurationOverflow)?;
+    let expected_frames = expected_frames_numerator
+        .checked_add(u128::from(audio.sample_rate) / 2)
+        .ok_or(AudioDecodeError::DurationOverflow)?
+        / u128::from(audio.sample_rate);
+    let expected_frames =
+        usize::try_from(expected_frames).map_err(|_| AudioDecodeError::DurationOverflow)?;
+    let expected_samples = expected_frames
+        .checked_mul(channels)
+        .ok_or(AudioDecodeError::DurationOverflow)?;
+
+    let mut interleaved_f32 = output.take_data();
+    if interleaved_f32.len() < expected_samples {
+        return Err(AudioDecodeError::Resample(
+            "resampler returned fewer frames than required for source duration".to_owned(),
+        ));
+    }
+    interleaved_f32.truncate(expected_samples);
+
     Ok(DecodedAudio {
         sample_rate: output_sample_rate,
         channel_layout: audio.channel_layout,
-        interleaved_f32: output.take_data(),
+        interleaved_f32,
     })
 }
 
