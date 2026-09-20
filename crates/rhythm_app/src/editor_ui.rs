@@ -1,7 +1,8 @@
 use crate::{
     editor_session::{
         EditorSession, InspectorMultiNumericTarget, InspectorNumericComponent,
-        InspectorNumericTarget, PreviewQuality, ViewportCameraAction,
+        InspectorNumericTarget, InspectorTextField, InspectorTextTarget, PreviewQuality,
+        ViewportCameraAction,
     },
     timeline::draw_timeline,
     viewport::{
@@ -13,13 +14,227 @@ use rhythm_core::{
     domain::Vec2,
     geometry::LocalBounds2d,
     ids::{AssetId, ObjectId},
-    project::{AssetSource, ObjectContent, Project},
+    project::{
+        AssetSource, FontStyle, FontWeight, ObjectContent, Project, TextAlignment, TextObject,
+    },
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, property_base_value,
         property_keyframe_at_tick, property_keyframe_count,
     },
     time::{ProjectTimeNs, snap_tick_position_to_grid},
 };
+
+const FONT_WEIGHTS: [FontWeight; 9] = [
+    FontWeight::Thin,
+    FontWeight::ExtraLight,
+    FontWeight::Light,
+    FontWeight::Normal,
+    FontWeight::Medium,
+    FontWeight::SemiBold,
+    FontWeight::Bold,
+    FontWeight::ExtraBold,
+    FontWeight::Black,
+];
+
+fn font_weight_label(weight: FontWeight) -> &'static str {
+    match weight {
+        FontWeight::Thin => "Thin",
+        FontWeight::ExtraLight => "Extra Light",
+        FontWeight::Light => "Light",
+        FontWeight::Normal => "Normal",
+        FontWeight::Medium => "Medium",
+        FontWeight::SemiBold => "Semi Bold",
+        FontWeight::Bold => "Bold",
+        FontWeight::ExtraBold => "Extra Bold",
+        FontWeight::Black => "Black",
+    }
+}
+
+fn font_style_label(style: FontStyle) -> &'static str {
+    match style {
+        FontStyle::Normal => "Normal",
+        FontStyle::Italic => "Italic",
+    }
+}
+
+fn text_alignment_label(alignment: TextAlignment) -> &'static str {
+    match alignment {
+        TextAlignment::Left => "Left",
+        TextAlignment::Center => "Center",
+        TextAlignment::Right => "Right",
+    }
+}
+
+fn draw_text_inspector(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    object_id: ObjectId,
+    text: &TextObject,
+    project: &Project,
+) {
+    ui.add_space(8.0);
+    ui.separator();
+    ui.heading("Text");
+
+    let content_target = InspectorTextTarget {
+        object_id,
+        field: InspectorTextField::Content,
+    };
+    ui.label("Content");
+    if let Some(mut buffer) = session
+        .inspector_text_edit_buffer(content_target)
+        .map(str::to_owned)
+    {
+        let response = ui.add(
+            egui::TextEdit::multiline(&mut buffer)
+                .desired_rows(4)
+                .desired_width(f32::INFINITY),
+        );
+        session.update_inspector_text_edit_buffer(content_target, buffer);
+        let escape = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
+        let ctrl_enter = response.has_focus()
+            && ui.input(|input| {
+                input.modifiers.ctrl && input.key_pressed(egui::Key::Enter)
+            });
+        if escape {
+            session.cancel_inspector_text_edit(content_target);
+            response.surrender_focus();
+        } else if ctrl_enter || response.lost_focus() {
+            session.commit_inspector_text_edit(content_target);
+        }
+    } else {
+        ui.label(if text.text.is_empty() {
+            "(empty)"
+        } else {
+            text.text.as_str()
+        });
+        if ui.button("Edit content").clicked() {
+            session.begin_inspector_text_edit(content_target, text.text.clone());
+        }
+    }
+
+    let family_target = InspectorTextTarget {
+        object_id,
+        field: InspectorTextField::FontFamily,
+    };
+    ui.horizontal(|ui| {
+        ui.label("Font");
+        if let Some(mut buffer) = session
+            .inspector_text_edit_buffer(family_target)
+            .map(str::to_owned)
+        {
+            let response = ui.add_sized(
+                [150.0, 24.0],
+                egui::TextEdit::singleline(&mut buffer),
+            );
+            session.update_inspector_text_edit_buffer(family_target, buffer);
+            let escape =
+                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
+            let enter =
+                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            if escape {
+                session.cancel_inspector_text_edit(family_target);
+                response.surrender_focus();
+            } else if enter || response.lost_focus() {
+                session.commit_inspector_text_edit(family_target);
+            }
+        } else if ui.button(&text.font.family).clicked() {
+            session.begin_inspector_text_edit(family_target, text.font.family.clone());
+        }
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Weight");
+        let mut weight = text.font.weight;
+        egui::ComboBox::from_id_salt(("text_weight", object_id.get()))
+            .selected_text(font_weight_label(weight))
+            .show_ui(ui, |ui| {
+                for candidate in FONT_WEIGHTS {
+                    ui.selectable_value(&mut weight, candidate, font_weight_label(candidate));
+                }
+            });
+        if weight != text.font.weight {
+            session.queue_text_font_weight(object_id, weight);
+        }
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Style");
+        let mut style = text.font.style;
+        egui::ComboBox::from_id_salt(("text_style", object_id.get()))
+            .selected_text(font_style_label(style))
+            .show_ui(ui, |ui| {
+                for candidate in [FontStyle::Normal, FontStyle::Italic] {
+                    ui.selectable_value(&mut style, candidate, font_style_label(candidate));
+                }
+            });
+        if style != text.font.style {
+            session.queue_text_font_style(object_id, style);
+        }
+    });
+
+    let size_target = InspectorTextTarget {
+        object_id,
+        field: InspectorTextField::FontSize,
+    };
+    ui.horizontal(|ui| {
+        ui.label("Size");
+        if let Some(mut buffer) = session
+            .inspector_text_edit_buffer(size_target)
+            .map(str::to_owned)
+        {
+            let response = ui.add_sized(
+                [80.0, 24.0],
+                egui::TextEdit::singleline(&mut buffer).horizontal_align(egui::Align::RIGHT),
+            );
+            session.update_inspector_text_edit_buffer(size_target, buffer);
+            let escape =
+                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
+            let enter =
+                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            if escape {
+                session.cancel_inspector_text_edit(size_target);
+                response.surrender_focus();
+            } else if enter || response.lost_focus() {
+                session.commit_inspector_text_edit(size_target);
+            }
+        } else if ui.button(format!("{:.1} px", text.font_size)).clicked() {
+            session.begin_inspector_text_edit(size_target, format!("{:.1}", text.font_size));
+        }
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Alignment");
+        let mut alignment = text.alignment;
+        egui::ComboBox::from_id_salt(("text_alignment", object_id.get()))
+            .selected_text(text_alignment_label(alignment))
+            .show_ui(ui, |ui| {
+                for candidate in [
+                    TextAlignment::Left,
+                    TextAlignment::Center,
+                    TextAlignment::Right,
+                ] {
+                    ui.selectable_value(
+                        &mut alignment,
+                        candidate,
+                        text_alignment_label(candidate),
+                    );
+                }
+            });
+        if alignment != text.alignment {
+            session.queue_text_alignment(object_id, alignment);
+        }
+    });
+
+    draw_animatable_property_row(
+        ui,
+        session,
+        project,
+        object_id,
+        AnimatableProperty::TextColor,
+        "Color",
+    );
+}
 
 fn draw_image_inspector(
     ui: &mut egui::Ui,
@@ -845,7 +1060,9 @@ pub fn draw_editor_shell(
                             ObjectContent::Image(image) => {
                                 draw_image_inspector(ui, session, project, image.asset);
                             }
-                            ObjectContent::Text(_) => {}
+                            ObjectContent::Text(text) => {
+                                draw_text_inspector(ui, session, object.id, text, project);
+                            }
                         }
                     } else {
                         ui.label("Selected object is unavailable");
@@ -953,6 +1170,29 @@ pub fn draw_editor_shell(
                         ui.label("Intrinsic dimensions are shown per image when runtime decode is available.");
                         ui.add_enabled(false, egui::Button::new("Relink"))
                             .on_hover_text("Relink is a single-asset action");
+                    }
+
+                    let all_text = selected.iter().all(|object_id| {
+                        project
+                            .composition
+                            .objects
+                            .iter()
+                            .find(|object| object.id == *object_id)
+                            .is_some_and(|object| matches!(&object.content, ObjectContent::Text(_)))
+                    });
+                    if all_text {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.heading("Text");
+                        ui.label("Content and font controls require single selection.");
+                        draw_multi_animatable_property_row(
+                            ui,
+                            session,
+                            project,
+                            &selected,
+                            AnimatableProperty::TextColor,
+                            "Color",
+                        );
                     }
 
                     let all_ellipses = selected.iter().all(|object_id| {
