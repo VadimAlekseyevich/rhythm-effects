@@ -1062,6 +1062,7 @@ mod tests {
     use super::{
         AudioChannelLayout, AudioDecodeError, DecodedAudio, decode_audio_file, probe_audio_file,
     };
+    use rhythm_core::time::ProjectTimeNs;
 
     fn write_pcm16_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[i16]) {
         let data_len = u32::try_from(samples.len() * 2).expect("small fixture");
