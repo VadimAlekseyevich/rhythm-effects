@@ -5,8 +5,8 @@ use crate::{
     domain::Vec2,
     ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{
-        FontStyle, FontWeight, Object, ObjectContent, Project, ProjectValidationError, TextAlignment,
-        TextObject,
+        FontStyle, FontWeight, Object, ObjectContent, Project, ProjectValidationError,
+        TextAlignment, TextObject,
     },
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
