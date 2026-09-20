@@ -939,6 +939,13 @@ pub fn draw_editor_shell(
                 ui.heading("Rhythm Effects");
                 ui.separator();
                 ui.label("Transport");
+                if ui
+                    .button(if session.is_playing() { "Pause" } else { "Play" })
+                    .on_hover_text("Space")
+                    .clicked()
+                {
+                    session.toggle_playback();
+                }
                 if ui.button("Start").clicked() {
                     session.seek_paused(ProjectTimeNs::new(0));
                 }
