@@ -264,10 +264,8 @@ pub fn draw_editor_shell(
             };
             let composition_to_screen = |point: Vec2| {
                 egui::pos2(
-                    response.rect.left()
-                        + point.x() / composition_size.x * response.rect.width(),
-                    response.rect.top()
-                        + point.y() / composition_size.y * response.rect.height(),
+                    response.rect.left() + point.x() / composition_size.x * response.rect.width(),
+                    response.rect.top() + point.y() / composition_size.y * response.rect.height(),
                 )
             };
 
@@ -370,13 +368,10 @@ pub fn draw_editor_shell(
                 rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
             {
                 let selected = session.selected_object_ids();
-                if let Some(overlay) =
-                    selection_overlay_geometry(&scene, &selected, |_, _| None)
-                {
+                if let Some(overlay) = selection_overlay_geometry(&scene, &selected, |_, _| None) {
                     let corners = overlay.corners.map(composition_to_screen);
                     let anchor = composition_to_screen(overlay.anchor);
-                    let stroke =
-                        egui::Stroke::new(1.5, ui.visuals().selection.stroke.color);
+                    let stroke = egui::Stroke::new(1.5, ui.visuals().selection.stroke.color);
 
                     for (start, end) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
                         ui.painter()
