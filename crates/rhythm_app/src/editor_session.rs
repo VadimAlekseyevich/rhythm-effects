@@ -153,6 +153,7 @@ pub struct EditorSession {
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
     follow_playhead: bool,
+    viewport_pan_points: [f32; 2],
     selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
@@ -172,6 +173,7 @@ impl Default for EditorSession {
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
             follow_playhead: false,
+            viewport_pan_points: [0.0, 0.0],
             selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
@@ -207,6 +209,24 @@ impl EditorSession {
 
     pub const fn set_follow_playhead(&mut self, enabled: bool) {
         self.follow_playhead = enabled;
+    }
+
+    #[must_use]
+    pub const fn viewport_pan_points(&self) -> [f32; 2] {
+        self.viewport_pan_points
+    }
+
+    pub fn pan_viewport_points(&mut self, delta: [f32; 2]) -> bool {
+        if !delta[0].is_finite()
+            || !delta[1].is_finite()
+            || (delta[0].abs() < f32::EPSILON && delta[1].abs() < f32::EPSILON)
+        {
+            return false;
+        }
+
+        self.viewport_pan_points[0] += delta[0];
+        self.viewport_pan_points[1] += delta[1];
+        true
     }
 
     #[allow(dead_code)]
@@ -1209,6 +1229,17 @@ mod tests {
         assert!(session.replace_object_selection(None));
         assert!(session.selected_object_ids().is_empty());
         assert!(!session.replace_object_selection(None));
+    }
+
+    #[test]
+    fn viewport_pan_accumulates_middle_drag_delta_in_ui_points() {
+        let mut session = EditorSession::default();
+
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert!(session.pan_viewport_points([12.5, -4.0]));
+        assert!(session.pan_viewport_points([-2.5, 9.0]));
+        assert_eq!(session.viewport_pan_points(), [10.0, 5.0]);
+        assert!(!session.pan_viewport_points([0.0, 0.0]));
     }
 
     #[test]
