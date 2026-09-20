@@ -90,6 +90,13 @@ pub fn draw_editor_shell(
                     "Grid 1/{}",
                     session.authoring_division().parts_per_beat()
                 ));
+                let mut follow_playhead = session.follow_playhead();
+                if ui
+                    .toggle_value(&mut follow_playhead, "Follow Playhead")
+                    .changed()
+                {
+                    session.set_follow_playhead(follow_playhead);
+                }
                 ui.separator();
                 egui::ComboBox::from_id_salt("preview_quality")
                     .selected_text(session.preview_quality.label())
