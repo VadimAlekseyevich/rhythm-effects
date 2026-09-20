@@ -2981,6 +2981,51 @@ mod tests {
     }
 
     #[test]
+    fn inspector_static_ellipse_fill_channel_commit_uses_generic_color_path() {
+        use rhythm_core::{
+            animation::Animated,
+            project::{EllipseObject, ObjectContent},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.composition.objects[0].content = ObjectContent::Ellipse(EllipseObject {
+            size: Animated::new_static(Vec2::new(120.0, 80.0).expect("ellipse size")),
+            fill: Animated::new_static(LinearRgba::black_opaque()),
+        });
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        let target = InspectorNumericTarget {
+            object_id,
+            property: AnimatableProperty::EllipseFill,
+            component: InspectorNumericComponent::B,
+        };
+
+        session.begin_inspector_numeric_edit(target, 0.0, "0.0".to_owned());
+        assert!(session.update_inspector_numeric_edit_buffer(target, "25.0".to_owned()));
+        assert!(session.commit_inspector_numeric_edit(target));
+        assert_eq!(
+            session.commit_pending_inspector_static_property_edit(&mut editor),
+            Ok(true)
+        );
+
+        let fill =
+            property_base_value(editor.project(), object_id, AnimatableProperty::EllipseFill)
+                .expect("fill");
+        let PropertyValue::Color(fill) = fill else {
+            panic!("fill should be color");
+        };
+        assert!((fill.b() - 0.25).abs() < f32::EPSILON);
+        assert_eq!(editor.history_len(), 1);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::EllipseFill),
+            Ok(PropertyValue::Color(LinearRgba::black_opaque()))
+        );
+    }
+
+    #[test]
     fn inspector_animated_fill_channel_commit_creates_nearest_grid_color_key() {
         use rhythm_core::animation::{Animated, Interpolation, Keyframe};
 
