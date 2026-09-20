@@ -6,7 +6,7 @@ use rhythm_core::{
     property::{AnimatableProperty, EffectAnimatableProperty},
     time::{
         BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
-        floor_tick_position_to_grid,
+        floor_tick_position_to_grid, snap_tick_position_to_grid,
     },
 };
 use rhythm_engine::waveform::{WaveformData, WaveformSlice};
@@ -833,8 +833,11 @@ fn draw_timeline_rows(
                             for keyframe in query_visible_keyframes(
                                 project, *object_id, *property, start_tick, end_tick,
                             ) {
+                                let display_tick = session
+                                    .keyframe_drag_preview_tick(keyframe.id)
+                                    .unwrap_or(keyframe.tick);
                                 let Ok(project_time) =
-                                    tempo_map.project_time_for_tick(keyframe.tick)
+                                    tempo_map.project_time_for_tick(display_tick)
                                 else {
                                     continue;
                                 };
@@ -860,6 +863,33 @@ fn draw_timeline_rows(
                                     } else {
                                         session.select_only_keyframe(keyframe.id);
                                     }
+                                }
+                                if response.drag_started() {
+                                    session.focus_property(*object_id, animatable_property);
+                                    session.select_only_keyframe(keyframe.id);
+                                    session.begin_keyframe_drag(
+                                        *object_id,
+                                        animatable_property,
+                                        keyframe.id,
+                                        keyframe.tick,
+                                    );
+                                }
+                                if response.dragged()
+                                    && let Some(pointer) = response.interact_pointer_pos()
+                                {
+                                    let pointer_time = transform.x_to_project_time(pointer.x);
+                                    if let Ok(continuous_tick) =
+                                        tempo_map.continuous_tick_position(pointer_time)
+                                        && let Ok(target_tick) = snap_tick_position_to_grid(
+                                            continuous_tick,
+                                            session.authoring_division(),
+                                        )
+                                    {
+                                        session.update_keyframe_drag(keyframe.id, target_tick);
+                                    }
+                                }
+                                if response.drag_stopped() {
+                                    session.finish_keyframe_drag(keyframe.id);
                                 }
                                 draw_keyframe_diamond(
                                     ui,

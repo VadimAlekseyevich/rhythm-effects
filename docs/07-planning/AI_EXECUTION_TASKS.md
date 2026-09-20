@@ -178,8 +178,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-146** — Implement K on a static focused property to create the first key at nearest grid and move playhead there.
 - [x] **AI-147** — Implement K on an existing resolved key to remove that key.
 - [x] **AI-148** — Implement K on an animated property without a current key to create one from evaluated value.
-- [ ] **AI-149** — Implement pointer keyframe drag through continuous time -> musical position -> current-grid snap.
-- [ ] **AI-150** — Implement Esc cancellation for a keyframe drag transaction.
+- [x] **AI-149** — Implement pointer keyframe drag through continuous time -> musical position -> current-grid snap.
+- [x] **AI-150** — Implement Esc cancellation for a keyframe drag transaction.
 - [ ] **AI-151** — Implement multi-key drag using one anchor key and identical integer tick delta.
 - [ ] **AI-152** — Implement occupied-target collision so incoming/moved key wins and replaced key is stored for undo.
 - [ ] **AI-153** — Implement Delete for selected keyframes as one compound history entry.

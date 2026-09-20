@@ -44,6 +44,23 @@ struct TimelineBoxSelection {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KeyframeDrag {
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    keyframe_id: KeyframeId,
+    original_tick: MusicalTick,
+    target_tick: MusicalTick,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingKeyframeMove {
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    keyframe_id: KeyframeId,
+    target_tick: MusicalTick,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct TimelineView {
     start: ProjectTimeNs,
     end: ProjectTimeNs,
@@ -63,6 +80,8 @@ pub struct EditorSession {
     timeline_view: Option<TimelineView>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
+    keyframe_drag: Option<KeyframeDrag>,
+    pending_keyframe_move: Option<PendingKeyframeMove>,
     timeline_box_selection: Option<TimelineBoxSelection>,
 }
 
@@ -75,6 +94,8 @@ impl Default for EditorSession {
             timeline_view: None,
             selected_keyframes: HashSet::new(),
             focused_property: None,
+            keyframe_drag: None,
+            pending_keyframe_move: None,
             timeline_box_selection: None,
         }
     }
@@ -180,6 +201,81 @@ impl EditorSession {
         self.playhead = resolved_time;
         self.select_only_keyframe(keyframe_id);
         Ok(true)
+    }
+
+    pub fn begin_keyframe_drag(
+        &mut self,
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe_id: KeyframeId,
+        original_tick: MusicalTick,
+    ) {
+        self.keyframe_drag = Some(KeyframeDrag {
+            object_id,
+            property,
+            keyframe_id,
+            original_tick,
+            target_tick: original_tick,
+        });
+        self.pending_keyframe_move = None;
+    }
+
+    pub fn update_keyframe_drag(&mut self, keyframe_id: KeyframeId, target_tick: MusicalTick) {
+        if let Some(drag) = self.keyframe_drag.as_mut()
+            && drag.keyframe_id == keyframe_id
+        {
+            drag.target_tick = target_tick;
+        }
+    }
+
+    #[must_use]
+    pub fn keyframe_drag_preview_tick(&self, keyframe_id: KeyframeId) -> Option<MusicalTick> {
+        self.keyframe_drag
+            .filter(|drag| drag.keyframe_id == keyframe_id)
+            .map(|drag| drag.target_tick)
+    }
+
+    pub fn finish_keyframe_drag(&mut self, keyframe_id: KeyframeId) -> bool {
+        let Some(drag) = self.keyframe_drag.take() else {
+            return false;
+        };
+        if drag.keyframe_id != keyframe_id {
+            self.keyframe_drag = Some(drag);
+            return false;
+        }
+        if drag.target_tick == drag.original_tick {
+            return false;
+        }
+
+        self.pending_keyframe_move = Some(PendingKeyframeMove {
+            object_id: drag.object_id,
+            property: drag.property,
+            keyframe_id: drag.keyframe_id,
+            target_tick: drag.target_tick,
+        });
+        true
+    }
+
+    pub fn cancel_keyframe_drag(&mut self) -> bool {
+        let had_drag = self.keyframe_drag.take().is_some();
+        self.pending_keyframe_move = None;
+        had_drag
+    }
+
+    pub fn commit_pending_keyframe_move(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(pending) = self.pending_keyframe_move.take() else {
+            return Ok(false);
+        };
+
+        editor.move_property_keyframe(
+            pending.object_id,
+            pending.property,
+            pending.keyframe_id,
+            pending.target_tick,
+        )
     }
 
     #[must_use]
@@ -473,6 +569,47 @@ mod tests {
         )
     }
 
+    fn editor_with_object_for_drag() -> rhythm_core::editor::ProjectEditor {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            ids::ObjectId,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, TempoMap},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut project = Project::new(
+            "Drag Test",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id: object_id,
+            name: "Rectangle".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(Vec2::new(0.0, 0.0).expect("position")),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(100.0, 100.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        rhythm_core::editor::ProjectEditor::new(project).expect("valid project")
+    }
+
     #[test]
     fn box_selection_replace_and_ctrl_toggle_are_applied_on_commit() {
         let first = rhythm_core::ids::KeyframeId::new(21).expect("key id");
@@ -556,6 +693,29 @@ mod tests {
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000),)
         );
+    }
+
+    #[test]
+    fn keyframe_drag_preview_can_be_cancelled_without_project_mutation() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let keyframe_id = KeyframeId::new(2).expect("key id");
+        let mut session = EditorSession::default();
+
+        session.begin_keyframe_drag(
+            object_id,
+            AnimatableProperty::Opacity,
+            keyframe_id,
+            MusicalTick::new(0),
+        );
+        session.update_keyframe_drag(keyframe_id, MusicalTick::new(240));
+
+        assert_eq!(
+            session.keyframe_drag_preview_tick(keyframe_id),
+            Some(MusicalTick::new(240))
+        );
+        assert!(session.cancel_keyframe_drag());
+        assert_eq!(session.keyframe_drag_preview_tick(keyframe_id), None);
+        assert_eq!(session.commit_pending_keyframe_move(&mut editor_with_object_for_drag()), Ok(false));
     }
 
     #[test]

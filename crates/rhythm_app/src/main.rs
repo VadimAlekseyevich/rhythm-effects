@@ -220,6 +220,13 @@ impl ApplicationHandler for RhythmApp {
                         && !shift
                         && !alt
                         && !super_key
+                        && code == KeyCode::Escape
+                    {
+                        self.session.cancel_keyframe_drag()
+                    } else if !control
+                        && !shift
+                        && !alt
+                        && !super_key
                         && code == KeyCode::KeyK
                     {
                         match self.session.keyframe_action(&mut self.project_editor) {
@@ -305,6 +312,14 @@ impl ApplicationHandler for RhythmApp {
                             );
                         }
                     });
+                    match self
+                        .session
+                        .commit_pending_keyframe_move(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "keyframe drag commit failed"),
+                    }
                     let paint_jobs =
                         egui_context.tessellate(full_output.shapes, full_output.pixels_per_point);
                     let mut textures_delta = full_output.textures_delta;

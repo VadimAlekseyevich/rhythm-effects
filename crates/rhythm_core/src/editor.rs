@@ -5,8 +5,8 @@ use crate::{
     project::{Object, Project, ProjectValidationError},
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
-        insert_property_keyframe, property_base_value, property_keyframe_count,
-        remove_property_keyframe_by_id, set_property_base_value,
+        insert_property_keyframe, property_base_value, property_keyframe_by_id,
+        property_keyframe_count, remove_property_keyframe_by_id, set_property_base_value,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -84,6 +84,12 @@ pub enum EditCommand {
         property: AnimatableProperty,
         keyframe: PropertyKeyframe,
     },
+    MovePropertyKeyframe {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe_id: KeyframeId,
+        target_tick: MusicalTick,
+    },
     SetTempoMap {
         tempo_map: TempoMap,
     },
@@ -101,6 +107,7 @@ impl EditCommand {
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
             Self::InsertPropertyKeyframe { .. } => "InsertPropertyKeyframe",
             Self::RemovePropertyKeyframe { .. } => "RemovePropertyKeyframe",
+            Self::MovePropertyKeyframe { .. } => "MovePropertyKeyframe",
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
     }
@@ -146,6 +153,12 @@ pub enum HistoryPayload {
         keyframe: PropertyKeyframe,
         base_before: Option<PropertyValue>,
         base_after: Option<PropertyValue>,
+    },
+    PropertyKeyframeMoved {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        before: PropertyKeyframe,
+        after: PropertyKeyframe,
     },
     TempoMapChanged {
         before: TempoMap,
@@ -406,6 +419,21 @@ impl ProjectEditor {
             object_id,
             property,
             keyframe,
+        })
+    }
+
+    pub fn move_property_keyframe(
+        &mut self,
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe_id: KeyframeId,
+        target_tick: MusicalTick,
+    ) -> Result<bool, EditError> {
+        self.execute(EditCommand::MovePropertyKeyframe {
+            object_id,
+            property,
+            keyframe_id,
+            target_tick,
         })
     }
 
@@ -789,6 +817,74 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::MovePropertyKeyframe {
+                object_id,
+                property,
+                keyframe_id,
+                target_tick,
+            } => {
+                let before = property_keyframe_by_id(
+                    &self.project,
+                    object_id,
+                    property,
+                    keyframe_id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+
+                if before.tick == target_tick {
+                    return Ok(None);
+                }
+
+                let removed = remove_property_keyframe_by_id(
+                    &mut self.project,
+                    object_id,
+                    property,
+                    keyframe_id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                let after = PropertyKeyframe {
+                    tick: target_tick,
+                    ..removed
+                };
+
+                if let Err(error) =
+                    insert_property_keyframe(&mut self.project, object_id, property, after)
+                {
+                    let _ = insert_property_keyframe(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        before,
+                    );
+                    return Err(EditError::PropertyAccess(error));
+                }
+
+                if let Err(error) = self.project.validate() {
+                    let _ = remove_property_keyframe_by_id(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        keyframe_id,
+                    );
+                    let _ = insert_property_keyframe(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        before,
+                    );
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Move Keyframe",
+                    HistoryPayload::PropertyKeyframeMoved {
+                        object_id,
+                        property,
+                        before,
+                        after,
+                    },
+                )))
+            }
             EditCommand::SetTempoMap { tempo_map } => {
                 let before = self.project.tempo_map.clone();
                 if before == tempo_map {
@@ -987,6 +1083,33 @@ impl ProjectEditor {
                     )?;
                 }
             }
+            (
+                HistoryPayload::PropertyKeyframeMoved {
+                    object_id,
+                    property,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let (remove_id, insert_keyframe) = match direction {
+                    HistoryDirection::Undo => (after.id, *before),
+                    HistoryDirection::Redo => (before.id, *after),
+                };
+                remove_property_keyframe_by_id(
+                    &mut self.project,
+                    *object_id,
+                    *property,
+                    remove_id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(remove_id))?;
+                insert_property_keyframe(
+                    &mut self.project,
+                    *object_id,
+                    *property,
+                    insert_keyframe,
+                )?;
+            }
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
             }
@@ -1064,6 +1187,55 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn moving_property_keyframe_is_one_undoable_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+        let keyframe_id = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                crate::property::PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("keyframe");
+        let history_before_move = editor.history_len();
+
+        assert_eq!(
+            editor.move_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                keyframe_id,
+                MusicalTick::new(240),
+            ),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), history_before_move + 1);
+        assert!(
+            crate::property::property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_some()
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert!(
+            crate::property::property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+            )
+            .expect("property")
+            .is_some()
+        );
     }
 
     #[test]
