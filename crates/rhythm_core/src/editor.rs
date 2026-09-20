@@ -4,8 +4,8 @@ use crate::{
     ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{Object, Project, ProjectValidationError},
     property::{
-        AnimatableProperty, PropertyAccessError, PropertyKeyframe, property_base_value,
-        property_keyframe_count, insert_property_keyframe, remove_property_keyframe_by_id,
+        AnimatableProperty, PropertyAccessError, PropertyKeyframe, insert_property_keyframe,
+        property_base_value, property_keyframe_count, remove_property_keyframe_by_id,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -829,12 +829,7 @@ impl ProjectEditor {
                 },
                 HistoryDirection::Redo,
             ) => {
-                insert_property_keyframe(
-                    &mut self.project,
-                    *object_id,
-                    *property,
-                    *keyframe,
-                )?;
+                insert_property_keyframe(&mut self.project, *object_id, *property, *keyframe)?;
             }
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
