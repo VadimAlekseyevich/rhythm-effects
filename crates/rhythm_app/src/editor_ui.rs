@@ -88,10 +88,7 @@ fn inspector_property_value_and_state(
     Some((value, state))
 }
 
-fn format_inspector_property_value(
-    property: AnimatableProperty,
-    value: PropertyValue,
-) -> String {
+fn format_inspector_property_value(property: AnimatableProperty, value: PropertyValue) -> String {
     match (property, value) {
         (AnimatableProperty::Position, PropertyValue::Vec2(value)) => {
             format!("{:.1}, {:.1} px", value.x(), value.y())
