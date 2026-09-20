@@ -385,7 +385,10 @@ pub fn draw_editor_shell(
                 && session.viewport_scale_drag_active()
             {
                 if let Some(composition_pointer) = screen_to_composition_unclamped(pointer) {
-                    session.update_viewport_scale_drag(composition_pointer);
+                    session.update_viewport_scale_drag(
+                        composition_pointer,
+                        ui.input(|input| input.modifiers.shift),
+                    );
                 }
             } else if primary_down
                 && let Some(pointer) = pointer_pos
@@ -437,7 +440,10 @@ pub fn draw_editor_shell(
                     && let Some(composition_pointer) =
                         screen_to_composition_unclamped(pointer)
                 {
-                    session.update_viewport_scale_drag(composition_pointer);
+                    session.update_viewport_scale_drag(
+                        composition_pointer,
+                        ui.input(|input| input.modifiers.shift),
+                    );
                 }
                 session.finish_viewport_scale_drag();
             }
