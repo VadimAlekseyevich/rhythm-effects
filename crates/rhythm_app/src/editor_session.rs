@@ -1980,11 +1980,7 @@ impl EditorSession {
         Ok(changed)
     }
 
-    pub fn begin_inspector_text_edit(
-        &mut self,
-        target: InspectorTextTarget,
-        buffer: String,
-    ) {
+    pub fn begin_inspector_text_edit(&mut self, target: InspectorTextTarget, buffer: String) {
         self.inspector_text_edit = Some(InspectorTextEdit { target, buffer });
     }
 
@@ -3634,10 +3630,9 @@ mod tests {
             field: super::InspectorTextField::Content,
         };
         session.begin_inspector_text_edit(content_target, "Hello".to_owned());
-        assert!(session.update_inspector_text_edit_buffer(
-            content_target,
-            "Привет\nRhythm".to_owned(),
-        ));
+        assert!(
+            session.update_inspector_text_edit_buffer(content_target, "Привет\nRhythm".to_owned(),)
+        );
         assert!(session.commit_inspector_text_edit(content_target));
 
         let family_target = super::InspectorTextTarget {
@@ -3645,10 +3640,7 @@ mod tests {
             field: super::InspectorTextField::FontFamily,
         };
         session.begin_inspector_text_edit(family_target, "Inter".to_owned());
-        assert!(session.update_inspector_text_edit_buffer(
-            family_target,
-            "Noto Sans".to_owned(),
-        ));
+        assert!(session.update_inspector_text_edit_buffer(family_target, "Noto Sans".to_owned(),));
         assert!(session.commit_inspector_text_edit(family_target));
 
         let size_target = super::InspectorTextTarget {
@@ -3656,10 +3648,7 @@ mod tests {
             field: super::InspectorTextField::FontSize,
         };
         session.begin_inspector_text_edit(size_target, "48".to_owned());
-        assert!(session.update_inspector_text_edit_buffer(
-            size_target,
-            "64".to_owned(),
-        ));
+        assert!(session.update_inspector_text_edit_buffer(size_target, "64".to_owned(),));
         assert!(session.commit_inspector_text_edit(size_target));
 
         session.queue_text_font_weight(object_id, FontWeight::Bold);
@@ -3683,10 +3672,9 @@ mod tests {
         assert_eq!(text.alignment, TextAlignment::Center);
 
         session.begin_inspector_text_edit(content_target, text.text.clone());
-        assert!(session.update_inspector_text_edit_buffer(
-            content_target,
-            "discard me".to_owned(),
-        ));
+        assert!(
+            session.update_inspector_text_edit_buffer(content_target, "discard me".to_owned(),)
+        );
         assert!(session.cancel_inspector_text_edit(content_target));
         assert_eq!(
             session.commit_pending_text_inspector_actions(&mut editor),
