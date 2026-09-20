@@ -218,7 +218,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-183** — Implement standard Inspector animatable property row.
 - [x] **AI-184** — Implement numeric edit commit on Enter/focus-loss and Escape restore.
 - [x] **AI-185** — Implement static property edit to base_value.
-- [ ] **AI-186** — Implement animated off-key property edit to create/update nearest-grid key and move playhead.
+- [x] **AI-186** — Implement animated off-key property edit to create/update nearest-grid key and move playhead.
 - [ ] **AI-187** — Implement final-key removal returning the property to static using removed-key value.
 - [ ] **AI-188** — Implement multi-selection mixed-value transform rows.
 - [ ] **AI-189** — Implement Rectangle Inspector controls.
