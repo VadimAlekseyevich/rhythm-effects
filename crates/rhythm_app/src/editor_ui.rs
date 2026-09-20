@@ -342,12 +342,8 @@ pub fn draw_editor_shell(
                         .objects
                         .iter()
                         .find(|object| object.id == object_id)
-                        .filter(|object| {
-                            object.visible
-                                && !object.locked
-                                && object.transform.rotation_degrees.keyframes().is_empty()
-                        })
-                        .and_then(|object| {
+                        .filter(|object| object.visible && !object.locked)
+                        .and_then(|_| {
                             let overlay = overlay?;
                             let corners = overlay.corners.map(composition_to_screen);
                             let (_, handle) = rotation_handle_points(corners);
@@ -355,11 +351,15 @@ pub fn draw_editor_shell(
                                 return None;
                             }
                             let composition_pointer = screen_to_composition_unclamped(origin)?;
+                            let evaluated = scene
+                                .objects
+                                .iter()
+                                .find(|evaluated| evaluated.id == object_id)?;
                             Some(session.begin_viewport_rotation_drag(
                                 object_id,
                                 overlay.anchor,
                                 composition_pointer,
-                                *object.transform.rotation_degrees.base_value(),
+                                evaluated.transform.rotation_degrees,
                             ))
                         })
                         .unwrap_or(false)
@@ -374,12 +374,8 @@ pub fn draw_editor_shell(
                         .objects
                         .iter()
                         .find(|object| object.id == object_id)
-                        .filter(|object| {
-                            object.visible
-                                && !object.locked
-                                && object.transform.scale.keyframes().is_empty()
-                        })
-                        .and_then(|object| {
+                        .filter(|object| object.visible && !object.locked)
+                        .and_then(|_| {
                             let overlay = overlay?;
                             let handle_start = overlay.corners.iter().copied().find(|corner| {
                                 composition_to_screen(*corner).distance(origin)
@@ -393,7 +389,7 @@ pub fn draw_editor_shell(
                                 object_id,
                                 overlay.anchor,
                                 handle_start,
-                                *object.transform.scale.base_value(),
+                                evaluated.transform.scale,
                                 evaluated.transform.rotation_degrees,
                             ))
                         })
@@ -436,17 +432,19 @@ pub fn draw_editor_shell(
                         && selected.len() == 1
                         && picked == selected.first().copied()
                         && let Some(object_id) = picked
-                        && let Some(object) = project
+                        && project
                             .composition
                             .objects
                             .iter()
                             .find(|object| object.id == object_id)
-                        && object.transform.position.keyframes().is_empty()
+                            .is_some_and(|object| object.visible && !object.locked)
+                        && let Some(evaluated) =
+                            scene.objects.iter().find(|evaluated| evaluated.id == object_id)
                     {
                         session.begin_viewport_position_drag(
                             object_id,
                             [origin.x, origin.y],
-                            *object.transform.position.base_value(),
+                            evaluated.transform.position,
                         );
                     } else if !multi_move_started && picked.is_none() {
                         session.begin_viewport_box_selection([origin.x, origin.y]);
