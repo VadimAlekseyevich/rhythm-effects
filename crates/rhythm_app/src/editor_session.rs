@@ -1248,7 +1248,6 @@ impl EditorSession {
         self.selected_objects.iter().copied().collect()
     }
 
-    #[cfg(test)]
     #[must_use]
     pub fn is_object_selected(&self, object_id: ObjectId) -> bool {
         self.selected_objects.contains(&object_id)
