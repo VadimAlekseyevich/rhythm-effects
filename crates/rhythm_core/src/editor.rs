@@ -834,33 +834,23 @@ impl ProjectEditor {
                 )))
             }
             EditCommand::MovePropertyKeyframes { moves } => {
-                let moves: Vec<_> = moves
-                    .into_iter()
-                    .filter_map(|movement| {
-                        let before = property_keyframe_by_id(
-                            &self.project,
-                            movement.object_id,
-                            movement.property,
-                            movement.keyframe_id,
-                        )
-                        .transpose();
-
-                        Some((movement, before))
-                    })
-                    .collect();
-
                 let mut resolved = Vec::with_capacity(moves.len());
                 let mut ids = HashSet::with_capacity(moves.len());
                 let mut destinations = HashSet::with_capacity(moves.len());
 
-                for (movement, before_result) in moves {
+                for movement in moves {
                     if !ids.insert(movement.keyframe_id) {
                         return Err(EditError::HistoryInvariant(
                             "duplicate keyframe id in move batch",
                         ));
                     }
-                    let before = before_result?
-                        .ok_or(EditError::KeyframeNotFound(movement.keyframe_id))?;
+                    let before = property_keyframe_by_id(
+                        &self.project,
+                        movement.object_id,
+                        movement.property,
+                        movement.keyframe_id,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(movement.keyframe_id))?;
                     if before.tick == movement.target_tick {
                         continue;
                     }
