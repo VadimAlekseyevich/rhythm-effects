@@ -238,6 +238,13 @@ impl EditorSession {
         true
     }
 
+    pub fn toggle_object_selection(&mut self, object_id: ObjectId) -> bool {
+        if !self.selected_objects.remove(&object_id) {
+            self.selected_objects.insert(object_id);
+        }
+        true
+    }
+
     #[must_use]
     pub const fn focused_property(&self) -> Option<FocusedProperty> {
         self.focused_property
@@ -1155,6 +1162,24 @@ mod tests {
         assert!(session.replace_object_selection(None));
         assert!(session.selected_object_ids().is_empty());
         assert!(!session.replace_object_selection(None));
+    }
+
+    #[test]
+    fn viewport_ctrl_toggle_adds_and_removes_objects_without_replacing_others() {
+        let first = ObjectId::new(21).expect("object id");
+        let second = ObjectId::new(22).expect("object id");
+        let mut session = EditorSession::default();
+
+        assert!(session.replace_object_selection(Some(first)));
+        assert!(session.toggle_object_selection(second));
+        assert!(session.is_object_selected(first));
+        assert!(session.is_object_selected(second));
+        assert_eq!(session.selected_object_ids().len(), 2);
+
+        assert!(session.toggle_object_selection(first));
+        assert!(!session.is_object_selected(first));
+        assert!(session.is_object_selected(second));
+        assert_eq!(session.selected_object_ids().len(), 1);
     }
 
     #[test]
