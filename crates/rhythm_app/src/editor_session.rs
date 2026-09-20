@@ -5,7 +5,7 @@ use rhythm_core::{
     domain::{LinearRgba, Vec2},
     editor::{EditCommand, EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     geometry::LocalBounds2d,
-    ids::{AssetId, KeyframeId, ObjectId},
+    ids::{AssetId, EffectId, KeyframeId, ObjectId},
     project::{FontStyle, FontWeight, TextAlignment},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
@@ -111,6 +111,24 @@ pub enum ViewportCameraAction {
 enum ObjectListAction {
     SetVisible { object_id: ObjectId, visible: bool },
     SetLocked { object_id: ObjectId, locked: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectStackAction {
+    SetEnabled {
+        object_id: ObjectId,
+        effect_id: EffectId,
+        enabled: bool,
+    },
+    Move {
+        object_id: ObjectId,
+        effect_id: EffectId,
+        target_index: usize,
+    },
+    Remove {
+        object_id: ObjectId,
+        effect_id: EffectId,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,6 +345,7 @@ pub struct EditorSession {
     viewport_zoom: f32,
     pending_viewport_camera_action: Option<ViewportCameraAction>,
     pending_object_list_actions: Vec<ObjectListAction>,
+    pending_effect_stack_actions: Vec<EffectStackAction>,
     pending_image_relink_asset: Option<AssetId>,
     viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_multi_position_drag: Option<ViewportMultiPositionDrag>,
@@ -362,6 +381,7 @@ impl Default for EditorSession {
             viewport_zoom: 1.0,
             pending_viewport_camera_action: None,
             pending_object_list_actions: Vec::new(),
+            pending_effect_stack_actions: Vec::new(),
             pending_image_relink_asset: None,
             viewport_position_drag: None,
             viewport_multi_position_drag: None,
@@ -470,6 +490,84 @@ impl EditorSession {
 
     pub const fn take_viewport_camera_action(&mut self) -> Option<ViewportCameraAction> {
         self.pending_viewport_camera_action.take()
+    }
+
+    pub fn queue_effect_enabled(
+        &mut self,
+        object_id: ObjectId,
+        effect_id: EffectId,
+        enabled: bool,
+    ) {
+        self.pending_effect_stack_actions
+            .push(EffectStackAction::SetEnabled {
+                object_id,
+                effect_id,
+                enabled,
+            });
+    }
+
+    pub fn queue_effect_move(
+        &mut self,
+        object_id: ObjectId,
+        effect_id: EffectId,
+        target_index: usize,
+    ) {
+        self.pending_effect_stack_actions.push(EffectStackAction::Move {
+            object_id,
+            effect_id,
+            target_index,
+        });
+    }
+
+    pub fn queue_effect_remove(&mut self, object_id: ObjectId, effect_id: EffectId) {
+        self.pending_effect_stack_actions
+            .push(EffectStackAction::Remove {
+                object_id,
+                effect_id,
+            });
+    }
+
+    pub fn commit_pending_effect_stack_actions(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        if self.pending_effect_stack_actions.is_empty() {
+            return Ok(false);
+        }
+
+        let actions = std::mem::take(&mut self.pending_effect_stack_actions);
+        let mut changed = false;
+        for action in actions {
+            let action_changed = match action {
+                EffectStackAction::SetEnabled {
+                    object_id,
+                    effect_id,
+                    enabled,
+                } => editor.execute(EditCommand::SetEffectEnabled {
+                    object_id,
+                    effect_id,
+                    enabled,
+                })?,
+                EffectStackAction::Move {
+                    object_id,
+                    effect_id,
+                    target_index,
+                } => editor.execute(EditCommand::MoveEffect {
+                    object_id,
+                    effect_id,
+                    target_index,
+                })?,
+                EffectStackAction::Remove {
+                    object_id,
+                    effect_id,
+                } => editor.execute(EditCommand::RemoveEffect {
+                    object_id,
+                    effect_id,
+                })?,
+            };
+            changed |= action_changed;
+        }
+        Ok(changed)
     }
 
     pub fn request_image_relink(&mut self, asset_id: AssetId) -> bool {
