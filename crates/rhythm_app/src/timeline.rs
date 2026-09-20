@@ -1668,7 +1668,9 @@ mod tests {
         }
 
         project.next_entity_id = next_keyframe_id;
-        project.validate().expect("timeline stress fixture is valid");
+        project
+            .validate()
+            .expect("timeline stress fixture is valid");
         project
     }
 
