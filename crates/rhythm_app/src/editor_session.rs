@@ -131,6 +131,7 @@ struct ViewportMultiPositionDrag {
     current_delta: Vec2,
     phase: ViewportTransformDragPhase,
     transaction_started: bool,
+    animated_transaction: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -652,6 +653,7 @@ impl EditorSession {
             current_delta: Vec2::new(0.0, 0.0).expect("zero delta is finite"),
             phase: ViewportTransformDragPhase::Active,
             transaction_started: false,
+            animated_transaction: false,
         });
         true
     }
@@ -731,30 +733,100 @@ impl EditorSession {
         &mut self,
         editor: &mut ProjectEditor,
     ) -> Result<bool, EditError> {
-        let Some(drag) = self.viewport_multi_position_drag.as_mut() else {
+        let Some(snapshot) = self.viewport_multi_position_drag.as_ref().cloned() else {
             return Ok(false);
         };
 
-        if drag.phase == ViewportTransformDragPhase::CancelRequested && !drag.transaction_started {
+        if snapshot.phase == ViewportTransformDragPhase::CancelRequested
+            && !snapshot.transaction_started
+        {
             self.viewport_multi_position_drag = None;
             return Ok(true);
         }
 
-        if !drag.transaction_started {
-            if let Err(error) = editor.begin_multi_position_transaction(&drag.object_ids) {
+        if !snapshot.transaction_started {
+            let has_animated_position = snapshot.object_ids.iter().try_fold(false, |animated, id| {
+                Ok::<_, EditError>(
+                    animated
+                        || property_keyframe_count(
+                            editor.project(),
+                            *id,
+                            AnimatableProperty::Position,
+                        )? > 0,
+                )
+            })?;
+
+            if has_animated_position {
+                let project = editor.project();
+                let Ok(continuous_tick) =
+                    project.tempo_map.continuous_tick_position(self.playhead)
+                else {
+                    self.viewport_multi_position_drag = None;
+                    return Ok(false);
+                };
+                let Ok(tick) =
+                    snap_tick_position_to_grid(continuous_tick, self.authoring_division)
+                else {
+                    self.viewport_multi_position_drag = None;
+                    return Ok(false);
+                };
+                let Ok(project_time) = project.tempo_map.project_time_for_tick(tick) else {
+                    self.viewport_multi_position_drag = None;
+                    return Ok(false);
+                };
+
+                let mut evaluated_positions = Vec::with_capacity(snapshot.object_ids.len());
+                for object_id in &snapshot.object_ids {
+                    let value = evaluate_property_at_tick(
+                        project,
+                        *object_id,
+                        AnimatableProperty::Position,
+                        tick.get() as f64,
+                    )?;
+                    let PropertyValue::Vec2(position) = value else {
+                        return Err(EditError::HistoryInvariant(
+                            "position evaluation returned non-vector value",
+                        ));
+                    };
+                    evaluated_positions.push((*object_id, position));
+                }
+
+                if let Err(error) = editor.begin_direct_multi_position_transaction(
+                    &snapshot.object_ids,
+                    tick,
+                    &evaluated_positions,
+                ) {
+                    self.viewport_multi_position_drag = None;
+                    return Err(error);
+                }
+                self.playhead = project_time;
+            } else if let Err(error) =
+                editor.begin_multi_position_transaction(&snapshot.object_ids)
+            {
                 self.viewport_multi_position_drag = None;
                 return Err(error);
             }
-            drag.transaction_started = true;
+
+            if let Some(drag) = self.viewport_multi_position_drag.as_mut() {
+                drag.transaction_started = true;
+                drag.animated_transaction = has_animated_position;
+            }
         }
 
+        let Some(drag) = self.viewport_multi_position_drag.as_ref().cloned() else {
+            return Ok(false);
+        };
         if drag.phase == ViewportTransformDragPhase::CancelRequested {
             let changed = editor.cancel_transaction()?;
             self.viewport_multi_position_drag = None;
             return Ok(changed);
         }
 
-        editor.update_multi_position_transaction(drag.current_delta)?;
+        if drag.animated_transaction {
+            editor.update_direct_multi_position_transaction(drag.current_delta)?;
+        } else {
+            editor.update_multi_position_transaction(drag.current_delta)?;
+        }
 
         if drag.phase == ViewportTransformDragPhase::CommitRequested {
             let changed = editor.commit_transaction()?;
@@ -2255,6 +2327,97 @@ mod tests {
                 .position
                 .base_value(),
             Vec2::new(100.0, 50.0).expect("second restored")
+        );
+    }
+
+    #[test]
+    fn viewport_multi_position_drag_mixes_static_and_animated_positions_at_nearest_grid() {
+        use rhythm_core::animation::{Animated, Interpolation, Keyframe};
+
+        let first_id = ObjectId::new(1).expect("first object");
+        let second_id = ObjectId::new(2).expect("second object");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.tempo_map = tempo_120();
+
+        let mut second = project.composition.objects[0].clone();
+        second.id = second_id;
+        second.transform.position = Animated::with_keyframes(
+            Vec2::new(100.0, 50.0).expect("base position"),
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(3).expect("keyframe"),
+                    MusicalTick::new(0),
+                    Vec2::new(100.0, 50.0).expect("position"),
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(4).expect("keyframe"),
+                    MusicalTick::new(480),
+                    Vec2::new(200.0, 50.0).expect("position"),
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("animated position");
+        project.composition.objects.push(second);
+        project.next_entity_id = 5;
+
+        let mut editor = rhythm_core::editor::ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.seek_paused(ProjectTimeNs::new(130_000_000));
+
+        assert!(session.begin_viewport_multi_position_drag(
+            vec![first_id, second_id],
+            [100.0, 100.0],
+        ));
+        assert!(session.update_viewport_multi_position_drag(
+            [120.0, 100.0],
+            [1.0, 1.0],
+            false,
+        ));
+        assert_eq!(
+            session.sync_viewport_multi_position_drag(&mut editor),
+            Ok(true)
+        );
+
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(20.0, 0.0).expect("static preview")
+        );
+        let animated = &editor.project().composition.objects[1].transform.position;
+        let inserted = animated
+            .keyframe_at_tick(MusicalTick::new(240))
+            .expect("nearest-grid key");
+        assert_eq!(
+            inserted.value,
+            Vec2::new(170.0, 50.0).expect("animated preview")
+        );
+
+        assert!(session.finish_viewport_multi_position_drag());
+        assert_eq!(
+            session.sync_viewport_multi_position_drag(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 1);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(0.0, 0.0).expect("static restored")
+        );
+        assert!(
+            editor.project().composition.objects[1]
+                .transform
+                .position
+                .keyframe_at_tick(MusicalTick::new(240))
+                .is_none()
         );
     }
 
