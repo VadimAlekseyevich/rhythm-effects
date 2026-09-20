@@ -187,6 +187,12 @@ impl<T> Animated<T> {
         Some(self.keyframes.remove(index))
     }
 
+    pub fn keyframe_by_id_mut(&mut self, id: KeyframeId) -> Option<&mut Keyframe<T>> {
+        self.keyframes
+            .iter_mut()
+            .find(|keyframe| keyframe.id == id)
+    }
+
     #[must_use]
     pub fn range_value(&self, continuous_tick: f64) -> Option<&T> {
         let first = match self.keyframes.first() {
