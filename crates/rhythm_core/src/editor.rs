@@ -5,7 +5,8 @@ use crate::{
     domain::Vec2,
     ids::{EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{
-        Effect, FontStyle, FontWeight, Object, ObjectContent, Project, ProjectValidationError,
+        Effect, EffectKind, FontStyle, FontWeight, Object, ObjectContent, Project,
+        ProjectValidationError,
         TextAlignment, TextObject,
     },
     property::{
@@ -159,6 +160,10 @@ pub enum EditCommand {
         object_id: ObjectId,
         alignment: TextAlignment,
     },
+    AddEffect {
+        object_id: ObjectId,
+        kind: EffectKind,
+    },
     SetEffectEnabled {
         object_id: ObjectId,
         effect_id: EffectId,
@@ -239,6 +244,7 @@ impl EditCommand {
             Self::SetTextFontStyle { .. } => "SetTextFontStyle",
             Self::SetTextFontSize { .. } => "SetTextFontSize",
             Self::SetTextAlignment { .. } => "SetTextAlignment",
+            Self::AddEffect { .. } => "AddEffect",
             Self::SetEffectEnabled { .. } => "SetEffectEnabled",
             Self::MoveEffect { .. } => "MoveEffect",
             Self::RemoveEffect { .. } => "RemoveEffect",
@@ -303,6 +309,11 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         before: TextAlignment,
         after: TextAlignment,
+    },
+    EffectInserted {
+        object_id: ObjectId,
+        index: usize,
+        effect: Effect,
     },
     EffectEnabledChanged {
         object_id: ObjectId,
@@ -1806,6 +1817,37 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::AddEffect { object_id, kind } => {
+                let object_index = self.object_index(object_id)?;
+                let previous_next_entity_id = self.project.next_entity_id;
+                let mut allocator = EntityIdAllocator::new(previous_next_entity_id)?;
+                let effect_id = allocator.allocate_effect()?;
+                let effect = Effect {
+                    id: effect_id,
+                    enabled: true,
+                    kind,
+                };
+                let index = self.project.composition.objects[object_index].effects.len();
+                self.project.composition.objects[object_index]
+                    .effects
+                    .push(effect.clone());
+                self.project.next_entity_id = allocator.next_entity_id();
+
+                if let Err(error) = self.project.validate() {
+                    self.project.composition.objects[object_index].effects.pop();
+                    self.project.next_entity_id = previous_next_entity_id;
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Add Effect",
+                    HistoryPayload::EffectInserted {
+                        object_id,
+                        index,
+                        effect,
+                    },
+                )))
+            }
             EditCommand::SetEffectEnabled {
                 object_id,
                 effect_id,
@@ -2730,6 +2772,51 @@ impl ProjectEditor {
                 direction,
             ) => {
                 self.text_object_mut(*object_id)?.alignment = *direction.pick(before, after);
+            }
+            (
+                HistoryPayload::EffectInserted {
+                    object_id,
+                    index,
+                    effect,
+                },
+                HistoryDirection::Undo,
+            ) => {
+                let (object_index, current_index) = self.effect_index(*object_id, effect.id)?;
+                if current_index != *index {
+                    return Err(EditError::HistoryInvariant(
+                        "effect insert history index mismatch",
+                    ));
+                }
+                self.project.composition.objects[object_index]
+                    .effects
+                    .remove(current_index);
+            }
+            (
+                HistoryPayload::EffectInserted {
+                    object_id,
+                    index,
+                    effect,
+                },
+                HistoryDirection::Redo,
+            ) => {
+                let object_index = self.object_index(*object_id)?;
+                if *index > self.project.composition.objects[object_index].effects.len() {
+                    return Err(EditError::HistoryInvariant(
+                        "effect insert redo index invalid",
+                    ));
+                }
+                if self.project.composition.objects[object_index]
+                    .effects
+                    .iter()
+                    .any(|existing| existing.id == effect.id)
+                {
+                    return Err(EditError::HistoryInvariant(
+                        "effect insert redo id collision",
+                    ));
+                }
+                self.project.composition.objects[object_index]
+                    .effects
+                    .insert(*index, effect.clone());
             }
             (
                 HistoryPayload::EffectEnabledChanged {
