@@ -150,7 +150,49 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.heading("Objects");
             ui.separator();
-            ui.label("Composition objects will appear here.");
+
+            if project.composition.objects.is_empty() {
+                ui.label("No objects");
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt("object_list_scroll")
+                    .show(ui, |ui| {
+                        for object in project.composition.objects.iter().rev() {
+                            ui.push_id(object.id.get(), |ui| {
+                                ui.horizontal(|ui| {
+                                    let mut visible = object.visible;
+                                    if ui
+                                        .toggle_value(&mut visible, "V")
+                                        .on_hover_text(if visible {
+                                            "Visible"
+                                        } else {
+                                            "Hidden"
+                                        })
+                                        .changed()
+                                    {
+                                        session.queue_object_visibility(object.id, visible);
+                                    }
+
+                                    let mut locked = object.locked;
+                                    if ui
+                                        .toggle_value(&mut locked, "L")
+                                        .on_hover_text(if locked {
+                                            "Locked"
+                                        } else {
+                                            "Unlocked"
+                                        })
+                                        .changed()
+                                    {
+                                        session.queue_object_locked(object.id, locked);
+                                    }
+
+                                    ui.label(&object.name);
+                                });
+                            });
+                        }
+                    });
+            }
+
             ui.take_available_space();
         });
 
