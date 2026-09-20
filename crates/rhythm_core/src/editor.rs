@@ -1474,7 +1474,11 @@ impl ProjectEditor {
 
                 self.project.composition.objects[index].visible = visible;
                 Ok(Some(PendingHistoryEntry::new(
-                    if visible { "Show Object" } else { "Hide Object" },
+                    if visible {
+                        "Show Object"
+                    } else {
+                        "Hide Object"
+                    },
                     HistoryPayload::ObjectVisibilityChanged {
                         object_id,
                         before,
@@ -1491,7 +1495,11 @@ impl ProjectEditor {
 
                 self.project.composition.objects[index].locked = locked;
                 Ok(Some(PendingHistoryEntry::new(
-                    if locked { "Lock Object" } else { "Unlock Object" },
+                    if locked {
+                        "Lock Object"
+                    } else {
+                        "Unlock Object"
+                    },
                     HistoryPayload::ObjectLockedChanged {
                         object_id,
                         before,
