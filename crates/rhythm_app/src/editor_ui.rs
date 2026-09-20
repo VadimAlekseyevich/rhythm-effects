@@ -3,19 +3,10 @@ use crate::{
     timeline::draw_timeline,
     viewport::{objects_intersecting_box, pick_topmost_object, selected_objects_bounds},
 };
-use rhythm_core::{
-    domain::Vec2,
-    geometry::LocalBounds2d,
-    project::Project,
-    time::ProjectTimeNs,
-};
+use rhythm_core::{domain::Vec2, geometry::LocalBounds2d, project::Project, time::ProjectTimeNs};
 
 fn fit_composition_preview(available: egui::Vec2, composition: egui::Vec2) -> egui::Vec2 {
-    if available.x <= 0.0
-        || available.y <= 0.0
-        || composition.x <= 0.0
-        || composition.y <= 0.0
-    {
+    if available.x <= 0.0 || available.y <= 0.0 || composition.x <= 0.0 || composition.y <= 0.0 {
         return egui::Vec2::ZERO;
     }
 
@@ -172,11 +163,7 @@ pub fn draw_editor_shell(
             {
                 session.request_viewport_camera_action(ViewportCameraAction::FitComposition);
             }
-            if ui
-                .button("Frame Selection")
-                .on_hover_text("F")
-                .clicked()
-            {
+            if ui.button("Frame Selection").on_hover_text("F").clicked() {
                 session.request_viewport_camera_action(ViewportCameraAction::FrameSelection);
             }
         });
@@ -290,8 +277,8 @@ pub fn draw_editor_shell(
                 }
             }
 
-            let (primary_pressed, primary_down, primary_released, pointer_pos, press_origin) =
-                ui.input(|input| {
+            let (primary_pressed, primary_down, primary_released, pointer_pos, press_origin) = ui
+                .input(|input| {
                     (
                         input.pointer.primary_pressed(),
                         input.pointer.primary_down(),
