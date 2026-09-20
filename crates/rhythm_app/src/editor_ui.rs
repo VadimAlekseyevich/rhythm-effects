@@ -339,6 +339,7 @@ pub fn draw_editor_shell(
                         composition_size.x / response.rect.width(),
                         composition_size.y / response.rect.height(),
                     ],
+                    ui.input(|input| input.modifiers.shift),
                 );
             } else if primary_down
                 && let Some(pointer) = pointer_pos
@@ -382,6 +383,7 @@ pub fn draw_editor_shell(
                             composition_size.x / response.rect.width(),
                             composition_size.y / response.rect.height(),
                         ],
+                        ui.input(|input| input.modifiers.shift),
                     );
                 }
                 session.finish_viewport_position_drag();
