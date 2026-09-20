@@ -420,6 +420,7 @@ impl EditorSession {
         &mut self,
         pointer: [f32; 2],
         composition_units_per_point: [f32; 2],
+        constrain_axis: bool,
     ) -> bool {
         let Some(drag) = self.viewport_position_drag.as_mut() else {
             return false;
@@ -435,10 +436,17 @@ impl EditorSession {
             return false;
         }
 
-        let delta_x =
+        let mut delta_x =
             (pointer[0] - drag.pointer_start[0]) * composition_units_per_point[0];
-        let delta_y =
+        let mut delta_y =
             (pointer[1] - drag.pointer_start[1]) * composition_units_per_point[1];
+        if constrain_axis {
+            if delta_x.abs() >= delta_y.abs() {
+                delta_y = 0.0;
+            } else {
+                delta_x = 0.0;
+            }
+        }
         let Ok(current_position) = Vec2::new(
             drag.position_start.x() + delta_x,
             drag.position_start.y() + delta_y,
@@ -1533,7 +1541,7 @@ mod tests {
             [100.0, 80.0],
             Vec2::new(0.0, 0.0).expect("position"),
         ));
-        assert!(session.update_viewport_position_drag([120.0, 90.0], [2.0, 2.0]));
+        assert!(session.update_viewport_position_drag([120.0, 90.0], [2.0, 2.0], false));
         assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
         assert_eq!(editor.history_len(), 0);
         assert_eq!(
@@ -1544,7 +1552,7 @@ mod tests {
             Vec2::new(40.0, 20.0).expect("preview position")
         );
 
-        assert!(session.update_viewport_position_drag([130.0, 95.0], [2.0, 2.0]));
+        assert!(session.update_viewport_position_drag([130.0, 95.0], [2.0, 2.0], false));
         assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
         assert_eq!(editor.history_len(), 0);
         assert!(session.finish_viewport_position_drag());
@@ -1569,6 +1577,46 @@ mod tests {
     }
 
     #[test]
+    fn viewport_position_drag_shift_constrains_to_dominant_axis() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_position_drag(
+            object_id,
+            [100.0, 100.0],
+            Vec2::new(10.0, 20.0).expect("position"),
+        ));
+        assert!(session.update_viewport_position_drag(
+            [130.0, 110.0],
+            [2.0, 2.0],
+            true,
+        ));
+        assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(70.0, 20.0).expect("x constrained position")
+        );
+
+        assert!(session.update_viewport_position_drag(
+            [105.0, 140.0],
+            [2.0, 2.0],
+            true,
+        ));
+        assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            Vec2::new(10.0, 100.0).expect("y constrained position")
+        );
+    }
+
+    #[test]
     fn viewport_position_drag_cancel_restores_before_without_history() {
         let object_id = ObjectId::new(1).expect("object id");
         let mut editor = editor_with_object_for_drag();
@@ -1579,7 +1627,7 @@ mod tests {
             [50.0, 50.0],
             Vec2::new(0.0, 0.0).expect("position"),
         ));
-        assert!(session.update_viewport_position_drag([80.0, 70.0], [1.0, 1.0]));
+        assert!(session.update_viewport_position_drag([80.0, 70.0], [1.0, 1.0], false));
         assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
         assert_eq!(
             *editor.project().composition.objects[0]
