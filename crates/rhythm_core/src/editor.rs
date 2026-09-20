@@ -1747,6 +1747,30 @@ impl ProjectEditor {
                     }
                 }
             },
+            (
+                HistoryPayload::PropertyKeyframeInterpolationsChanged { records },
+                direction,
+            ) => {
+                for record in records {
+                    let (expected, target) = match direction {
+                        HistoryDirection::Undo => (record.after, record.before),
+                        HistoryDirection::Redo => (record.before, record.after),
+                    };
+                    let observed = set_property_keyframe_interpolation(
+                        &mut self.project,
+                        record.object_id,
+                        record.property,
+                        record.keyframe_id,
+                        target,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(record.keyframe_id))?;
+                    if observed != expected {
+                        return Err(EditError::HistoryInvariant(
+                            "keyframe interpolation history mismatch",
+                        ));
+                    }
+                }
+            }
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
             }
