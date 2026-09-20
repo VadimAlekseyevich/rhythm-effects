@@ -1421,6 +1421,7 @@ mod tests {
         ViewportCameraAction,
     };
     use rhythm_core::{
+        domain::Vec2,
         ids::{KeyframeId, ObjectId},
         property::AnimatableProperty,
         time::{
