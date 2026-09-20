@@ -1024,9 +1024,7 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        EditorSession, KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality,
-    };
+    use super::{EditorSession, KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality};
     use rhythm_core::{
         ids::{KeyframeId, ObjectId},
         property::AnimatableProperty,
