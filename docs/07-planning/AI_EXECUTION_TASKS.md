@@ -209,7 +209,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-174** — Implement Shift axis constraint for Position drag.
 - [x] **AI-175** — Implement Scale corner handles for a single object.
 - [x] **AI-176** — Implement Shift uniform Scale constraint.
-- [ ] **AI-177** — Implement Rotation handle around Anchor.
+- [x] **AI-177** — Implement Rotation handle around Anchor.
 - [ ] **AI-178** — Implement Shift 15-degree Rotation snapping.
 - [ ] **AI-179** — Implement multi-object move by shared composition-space delta.
 - [ ] **AI-180** — Implement animated direct-transform edits using the accepted property-keyframing behavior.
