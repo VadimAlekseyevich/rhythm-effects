@@ -176,15 +176,9 @@ pub fn property_keyframe_at_tick(
     tick: MusicalTick,
 ) -> Result<Option<PropertyKeyframe>, PropertyAccessError> {
     Ok(match animated_ref(project, object_id, property)? {
-        AnimatedRef::Scalar(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(|keyframe| pack_scalar_keyframe(keyframe)),
-        AnimatedRef::Vec2(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(|keyframe| pack_vec2_keyframe(keyframe)),
-        AnimatedRef::Color(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(|keyframe| pack_color_keyframe(keyframe)),
+        AnimatedRef::Scalar(animated) => animated.keyframe_at_tick(tick).map(pack_scalar_keyframe),
+        AnimatedRef::Vec2(animated) => animated.keyframe_at_tick(tick).map(pack_vec2_keyframe),
+        AnimatedRef::Color(animated) => animated.keyframe_at_tick(tick).map(pack_color_keyframe),
     })
 }
 
@@ -232,6 +226,27 @@ pub fn locate_property_keyframe(
     }
 
     None
+}
+
+pub fn property_keyframe_has_successor(
+    project: &Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    keyframe_id: KeyframeId,
+) -> Result<bool, PropertyAccessError> {
+    fn has_successor<T>(animated: &Animated<T>, keyframe_id: KeyframeId) -> bool {
+        animated
+            .keyframes()
+            .iter()
+            .position(|keyframe| keyframe.id == keyframe_id)
+            .is_some_and(|index| index + 1 < animated.keyframes().len())
+    }
+
+    Ok(match animated_ref(project, object_id, property)? {
+        AnimatedRef::Scalar(animated) => has_successor(animated, keyframe_id),
+        AnimatedRef::Vec2(animated) => has_successor(animated, keyframe_id),
+        AnimatedRef::Color(animated) => has_successor(animated, keyframe_id),
+    })
 }
 
 fn object_animatable_properties(object: &Object) -> Vec<AnimatableProperty> {
@@ -428,6 +443,78 @@ pub(crate) fn remove_property_keyframe_by_id(
             .remove_keyframe_by_id(keyframe_id)
             .as_ref()
             .map(pack_color_keyframe),
+    })
+}
+
+pub(crate) fn set_property_keyframe_value(
+    project: &mut Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    keyframe_id: KeyframeId,
+    value: PropertyValue,
+) -> Result<Option<PropertyValue>, PropertyAccessError> {
+    if !property_value_compatible(property, value) {
+        return Err(if value.is_finite() {
+            PropertyAccessError::IncompatibleValue
+        } else {
+            PropertyAccessError::NonFiniteValue
+        });
+    }
+
+    match (animated_mut(project, object_id, property)?, value) {
+        (AnimatedMut::Scalar(animated), PropertyValue::Scalar(value)) => {
+            Ok(animated.keyframe_by_id_mut(keyframe_id).map(|keyframe| {
+                let before = keyframe.value;
+                keyframe.value = value;
+                PropertyValue::Scalar(before)
+            }))
+        }
+        (AnimatedMut::Vec2(animated), PropertyValue::Vec2(value)) => {
+            Ok(animated.keyframe_by_id_mut(keyframe_id).map(|keyframe| {
+                let before = keyframe.value;
+                keyframe.value = value;
+                PropertyValue::Vec2(before)
+            }))
+        }
+        (AnimatedMut::Color(animated), PropertyValue::Color(value)) => {
+            Ok(animated.keyframe_by_id_mut(keyframe_id).map(|keyframe| {
+                let before = keyframe.value;
+                keyframe.value = value;
+                PropertyValue::Color(before)
+            }))
+        }
+        _ => Err(PropertyAccessError::IncompatibleValue),
+    }
+}
+
+pub(crate) fn set_property_keyframe_interpolation(
+    project: &mut Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    keyframe_id: KeyframeId,
+    interpolation: Interpolation,
+) -> Result<Option<Interpolation>, PropertyAccessError> {
+    fn replace_interpolation<T>(
+        keyframe: Option<&mut Keyframe<T>>,
+        interpolation: Interpolation,
+    ) -> Option<Interpolation> {
+        keyframe.map(|keyframe| {
+            let before = keyframe.interpolation;
+            keyframe.interpolation = interpolation;
+            before
+        })
+    }
+
+    Ok(match animated_mut(project, object_id, property)? {
+        AnimatedMut::Scalar(animated) => {
+            replace_interpolation(animated.keyframe_by_id_mut(keyframe_id), interpolation)
+        }
+        AnimatedMut::Vec2(animated) => {
+            replace_interpolation(animated.keyframe_by_id_mut(keyframe_id), interpolation)
+        }
+        AnimatedMut::Color(animated) => {
+            replace_interpolation(animated.keyframe_by_id_mut(keyframe_id), interpolation)
+        }
     })
 }
 
