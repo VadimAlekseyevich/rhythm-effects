@@ -216,7 +216,15 @@ impl ApplicationHandler for RhythmApp {
                         _ => 0,
                     };
 
-                    let handled = if direction != 0 && alt && !shift && !super_key {
+                    let handled = if control
+                        && !shift
+                        && !alt
+                        && !super_key
+                        && code == KeyCode::KeyC
+                    {
+                        self.session
+                            .copy_selected_keyframes(self.project_editor.project())
+                    } else if direction != 0 && alt && !shift && !super_key {
                         let result = if control {
                             self.session.move_selected_keyframes_by_beat(
                                 &mut self.project_editor,

@@ -4,7 +4,7 @@ use rhythm_core::{
     editor::{EditError, ProjectEditor, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
-        AnimatableProperty, evaluate_property_at_tick, locate_property_keyframe,
+        AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
         property_keyframe_at_tick, property_keyframe_count,
     },
     time::{
@@ -70,6 +70,20 @@ struct TimelineView {
     end: ProjectTimeNs,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyframeCopyEntry {
+    pub source_object_id: ObjectId,
+    pub source_property: AnimatableProperty,
+    pub relative_tick: i64,
+    pub value: PropertyValue,
+    pub interpolation: rhythm_core::animation::Interpolation,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyframeCopyPacket {
+    pub entries: Vec<KeyframeCopyEntry>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FocusedProperty {
     pub object_id: ObjectId,
@@ -86,6 +100,7 @@ pub struct EditorSession {
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
+    keyframe_clipboard: Option<KeyframeCopyPacket>,
     timeline_box_selection: Option<TimelineBoxSelection>,
 }
 
@@ -100,6 +115,7 @@ impl Default for EditorSession {
             focused_property: None,
             keyframe_drag: None,
             pending_keyframe_move: None,
+            keyframe_clipboard: None,
             timeline_box_selection: None,
         }
     }
@@ -348,6 +364,54 @@ impl EditorSession {
             .checked_mul(direction)
             .ok_or(EditError::HistoryInvariant("beat movement overflow"))?;
         self.move_selected_keyframes_by_ticks(editor, delta)
+    }
+
+    pub fn copy_selected_keyframes(
+        &mut self,
+        project: &rhythm_core::project::Project,
+    ) -> bool {
+        let mut located = Vec::with_capacity(self.selected_keyframes.len());
+        for keyframe_id in self.selected_keyframe_ids() {
+            let Some(keyframe) = locate_property_keyframe(project, keyframe_id) else {
+                return false;
+            };
+            located.push(keyframe);
+        }
+
+        let Some(anchor_tick) = located
+            .iter()
+            .map(|located| located.keyframe.tick.get())
+            .min()
+        else {
+            return false;
+        };
+
+        let mut entries: Vec<_> = located
+            .into_iter()
+            .map(|located| KeyframeCopyEntry {
+                source_object_id: located.object_id,
+                source_property: located.property,
+                relative_tick: located.keyframe.tick.get() - anchor_tick,
+                value: located.keyframe.value,
+                interpolation: located.keyframe.interpolation,
+            })
+            .collect();
+
+        entries.sort_by_key(|entry| {
+            (
+                entry.relative_tick,
+                entry.source_object_id.get(),
+                format!("{:?}", entry.source_property),
+            )
+        });
+
+        self.keyframe_clipboard = Some(KeyframeCopyPacket { entries });
+        true
+    }
+
+    #[must_use]
+    pub fn keyframe_clipboard(&self) -> Option<&KeyframeCopyPacket> {
+        self.keyframe_clipboard.as_ref()
     }
 
     pub fn delete_selected_keyframes(
@@ -797,6 +861,48 @@ mod tests {
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000),)
         );
+    }
+
+    #[test]
+    fn copy_packet_preserves_values_easing_and_relative_ticks() {
+        use rhythm_core::{
+            animation::Interpolation,
+            property::{AnimatableProperty, PropertyValue},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.25),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+                PropertyValue::Scalar(0.75),
+            )
+            .expect("insert")
+            .expect("second");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([second, first]);
+
+        assert!(session.copy_selected_keyframes(editor.project()));
+        let packet = session.keyframe_clipboard().expect("copy packet");
+        assert_eq!(packet.entries.len(), 2);
+        assert_eq!(packet.entries[0].relative_tick, 0);
+        assert_eq!(packet.entries[0].value, PropertyValue::Scalar(0.25));
+        assert_eq!(packet.entries[0].interpolation, Interpolation::Linear);
+        assert_eq!(packet.entries[1].relative_tick, 480);
+        assert_eq!(packet.entries[1].value, PropertyValue::Scalar(0.75));
     }
 
     #[test]
