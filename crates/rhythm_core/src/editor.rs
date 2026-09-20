@@ -7,8 +7,9 @@ use crate::{
     project::{Object, Project, ProjectValidationError},
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
-        insert_property_keyframe, property_base_value, property_keyframe_by_id,
-        property_keyframe_count, remove_property_keyframe_by_id, set_property_base_value,
+        insert_property_keyframe, locate_property_keyframe, property_base_value,
+        property_keyframe_by_id, property_keyframe_count, remove_property_keyframe_by_id,
+        set_property_base_value,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -69,6 +70,22 @@ pub struct PropertyKeyframeMoveRecord {
     pub replaced: Option<PropertyKeyframe>,
 }
 
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PropertyKeyframeDeleteRecord {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub keyframe: PropertyKeyframe,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PropertyBaseChange {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub before: PropertyValue,
+    pub after: PropertyValue,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     AddObject {
@@ -103,6 +120,9 @@ pub enum EditCommand {
         property: AnimatableProperty,
         keyframe: PropertyKeyframe,
     },
+    DeletePropertyKeyframes {
+        keyframe_ids: Vec<KeyframeId>,
+    },
     MovePropertyKeyframes {
         moves: Vec<PropertyKeyframeMove>,
     },
@@ -123,6 +143,7 @@ impl EditCommand {
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
             Self::InsertPropertyKeyframe { .. } => "InsertPropertyKeyframe",
             Self::RemovePropertyKeyframe { .. } => "RemovePropertyKeyframe",
+            Self::DeletePropertyKeyframes { .. } => "DeletePropertyKeyframes",
             Self::MovePropertyKeyframes { .. } => "MovePropertyKeyframes",
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
@@ -169,6 +190,10 @@ pub enum HistoryPayload {
         keyframe: PropertyKeyframe,
         base_before: Option<PropertyValue>,
         base_after: Option<PropertyValue>,
+    },
+    PropertyKeyframesDeleted {
+        records: Vec<PropertyKeyframeDeleteRecord>,
+        base_changes: Vec<PropertyBaseChange>,
     },
     PropertyKeyframesMoved {
         records: Vec<PropertyKeyframeMoveRecord>,
@@ -433,6 +458,13 @@ impl ProjectEditor {
             property,
             keyframe,
         })
+    }
+
+    pub fn delete_property_keyframes(
+        &mut self,
+        keyframe_ids: Vec<KeyframeId>,
+    ) -> Result<bool, EditError> {
+        self.execute(EditCommand::DeletePropertyKeyframes { keyframe_ids })
     }
 
     pub fn move_property_keyframe(
@@ -830,6 +862,167 @@ impl ProjectEditor {
                         keyframe,
                         base_before,
                         base_after,
+                    },
+                )))
+            }
+            EditCommand::DeletePropertyKeyframes { keyframe_ids } => {
+                let mut unique_ids = HashSet::with_capacity(keyframe_ids.len());
+                let mut located = Vec::with_capacity(keyframe_ids.len());
+
+                for keyframe_id in keyframe_ids {
+                    if !unique_ids.insert(keyframe_id) {
+                        continue;
+                    }
+                    let located_keyframe = locate_property_keyframe(&self.project, keyframe_id)
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                    located.push(located_keyframe);
+                }
+
+                if located.is_empty() {
+                    return Ok(None);
+                }
+
+                located.sort_by_key(|located| {
+                    (
+                HistoryPayload::PropertyKeyframesDeleted {
+                    records,
+                    base_changes,
+                },
+                direction,
+            ) => {
+                match direction {
+                    HistoryDirection::Undo => {
+                        for change in base_changes {
+                            set_property_base_value(
+                                &mut self.project,
+                                change.object_id,
+                                change.property,
+                                change.before,
+                            )?;
+                        }
+                        for record in records {
+                            insert_property_keyframe(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.keyframe,
+                            )?;
+                        }
+                    }
+                    HistoryDirection::Redo => {
+                        for record in records {
+                            remove_property_keyframe_by_id(
+                                &mut self.project,
+                                record.object_id,
+                                record.property,
+                                record.keyframe.id,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(record.keyframe.id))?;
+                        }
+                        for change in base_changes {
+                            set_property_base_value(
+                                &mut self.project,
+                                change.object_id,
+                                change.property,
+                                change.after,
+                            )?;
+                        }
+                    }
+                }
+            }
+            (
+                        located.object_id.get(),
+                        format!("{:?}", located.property),
+                        located.keyframe.tick.get(),
+                    )
+                });
+
+                let mut base_changes = Vec::new();
+                let mut grouped: Vec<(ObjectId, AnimatableProperty, Vec<PropertyKeyframe>)> =
+                    Vec::new();
+
+                for located_keyframe in located {
+                    if let Some((_, _, keys)) = grouped.iter_mut().find(|(object_id, property, _)| {
+                        *object_id == located_keyframe.object_id
+                            && *property == located_keyframe.property
+                    }) {
+                        keys.push(located_keyframe.keyframe);
+                    } else {
+                        grouped.push((
+                            located_keyframe.object_id,
+                            located_keyframe.property,
+                            vec![located_keyframe.keyframe],
+                        ));
+                    }
+                }
+
+                let mut records = Vec::new();
+                for (object_id, property, mut keys) in grouped {
+                    keys.sort_by_key(|keyframe| keyframe.tick);
+                    let total_before =
+                        property_keyframe_count(&self.project, object_id, property)?;
+                    let base_before = property_base_value(&self.project, object_id, property)?;
+
+                    for keyframe in &keys {
+                        let removed = remove_property_keyframe_by_id(
+                            &mut self.project,
+                            object_id,
+                            property,
+                            keyframe.id,
+                        )?
+                        .ok_or(EditError::KeyframeNotFound(keyframe.id))?;
+                        records.push(PropertyKeyframeDeleteRecord {
+                            object_id,
+                            property,
+                            keyframe: removed,
+                        });
+                    }
+
+                    if keys.len() == total_before {
+                        let after = keys
+                            .last()
+                            .expect("non-empty delete group")
+                            .value;
+                        set_property_base_value(
+                            &mut self.project,
+                            object_id,
+                            property,
+                            after,
+                        )?;
+                        base_changes.push(PropertyBaseChange {
+                            object_id,
+                            property,
+                            before: base_before,
+                            after,
+                        });
+                    }
+                }
+
+                if let Err(error) = self.project.validate() {
+                    for change in &base_changes {
+                        let _ = set_property_base_value(
+                            &mut self.project,
+                            change.object_id,
+                            change.property,
+                            change.before,
+                        );
+                    }
+                    for record in &records {
+                        let _ = insert_property_keyframe(
+                            &mut self.project,
+                            record.object_id,
+                            record.property,
+                            record.keyframe,
+                        );
+                    }
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Delete Keyframes",
+                    HistoryPayload::PropertyKeyframesDeleted {
+                        records,
+                        base_changes,
                     },
                 )))
             }
@@ -1321,6 +1514,71 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn compound_keyframe_delete_is_one_entry_and_latest_deleted_value_becomes_static() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                crate::property::PropertyValue::Scalar(0.2),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                crate::property::PropertyValue::Scalar(0.8),
+            )
+            .expect("insert")
+            .expect("second");
+        let history_before = editor.history_len();
+
+        assert_eq!(
+            editor.delete_property_keyframes(vec![second, first]),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), history_before + 1);
+        assert_eq!(
+            crate::property::property_keyframe_count(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+            ),
+            Ok(0)
+        );
+        assert_eq!(
+            crate::property::property_base_value(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+            ),
+            Ok(crate::property::PropertyValue::Scalar(0.8))
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            crate::property::property_keyframe_count(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+            ),
+            Ok(2)
+        );
+        assert_eq!(
+            crate::property::property_base_value(
+                editor.project(),
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+            ),
+            Ok(crate::property::PropertyValue::Scalar(1.0))
+        );
     }
 
     #[test]

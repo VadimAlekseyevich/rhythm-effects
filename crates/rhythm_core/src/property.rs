@@ -110,6 +110,13 @@ pub struct PropertyKeyframe {
     pub interpolation: Interpolation,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LocatedPropertyKeyframe {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub keyframe: PropertyKeyframe,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropertyAccessError {
     ObjectNotFound(ObjectId),
@@ -204,6 +211,90 @@ pub fn property_keyframe_by_id(
             .find(|keyframe| keyframe.id == keyframe_id)
             .map(pack_color_keyframe),
     })
+}
+
+pub fn locate_property_keyframe(
+    project: &Project,
+    keyframe_id: KeyframeId,
+) -> Option<LocatedPropertyKeyframe> {
+    for object in &project.composition.objects {
+        for property in object_animatable_properties(object) {
+            if let Ok(Some(keyframe)) =
+                property_keyframe_by_id(project, object.id, property, keyframe_id)
+            {
+                return Some(LocatedPropertyKeyframe {
+                    object_id: object.id,
+                    property,
+                    keyframe,
+                });
+            }
+        }
+    }
+
+    None
+}
+
+fn object_animatable_properties(object: &Object) -> Vec<AnimatableProperty> {
+    let mut properties = vec![
+        AnimatableProperty::Position,
+        AnimatableProperty::Scale,
+        AnimatableProperty::Rotation,
+        AnimatableProperty::Anchor,
+        AnimatableProperty::Opacity,
+    ];
+
+    match &object.content {
+        ObjectContent::Rectangle(_) => {
+            properties.extend([
+                AnimatableProperty::RectangleSize,
+                AnimatableProperty::RectangleFill,
+                AnimatableProperty::RectangleCornerRadius,
+            ]);
+        }
+        ObjectContent::Ellipse(_) => {
+            properties.extend([
+                AnimatableProperty::EllipseSize,
+                AnimatableProperty::EllipseFill,
+            ]);
+        }
+        ObjectContent::Image(_) => {}
+        ObjectContent::Text(_) => properties.push(AnimatableProperty::TextColor),
+    }
+
+    for effect in &object.effects {
+        let effect_id = effect.id;
+        let effect_properties: &[EffectAnimatableProperty] = match &effect.kind {
+            EffectKind::Blur(_) => &[EffectAnimatableProperty::BlurRadius],
+            EffectKind::Glow(_) => &[
+                EffectAnimatableProperty::GlowRadius,
+                EffectAnimatableProperty::GlowIntensity,
+                EffectAnimatableProperty::GlowThreshold,
+                EffectAnimatableProperty::GlowColor,
+            ],
+            EffectKind::Tint(_) => &[
+                EffectAnimatableProperty::TintColor,
+                EffectAnimatableProperty::TintAmount,
+            ],
+            EffectKind::Noise(_) => &[
+                EffectAnimatableProperty::NoiseAmount,
+                EffectAnimatableProperty::NoiseSize,
+                EffectAnimatableProperty::NoiseEvolution,
+            ],
+            EffectKind::RgbSplit(_) => &[
+                EffectAnimatableProperty::RgbSplitAmount,
+                EffectAnimatableProperty::RgbSplitAngle,
+            ],
+        };
+
+        properties.extend(effect_properties.iter().copied().map(|property| {
+            AnimatableProperty::Effect {
+                effect_id,
+                property,
+            }
+        }));
+    }
+
+    properties
 }
 
 pub fn evaluate_property_at_tick(

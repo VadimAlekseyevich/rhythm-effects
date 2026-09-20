@@ -293,6 +293,22 @@ impl EditorSession {
         had_drag
     }
 
+    pub fn delete_selected_keyframes(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let selected = self.selected_keyframe_ids();
+        if selected.is_empty() {
+            return Ok(false);
+        }
+
+        let changed = editor.delete_property_keyframes(selected)?;
+        if changed {
+            self.clear_keyframe_selection();
+        }
+        Ok(changed)
+    }
+
     pub fn commit_pending_keyframe_move(
         &mut self,
         editor: &mut ProjectEditor,

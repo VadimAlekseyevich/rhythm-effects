@@ -220,6 +220,22 @@ impl ApplicationHandler for RhythmApp {
                         && !shift
                         && !alt
                         && !super_key
+                        && code == KeyCode::Delete
+                    {
+                        match self
+                            .session
+                            .delete_selected_keyframes(&mut self.project_editor)
+                        {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "delete selected keyframes failed");
+                                false
+                            }
+                        }
+                    } else if !control
+                        && !shift
+                        && !alt
+                        && !super_key
                         && code == KeyCode::Escape
                     {
                         self.session.cancel_keyframe_drag()

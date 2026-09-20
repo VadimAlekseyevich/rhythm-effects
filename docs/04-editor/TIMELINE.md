@@ -168,6 +168,10 @@ Accepted move/paste collision rule:
 - replaced key data is included in undo;
 - preview should indicate replacement before commit where practical.
 
+### Compound delete final-key rule
+
+When a compound Delete removes every keyframe of one property, selected keys are resolved in ascending MusicalTick order for that property. The value of the latest removed key becomes the new static base_value. This is the deterministic compound extension of the Inspector rule that removing the final key promotes that removed key value to static state.
+
 ## 16. Box selection
 
 Drag from empty keyframe canvas.

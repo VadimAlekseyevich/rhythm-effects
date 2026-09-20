@@ -182,7 +182,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-150** — Implement Esc cancellation for a keyframe drag transaction.
 - [x] **AI-151** — Implement multi-key drag using one anchor key and identical integer tick delta.
 - [x] **AI-152** — Implement occupied-target collision so incoming/moved key wins and replaced key is stored for undo.
-- [ ] **AI-153** — Implement Delete for selected keyframes as one compound history entry.
+- [x] **AI-153** — Implement Delete for selected keyframes as one compound history entry.
 - [ ] **AI-154** — Implement Alt+Left/Right selected-key movement by exactly one current grid step.
 - [ ] **AI-155** — Implement Ctrl+Alt+Left/Right selected-key movement by exactly one beat.
 - [ ] **AI-156** — Implement copy packet with property compatibility, values, easing and relative tick offsets.
