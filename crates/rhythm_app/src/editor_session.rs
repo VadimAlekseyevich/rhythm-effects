@@ -570,7 +570,7 @@ impl EditorSession {
             .is_some_and(|drag| drag.phase == ViewportTransformDragPhase::Active)
     }
 
-    pub fn update_viewport_scale_drag(&mut self, pointer: Vec2) -> bool {
+    pub fn update_viewport_scale_drag(&mut self, pointer: Vec2, constrain_uniform: bool) -> bool {
         let Some(drag) = self.viewport_scale_drag.as_mut() else {
             return false;
         };
@@ -592,15 +592,30 @@ impl EditorSession {
         let (current_x, current_y) = unrotate(pointer);
         const HANDLE_AXIS_EPSILON: f32 = 0.0001;
 
-        let scale_x = if start_x.abs() > HANDLE_AXIS_EPSILON {
-            drag.scale_start.x() * current_x / start_x
+        let ratio_x = (start_x.abs() > HANDLE_AXIS_EPSILON).then_some(current_x / start_x);
+        let ratio_y = (start_y.abs() > HANDLE_AXIS_EPSILON).then_some(current_y / start_y);
+        let (scale_x, scale_y) = if constrain_uniform {
+            let uniform_ratio = match (ratio_x, ratio_y) {
+                (Some(x), Some(y)) => {
+                    if (x - 1.0).abs() >= (y - 1.0).abs() {
+                        x
+                    } else {
+                        y
+                    }
+                }
+                (Some(x), None) => x,
+                (None, Some(y)) => y,
+                (None, None) => 1.0,
+            };
+            (
+                drag.scale_start.x() * uniform_ratio,
+                drag.scale_start.y() * uniform_ratio,
+            )
         } else {
-            drag.scale_start.x()
-        };
-        let scale_y = if start_y.abs() > HANDLE_AXIS_EPSILON {
-            drag.scale_start.y() * current_y / start_y
-        } else {
-            drag.scale_start.y()
+            (
+                ratio_x.map_or(drag.scale_start.x(), |ratio| drag.scale_start.x() * ratio),
+                ratio_y.map_or(drag.scale_start.y(), |ratio| drag.scale_start.y() * ratio),
+            )
         };
         let Ok(current_scale) = Vec2::new(scale_x, scale_y) else {
             return false;
@@ -1774,7 +1789,8 @@ mod tests {
             0.0,
         ));
         assert!(session.update_viewport_scale_drag(
-            Vec2::new(100.0, 25.0).expect("pointer")
+            Vec2::new(100.0, 25.0).expect("pointer"),
+            false,
         ));
         assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
         assert_eq!(editor.history_len(), 0);
@@ -1800,6 +1816,33 @@ mod tests {
     }
 
     #[test]
+    fn viewport_scale_drag_shift_preserves_starting_scale_ratio() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_viewport_scale_drag(
+            object_id,
+            Vec2::new(0.0, 0.0).expect("anchor"),
+            Vec2::new(50.0, 50.0).expect("handle"),
+            Vec2::new(2.0, 1.0).expect("scale"),
+            0.0,
+        ));
+        assert!(session.update_viewport_scale_drag(
+            Vec2::new(100.0, 60.0).expect("pointer"),
+            true,
+        ));
+        assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value(),
+            Vec2::new(4.0, 2.0).expect("uniform scale")
+        );
+    }
+
+    #[test]
     fn viewport_scale_drag_respects_object_rotation_and_crossing_anchor() {
         let object_id = ObjectId::new(1).expect("object id");
         let mut editor = editor_with_object_for_drag();
@@ -1813,7 +1856,8 @@ mod tests {
             90.0,
         ));
         assert!(session.update_viewport_scale_drag(
-            Vec2::new(25.0, -100.0).expect("pointer across anchor")
+            Vec2::new(25.0, -100.0).expect("pointer across anchor"),
+            false,
         ));
         assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
         assert_eq!(
