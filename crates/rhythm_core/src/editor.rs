@@ -643,9 +643,7 @@ impl ProjectEditor {
         let object_id = match self.transaction {
             Some(ActiveTransaction::ObjectScale { object_id, .. }) => object_id,
             _ => {
-                return Err(EditError::HistoryInvariant(
-                    "no active scale transaction",
-                ));
+                return Err(EditError::HistoryInvariant("no active scale transaction"));
             }
         };
 
