@@ -309,7 +309,13 @@ mod tests {
             .iter()
             .map(|level| level.peaks.len())
             .sum();
-        assert!(total_peaks < 900_000);
+        let base_peaks = waveform.pyramid.levels[0].peaks.len();
+        assert!(
+            total_peaks
+                <= base_peaks
+                    .saturating_mul(2)
+                    .saturating_add(waveform.pyramid.levels.len())
+        );
 
         for (start, end, width) in [
             (0, 28_800_000, 1_920.0),
