@@ -48,8 +48,7 @@ impl LocalBounds2d {
 
         let max_x = self.min.x() + self.size.x();
         let max_y = self.min.y() + self.size.y();
-        (self.min.x()..=max_x).contains(&point.x())
-            && (self.min.y()..=max_y).contains(&point.y())
+        (self.min.x()..=max_x).contains(&point.x()) && (self.min.y()..=max_y).contains(&point.y())
     }
 }
 
@@ -154,11 +153,7 @@ pub fn hit_test_image_bounds(
 }
 
 #[must_use]
-pub fn hit_test_ellipse(
-    composition_point: Vec2,
-    transform: ObjectTransform2d,
-    size: Vec2,
-) -> bool {
+pub fn hit_test_ellipse(composition_point: Vec2, transform: ObjectTransform2d, size: Vec2) -> bool {
     if size.x() <= 0.0 || size.y() <= 0.0 {
         return false;
     }
@@ -186,7 +181,8 @@ pub fn hit_test_rectangle(
         return false;
     }
 
-    let Some(local_point) = inverse_object_transform_point(composition_point, transform, size) else {
+    let Some(local_point) = inverse_object_transform_point(composition_point, transform, size)
+    else {
         return false;
     };
 
@@ -323,8 +319,16 @@ mod tests {
     fn ellipse_hit_test_rejects_degenerate_size() {
         let transform = transform((200.0, 100.0), (1.0, 1.0), 0.0, (0.5, 0.5));
 
-        assert!(!hit_test_ellipse(vec2(200.0, 100.0), transform, vec2(0.0, 50.0)));
-        assert!(!hit_test_ellipse(vec2(200.0, 100.0), transform, vec2(100.0, -50.0)));
+        assert!(!hit_test_ellipse(
+            vec2(200.0, 100.0),
+            transform,
+            vec2(0.0, 50.0)
+        ));
+        assert!(!hit_test_ellipse(
+            vec2(200.0, 100.0),
+            transform,
+            vec2(100.0, -50.0)
+        ));
     }
 
     #[test]
