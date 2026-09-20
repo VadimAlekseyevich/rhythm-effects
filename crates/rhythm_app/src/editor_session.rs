@@ -281,6 +281,7 @@ impl EditorSession {
         }
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn selected_object_ids(&self) -> Vec<ObjectId> {
         self.selected_objects.iter().copied().collect()
