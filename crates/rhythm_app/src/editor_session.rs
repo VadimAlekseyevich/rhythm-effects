@@ -406,6 +406,7 @@ impl EditorSession {
         true
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn keyframe_clipboard(&self) -> Option<&KeyframeCopyPacket> {
         self.keyframe_clipboard.as_ref()
@@ -440,9 +441,10 @@ impl EditorSession {
             packet.entries[0].source_object_id,
             packet.entries[0].source_property,
         );
-        let single_source = packet.entries.iter().all(|entry| {
-            (entry.source_object_id, entry.source_property) == first_source
-        });
+        let single_source = packet
+            .entries
+            .iter()
+            .all(|entry| (entry.source_object_id, entry.source_property) == first_source);
         let remap_target = self.focused_property.filter(|focused| {
             single_source
                 && packet
@@ -474,6 +476,79 @@ impl EditorSession {
                 tick: MusicalTick::new(target_tick),
                 value: entry.value,
                 interpolation: entry.interpolation,
+            });
+        }
+
+        let new_ids = editor.insert_property_keyframes(drafts)?;
+        if new_ids.is_empty() {
+            return Ok(false);
+        }
+
+        self.replace_keyframe_selection(new_ids);
+        Ok(true)
+    }
+
+    pub fn duplicate_selected_keyframes(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        if self.selected_keyframes.is_empty() {
+            return Ok(false);
+        }
+
+        let mut located = Vec::with_capacity(self.selected_keyframes.len());
+        for keyframe_id in self.selected_keyframe_ids() {
+            let Some(keyframe) = locate_property_keyframe(editor.project(), keyframe_id) else {
+                return Err(EditError::KeyframeNotFound(keyframe_id));
+            };
+            located.push(keyframe);
+        }
+
+        let Some(first_tick) = located
+            .iter()
+            .map(|located| located.keyframe.tick.get())
+            .min()
+        else {
+            return Ok(false);
+        };
+        let Some(last_tick) = located
+            .iter()
+            .map(|located| located.keyframe.tick.get())
+            .max()
+        else {
+            return Ok(false);
+        };
+
+        let pattern_span = last_tick
+            .checked_sub(first_tick)
+            .ok_or(EditError::HistoryInvariant(
+                "duplicate pattern span overflow",
+            ))?;
+        let offset = pattern_span
+            .checked_add(self.authoring_division.ticks_per_step())
+            .ok_or(EditError::HistoryInvariant(
+                "duplicate keyframe offset overflow",
+            ))?;
+
+        located.sort_by_key(|located| {
+            (
+                located.keyframe.tick.get(),
+                located.object_id.get(),
+                format!("{:?}", located.property),
+            )
+        });
+
+        let mut drafts = Vec::with_capacity(located.len());
+        for located in located {
+            let target_tick = located.keyframe.tick.get().checked_add(offset).ok_or(
+                EditError::HistoryInvariant("duplicate keyframe tick overflow"),
+            )?;
+            drafts.push(PropertyKeyframeDraft {
+                object_id: located.object_id,
+                property: located.property,
+                tick: MusicalTick::new(target_tick),
+                value: located.keyframe.value,
+                interpolation: located.keyframe.interpolation,
             });
         }
 
@@ -523,6 +598,7 @@ impl EditorSession {
         self.selected_keyframes.contains(&keyframe_id)
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn selected_keyframe_count(&self) -> usize {
         self.selected_keyframes.len()
@@ -586,6 +662,7 @@ impl EditorSession {
             .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
     }
 
+    #[cfg(test)]
     pub const fn set_authoring_division(&mut self, division: BeatDivision) {
         self.authoring_division = division;
     }
@@ -796,9 +873,14 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSession, PreviewQuality};
-    use rhythm_core::time::{
-        BeatDivision, BpmMicros, DurationNs, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
+    use super::{EditorSession, KeyframeDragMember, PreviewQuality};
+    use rhythm_core::{
+        ids::{KeyframeId, ObjectId},
+        property::AnimatableProperty,
+        time::{
+            BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
+            TempoMap, TimeSignature,
+        },
     };
 
     fn tempo_120() -> TempoMap {
@@ -1005,6 +1087,87 @@ mod tests {
         assert!(pasted_first.id.get() > second.get());
         assert!(session.is_keyframe_selected(pasted_first.id));
         assert!(session.is_keyframe_selected(pasted_second.id));
+    }
+
+    #[test]
+    fn duplicate_repeats_pattern_after_current_grid_gap_and_selects_duplicates() {
+        use rhythm_core::{
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.25),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+                PropertyValue::Scalar(0.75),
+            )
+            .expect("insert")
+            .expect("second");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, second]);
+        assert!(session.keyframe_clipboard().is_none());
+
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
+
+        let source_first = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("source first");
+        let source_second = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(720),
+        )
+        .expect("property")
+        .expect("source second");
+        let duplicate_first = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(960),
+        )
+        .expect("property")
+        .expect("duplicate first");
+        let duplicate_second = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(1_440),
+        )
+        .expect("property")
+        .expect("duplicate second");
+
+        assert_eq!(source_first.id, first);
+        assert_eq!(source_second.id, second);
+        assert_eq!(duplicate_first.value, PropertyValue::Scalar(0.25));
+        assert_eq!(duplicate_second.value, PropertyValue::Scalar(0.75));
+        assert!(duplicate_first.id.get() > second.get());
+        assert!(duplicate_second.id.get() > duplicate_first.id.get());
+        assert!(!session.is_keyframe_selected(first));
+        assert!(!session.is_keyframe_selected(second));
+        assert!(session.is_keyframe_selected(duplicate_first.id));
+        assert!(session.is_keyframe_selected(duplicate_second.id));
+        assert_eq!(session.selected_keyframe_count(), 2);
+        assert!(session.keyframe_clipboard().is_none());
     }
 
     #[test]

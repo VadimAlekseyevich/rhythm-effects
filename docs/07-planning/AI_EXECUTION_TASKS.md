@@ -187,7 +187,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-155** — Implement Ctrl+Alt+Left/Right selected-key movement by exactly one beat.
 - [x] **AI-156** — Implement copy packet with property compatibility, values, easing and relative tick offsets.
 - [x] **AI-157** — Implement paste anchored at nearest-grid playhead with fresh KeyframeIds.
-- [ ] **AI-158** — Implement Ctrl+D duplicate of selected keys with duplicates remaining selected.
+- [x] **AI-158** — Implement Ctrl+D duplicate of selected keys with duplicates remaining selected.
 - [ ] **AI-159** — Implement Hold/Linear/easing preset context actions for selected outgoing segments.
 - [ ] **AI-160** — Implement Follow Playhead toggle defaulting OFF and edge-follow behavior.
 - [ ] **AI-161** — Add the 10,000-key timeline stress fixture and verify no full-project draw scan.
