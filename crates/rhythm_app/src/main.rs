@@ -4,6 +4,7 @@ mod editor_session;
 mod editor_ui;
 mod gpu;
 mod timeline;
+mod viewport;
 
 use std::sync::Arc;
 use std::time::Instant;
