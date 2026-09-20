@@ -228,6 +228,27 @@ pub fn locate_property_keyframe(
     None
 }
 
+pub fn property_keyframe_has_successor(
+    project: &Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    keyframe_id: KeyframeId,
+) -> Result<bool, PropertyAccessError> {
+    fn has_successor<T>(animated: &Animated<T>, keyframe_id: KeyframeId) -> bool {
+        animated
+            .keyframes()
+            .iter()
+            .position(|keyframe| keyframe.id == keyframe_id)
+            .is_some_and(|index| index + 1 < animated.keyframes().len())
+    }
+
+    Ok(match animated_ref(project, object_id, property)? {
+        AnimatedRef::Scalar(animated) => has_successor(animated, keyframe_id),
+        AnimatedRef::Vec2(animated) => has_successor(animated, keyframe_id),
+        AnimatedRef::Color(animated) => has_successor(animated, keyframe_id),
+    })
+}
+
 fn object_animatable_properties(object: &Object) -> Vec<AnimatableProperty> {
     let mut properties = vec![
         AnimatableProperty::Position,
@@ -423,6 +444,26 @@ pub(crate) fn remove_property_keyframe_by_id(
             .as_ref()
             .map(pack_color_keyframe),
     })
+}
+
+pub(crate) fn set_property_keyframe_interpolation(
+    project: &mut Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    keyframe_id: KeyframeId,
+    interpolation: Interpolation,
+) -> Result<Option<Interpolation>, PropertyAccessError> {
+    let keyframe = match animated_mut(project, object_id, property)? {
+        AnimatedMut::Scalar(animated) => animated.keyframe_by_id_mut(keyframe_id),
+        AnimatedMut::Vec2(animated) => animated.keyframe_by_id_mut(keyframe_id),
+        AnimatedMut::Color(animated) => animated.keyframe_by_id_mut(keyframe_id),
+    };
+
+    Ok(keyframe.map(|keyframe| {
+        let before = keyframe.interpolation;
+        keyframe.interpolation = interpolation;
+        before
+    }))
 }
 
 fn animated_ref(
