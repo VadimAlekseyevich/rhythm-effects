@@ -154,6 +154,7 @@ pub struct EditorSession {
     timeline_view: Option<TimelineView>,
     follow_playhead: bool,
     viewport_pan_points: [f32; 2],
+    viewport_zoom: f32,
     selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
@@ -174,6 +175,7 @@ impl Default for EditorSession {
             timeline_view: None,
             follow_playhead: false,
             viewport_pan_points: [0.0, 0.0],
+            viewport_zoom: 1.0,
             selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
@@ -226,6 +228,44 @@ impl EditorSession {
 
         self.viewport_pan_points[0] += delta[0];
         self.viewport_pan_points[1] += delta[1];
+        true
+    }
+
+    #[must_use]
+    pub const fn viewport_zoom(&self) -> f32 {
+        self.viewport_zoom
+    }
+
+    pub fn zoom_viewport_around_anchor(
+        &mut self,
+        zoom_factor: f32,
+        anchor_from_viewport_center: [f32; 2],
+    ) -> bool {
+        const MIN_VIEWPORT_ZOOM: f32 = 0.1;
+        const MAX_VIEWPORT_ZOOM: f32 = 8.0;
+
+        if !zoom_factor.is_finite()
+            || zoom_factor <= 0.0
+            || !anchor_from_viewport_center[0].is_finite()
+            || !anchor_from_viewport_center[1].is_finite()
+        {
+            return false;
+        }
+
+        let old_zoom = self.viewport_zoom;
+        let new_zoom = (old_zoom * zoom_factor).clamp(MIN_VIEWPORT_ZOOM, MAX_VIEWPORT_ZOOM);
+        if (new_zoom - old_zoom).abs() < f32::EPSILON {
+            return false;
+        }
+
+        let ratio = new_zoom / old_zoom;
+        let offset_from_composition_center = [
+            anchor_from_viewport_center[0] - self.viewport_pan_points[0],
+            anchor_from_viewport_center[1] - self.viewport_pan_points[1],
+        ];
+        self.viewport_pan_points[0] += offset_from_composition_center[0] * (1.0 - ratio);
+        self.viewport_pan_points[1] += offset_from_composition_center[1] * (1.0 - ratio);
+        self.viewport_zoom = new_zoom;
         true
     }
 
@@ -1229,6 +1269,32 @@ mod tests {
         assert!(session.replace_object_selection(None));
         assert!(session.selected_object_ids().is_empty());
         assert!(!session.replace_object_selection(None));
+    }
+
+    #[test]
+    fn viewport_zoom_keeps_pointer_anchor_stable_by_adjusting_pan() {
+        let mut session = EditorSession::default();
+
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert!(session.zoom_viewport_around_anchor(2.0, [100.0, 50.0]));
+        assert_eq!(session.viewport_zoom(), 2.0);
+        assert_eq!(session.viewport_pan_points(), [-100.0, -50.0]);
+
+        let old_screen_x = -100.0 + 100.0 * 2.0;
+        let old_screen_y = -50.0 + 50.0 * 2.0;
+        assert!((old_screen_x - 100.0).abs() < 0.0001);
+        assert!((old_screen_y - 50.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn viewport_zoom_clamps_to_practical_range() {
+        let mut session = EditorSession::default();
+
+        assert!(session.zoom_viewport_around_anchor(100.0, [0.0, 0.0]));
+        assert_eq!(session.viewport_zoom(), 8.0);
+        assert!(session.zoom_viewport_around_anchor(0.001, [0.0, 0.0]));
+        assert_eq!(session.viewport_zoom(), 0.1);
     }
 
     #[test]
