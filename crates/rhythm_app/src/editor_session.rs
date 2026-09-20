@@ -198,10 +198,7 @@ impl EditorSession {
         self.follow_playhead = enabled;
     }
 
-    #[expect(
-        dead_code,
-        reason = "wired to transport playback by AI-196; AI-160 defines follow semantics"
-    )]
+    #[allow(dead_code)]
     pub fn update_playhead_during_playback(
         &mut self,
         project_time: ProjectTimeNs,
