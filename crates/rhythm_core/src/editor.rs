@@ -178,9 +178,7 @@ impl EditCommand {
             Self::InsertPropertyKeyframes { .. } => "InsertPropertyKeyframes",
             Self::DeletePropertyKeyframes { .. } => "DeletePropertyKeyframes",
             Self::MovePropertyKeyframes { .. } => "MovePropertyKeyframes",
-            Self::SetPropertyKeyframeInterpolations { .. } => {
-                "SetPropertyKeyframeInterpolations"
-            }
+            Self::SetPropertyKeyframeInterpolations { .. } => "SetPropertyKeyframeInterpolations",
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
     }
@@ -1747,10 +1745,7 @@ impl ProjectEditor {
                     }
                 }
             },
-            (
-                HistoryPayload::PropertyKeyframeInterpolationsChanged { records },
-                direction,
-            ) => {
+            (HistoryPayload::PropertyKeyframeInterpolationsChanged { records }, direction) => {
                 for record in records {
                     let (expected, target) = match direction {
                         HistoryDirection::Undo => (record.after, record.before),
@@ -1951,10 +1946,7 @@ mod tests {
         let history_before = editor.history_len();
 
         assert_eq!(
-            editor.set_property_keyframe_interpolations(
-                vec![first, second],
-                Interpolation::Hold,
-            ),
+            editor.set_property_keyframe_interpolations(vec![first, second], Interpolation::Hold,),
             Ok(true)
         );
         assert_eq!(editor.history_len(), history_before + 1);
