@@ -52,6 +52,19 @@ pub fn inverse_object_transform_point(
 }
 
 #[must_use]
+pub fn hit_test_image_bounds(
+    composition_point: Vec2,
+    transform: ObjectTransform2d,
+    intrinsic_size: Vec2,
+) -> bool {
+    if intrinsic_size.x() <= 0.0 || intrinsic_size.y() <= 0.0 {
+        return false;
+    }
+
+    hit_test_rectangle(composition_point, transform, intrinsic_size)
+}
+
+#[must_use]
 pub fn hit_test_ellipse(
     composition_point: Vec2,
     transform: ObjectTransform2d,
@@ -94,7 +107,8 @@ pub fn hit_test_rectangle(
 #[cfg(test)]
 mod tests {
     use super::{
-        ObjectTransform2d, hit_test_ellipse, hit_test_rectangle, inverse_object_transform_point,
+        ObjectTransform2d, hit_test_ellipse, hit_test_image_bounds, hit_test_rectangle,
+        inverse_object_transform_point,
     };
     use crate::domain::Vec2;
 
@@ -114,6 +128,39 @@ mod tests {
             rotation_degrees,
             vec2(anchor.0, anchor.1),
         )
+    }
+
+    #[test]
+    fn image_hit_test_uses_intrinsic_local_bounds() {
+        let transform = transform((300.0, 200.0), (2.0, -1.0), 90.0, (0.5, 0.5));
+        let intrinsic_size = vec2(200.0, 100.0);
+
+        assert!(hit_test_image_bounds(
+            vec2(300.0, 200.0),
+            transform,
+            intrinsic_size
+        ));
+        assert!(hit_test_image_bounds(
+            vec2(350.0, 400.0),
+            transform,
+            intrinsic_size
+        ));
+        assert!(!hit_test_image_bounds(
+            vec2(350.1, 400.0),
+            transform,
+            intrinsic_size
+        ));
+    }
+
+    #[test]
+    fn image_hit_test_rejects_invalid_intrinsic_bounds() {
+        let transform = transform((300.0, 200.0), (1.0, 1.0), 0.0, (0.5, 0.5));
+
+        assert!(!hit_test_image_bounds(
+            vec2(300.0, 200.0),
+            transform,
+            vec2(0.0, 100.0)
+        ));
     }
 
     #[test]
