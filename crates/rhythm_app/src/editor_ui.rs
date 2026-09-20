@@ -437,8 +437,7 @@ pub fn draw_editor_shell(
             let scale_drag_released = primary_released && session.viewport_scale_drag_active();
             if scale_drag_released {
                 if let Some(pointer) = pointer_pos
-                    && let Some(composition_pointer) =
-                        screen_to_composition_unclamped(pointer)
+                    && let Some(composition_pointer) = screen_to_composition_unclamped(pointer)
                 {
                     session.update_viewport_scale_drag(
                         composition_pointer,
@@ -448,9 +447,8 @@ pub fn draw_editor_shell(
                 session.finish_viewport_scale_drag();
             }
 
-            let position_drag_released = primary_released
-                && !scale_drag_released
-                && session.viewport_position_drag_active();
+            let position_drag_released =
+                primary_released && !scale_drag_released && session.viewport_position_drag_active();
             if position_drag_released {
                 if let Some(pointer) = pointer_pos {
                     session.update_viewport_position_drag(
