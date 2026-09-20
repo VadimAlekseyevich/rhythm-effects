@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
-    editor::{EditError, ProjectEditor, PropertyKeyframeMove},
+    editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
-        property_keyframe_at_tick, property_keyframe_count,
+        property_keyframe_at_tick, property_keyframe_count, property_value_compatible,
     },
     time::{
         BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
@@ -409,6 +409,81 @@ impl EditorSession {
     #[must_use]
     pub fn keyframe_clipboard(&self) -> Option<&KeyframeCopyPacket> {
         self.keyframe_clipboard.as_ref()
+    }
+
+    pub fn paste_keyframe_clipboard(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(packet) = self.keyframe_clipboard.clone() else {
+            return Ok(false);
+        };
+        if packet.entries.is_empty() {
+            return Ok(false);
+        }
+
+        let anchor_tick = {
+            let project = editor.project();
+            let Ok(continuous_tick) = project.tempo_map.continuous_tick_position(self.playhead)
+            else {
+                return Ok(false);
+            };
+            let Ok(anchor_tick) =
+                snap_tick_position_to_grid(continuous_tick, self.authoring_division)
+            else {
+                return Ok(false);
+            };
+            anchor_tick
+        };
+
+        let first_source = (
+            packet.entries[0].source_object_id,
+            packet.entries[0].source_property,
+        );
+        let single_source = packet.entries.iter().all(|entry| {
+            (entry.source_object_id, entry.source_property) == first_source
+        });
+        let remap_target = self.focused_property.filter(|focused| {
+            single_source
+                && packet
+                    .entries
+                    .iter()
+                    .all(|entry| property_value_compatible(focused.property, entry.value))
+        });
+
+        let mut drafts = Vec::with_capacity(packet.entries.len());
+        for entry in packet.entries {
+            let (object_id, property) = remap_target
+                .map(|focused| (focused.object_id, focused.property))
+                .unwrap_or((entry.source_object_id, entry.source_property));
+
+            if !property_value_compatible(property, entry.value) {
+                return Err(EditError::InvalidValue(
+                    "keyframe paste property type mismatch",
+                ));
+            }
+
+            let target_tick = anchor_tick
+                .get()
+                .checked_add(entry.relative_tick)
+                .ok_or(EditError::HistoryInvariant("paste tick overflow"))?;
+
+            drafts.push(PropertyKeyframeDraft {
+                object_id,
+                property,
+                tick: MusicalTick::new(target_tick),
+                value: entry.value,
+                interpolation: entry.interpolation,
+            });
+        }
+
+        let new_ids = editor.insert_property_keyframes(drafts)?;
+        if new_ids.is_empty() {
+            return Ok(false);
+        }
+
+        self.replace_keyframe_selection(new_ids);
+        Ok(true)
     }
 
     pub fn delete_selected_keyframes(
@@ -858,6 +933,78 @@ mod tests {
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000),)
         );
+    }
+
+    #[test]
+    fn paste_anchors_packet_to_grid_and_allocates_fresh_ids() {
+        use rhythm_core::{
+            animation::Interpolation,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        editor
+            .execute(rhythm_core::editor::EditCommand::SetTempoMap {
+                tempo_map: TempoMap::with_initial_tempo(
+                    GridOffsetNs::new(0),
+                    BpmMicros::new(120_000_000).expect("valid BPM"),
+                    TimeSignature::default(),
+                ),
+            })
+            .expect("tempo");
+
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.25),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(0.75),
+            )
+            .expect("insert")
+            .expect("second");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, second]);
+        assert!(session.copy_selected_keyframes(editor.project()));
+        session.seek_paused(ProjectTimeNs::new(500_000_000));
+
+        assert_eq!(session.paste_keyframe_clipboard(&mut editor), Ok(true));
+        assert_eq!(session.selected_keyframe_count(), 2);
+
+        let pasted_first = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(960),
+        )
+        .expect("property")
+        .expect("pasted first");
+        let pasted_second = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(1_440),
+        )
+        .expect("property")
+        .expect("pasted second");
+
+        assert_eq!(pasted_first.value, PropertyValue::Scalar(0.25));
+        assert_eq!(pasted_first.interpolation, Interpolation::Linear);
+        assert_eq!(pasted_second.value, PropertyValue::Scalar(0.75));
+        assert!(pasted_first.id.get() > second.get());
+        assert!(session.is_keyframe_selected(pasted_first.id));
+        assert!(session.is_keyframe_selected(pasted_second.id));
     }
 
     #[test]

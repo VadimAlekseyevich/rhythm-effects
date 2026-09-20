@@ -224,6 +224,22 @@ impl ApplicationHandler for RhythmApp {
                     {
                         self.session
                             .copy_selected_keyframes(self.project_editor.project())
+                    } else if control
+                        && !shift
+                        && !alt
+                        && !super_key
+                        && code == KeyCode::KeyV
+                    {
+                        match self
+                            .session
+                            .paste_keyframe_clipboard(&mut self.project_editor)
+                        {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "paste keyframes failed");
+                                false
+                            }
+                        }
                     } else if direction != 0 && alt && !shift && !super_key {
                         let result = if control {
                             self.session.move_selected_keyframes_by_beat(
