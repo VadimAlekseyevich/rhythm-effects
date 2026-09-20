@@ -1284,7 +1284,7 @@ mod tests {
         let mut session = EditorSession::default();
 
         assert!(!session.follow_playhead());
-        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(2_500_000_000), 2.0));
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 2.0));
         assert_eq!(
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000))
