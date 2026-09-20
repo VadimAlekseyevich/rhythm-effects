@@ -53,7 +53,6 @@ impl LocalBounds2d {
 }
 
 #[must_use]
-#[must_use]
 pub fn object_transform_point_in_bounds(
     local_point: Vec2,
     transform: ObjectTransform2d,
