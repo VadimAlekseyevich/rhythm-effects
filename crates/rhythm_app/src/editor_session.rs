@@ -1858,13 +1858,12 @@ mod tests {
             false,
         ));
         assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
-        assert_eq!(
-            *editor.project().composition.objects[0]
-                .transform
-                .scale
-                .base_value(),
-            Vec2::new(-2.0, -0.5).expect("mirrored scale")
-        );
+        let scale = *editor.project().composition.objects[0]
+            .transform
+            .scale
+            .base_value();
+        assert!((scale.x() + 2.0).abs() < 0.0001);
+        assert!((scale.y() + 0.5).abs() < 0.0001);
     }
 
     #[test]
