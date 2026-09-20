@@ -113,15 +113,20 @@ where
             continue;
         }
 
-        let local_bounds =
-            evaluated_local_bounds(evaluated.id, &evaluated.content, &mut runtime_bounds)?;
+        let Some(local_bounds) =
+            evaluated_local_bounds(evaluated.id, &evaluated.content, &mut runtime_bounds)
+        else {
+            continue;
+        };
         let transform = ObjectTransform2d::new(
             evaluated.transform.position,
             evaluated.transform.scale,
             evaluated.transform.rotation_degrees,
             evaluated.transform.anchor,
         );
-        let bounds = transformed_bounds(transform, local_bounds)?;
+        let Some(bounds) = transformed_bounds(transform, local_bounds) else {
+            continue;
+        };
 
         combined = Some(match combined {
             None => bounds,
