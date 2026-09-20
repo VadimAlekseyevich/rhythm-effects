@@ -185,7 +185,14 @@ pub fn draw_editor_shell(
                     {
                         let picked =
                             pick_topmost_object(project, &scene, composition_point, |_, _| None);
-                        session.replace_object_selection(picked);
+                        let ctrl = ui.input(|input| input.modifiers.ctrl);
+                        if ctrl {
+                            if let Some(object_id) = picked {
+                                session.toggle_object_selection(object_id);
+                            }
+                        } else {
+                            session.replace_object_selection(picked);
+                        }
                     }
                 }
             } else {
