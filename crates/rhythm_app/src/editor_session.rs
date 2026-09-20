@@ -745,27 +745,26 @@ impl EditorSession {
         }
 
         if !snapshot.transaction_started {
-            let has_animated_position = snapshot.object_ids.iter().try_fold(false, |animated, id| {
-                Ok::<_, EditError>(
-                    animated
-                        || property_keyframe_count(
-                            editor.project(),
-                            *id,
-                            AnimatableProperty::Position,
-                        )? > 0,
-                )
-            })?;
+            let has_animated_position =
+                snapshot.object_ids.iter().try_fold(false, |animated, id| {
+                    Ok::<_, EditError>(
+                        animated
+                            || property_keyframe_count(
+                                editor.project(),
+                                *id,
+                                AnimatableProperty::Position,
+                            )? > 0,
+                    )
+                })?;
 
             if has_animated_position {
                 let project = editor.project();
-                let Ok(continuous_tick) =
-                    project.tempo_map.continuous_tick_position(self.playhead)
+                let Ok(continuous_tick) = project.tempo_map.continuous_tick_position(self.playhead)
                 else {
                     self.viewport_multi_position_drag = None;
                     return Ok(false);
                 };
-                let Ok(tick) =
-                    snap_tick_position_to_grid(continuous_tick, self.authoring_division)
+                let Ok(tick) = snap_tick_position_to_grid(continuous_tick, self.authoring_division)
                 else {
                     self.viewport_multi_position_drag = None;
                     return Ok(false);
@@ -800,8 +799,7 @@ impl EditorSession {
                     return Err(error);
                 }
                 self.playhead = project_time;
-            } else if let Err(error) =
-                editor.begin_multi_position_transaction(&snapshot.object_ids)
+            } else if let Err(error) = editor.begin_multi_position_transaction(&snapshot.object_ids)
             {
                 self.viewport_multi_position_drag = None;
                 return Err(error);
@@ -2366,15 +2364,10 @@ mod tests {
         let mut session = EditorSession::default();
         session.seek_paused(ProjectTimeNs::new(130_000_000));
 
-        assert!(session.begin_viewport_multi_position_drag(
-            vec![first_id, second_id],
-            [100.0, 100.0],
-        ));
-        assert!(session.update_viewport_multi_position_drag(
-            [120.0, 100.0],
-            [1.0, 1.0],
-            false,
-        ));
+        assert!(
+            session.begin_viewport_multi_position_drag(vec![first_id, second_id], [100.0, 100.0],)
+        );
+        assert!(session.update_viewport_multi_position_drag([120.0, 100.0], [1.0, 1.0], false,));
         assert_eq!(
             session.sync_viewport_multi_position_drag(&mut editor),
             Ok(true)
