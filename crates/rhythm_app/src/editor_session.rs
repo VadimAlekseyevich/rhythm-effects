@@ -1683,6 +1683,17 @@ impl EditorSession {
         });
     }
 
+    pub fn focus_selected_property(&mut self, property: AnimatableProperty) -> bool {
+        if self.selected_objects.len() != 1 {
+            return false;
+        }
+        let Some(object_id) = self.selected_objects.iter().copied().next() else {
+            return false;
+        };
+        self.focus_property(object_id, property);
+        true
+    }
+
     pub fn begin_inspector_numeric_edit(
         &mut self,
         target: InspectorNumericTarget,
@@ -4025,6 +4036,34 @@ mod tests {
         assert_eq!(
             session.commit_pending_object_list_actions(&mut editor),
             Ok(false)
+        );
+    }
+
+    #[test]
+    fn property_shortcut_focus_requires_one_selected_object() {
+        let first = ObjectId::new(11).expect("object id");
+        let second = ObjectId::new(12).expect("object id");
+        let mut session = EditorSession::default();
+
+        assert!(!session.focus_selected_property(AnimatableProperty::Position));
+        session.replace_object_selection(Some(first));
+        assert!(session.focus_selected_property(AnimatableProperty::Scale));
+        assert_eq!(
+            session.focused_property(),
+            Some(super::FocusedProperty {
+                object_id: first,
+                property: AnimatableProperty::Scale,
+            })
+        );
+
+        session.replace_object_selection_many([first, second]);
+        assert!(!session.focus_selected_property(AnimatableProperty::Rotation));
+        assert_eq!(
+            session.focused_property(),
+            Some(super::FocusedProperty {
+                object_id: first,
+                property: AnimatableProperty::Scale,
+            })
         );
     }
 
