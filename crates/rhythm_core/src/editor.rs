@@ -410,7 +410,6 @@ impl History {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[derive(Debug, Clone, PartialEq)]
 enum DirectPositionTarget {
     Base {
         object_id: ObjectId,
