@@ -14,8 +14,8 @@ use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use rhythm_core::APP_NAME;
-use shortcuts::{EditorShortcut, ShortcutModifiers, dispatch_physical_shortcut};
 use rhythm_engine::renderer::Renderer;
+use shortcuts::{EditorShortcut, ShortcutModifiers, dispatch_physical_shortcut};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use winit::{
@@ -247,12 +247,7 @@ impl ApplicationHandler for RhythmApp {
                                 true
                             }
                         }
-                    } else if control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::KeyC
-                    {
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyC {
                         self.session
                             .copy_selected_keyframes(self.project_editor.project())
                     } else if control && !shift && !alt && !super_key && code == KeyCode::KeyV {
