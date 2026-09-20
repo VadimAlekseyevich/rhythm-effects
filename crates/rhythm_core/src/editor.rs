@@ -139,6 +139,11 @@ pub enum EditCommand {
         object_id: ObjectId,
         locked: bool,
     },
+    SetPropertyBase {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        value: PropertyValue,
+    },
     SetPositionBase {
         object_id: ObjectId,
         value: Vec2,
@@ -188,6 +193,7 @@ impl EditCommand {
             Self::RenameObject { .. } => "RenameObject",
             Self::SetObjectVisible { .. } => "SetObjectVisible",
             Self::SetObjectLocked { .. } => "SetObjectLocked",
+            Self::SetPropertyBase { .. } => "SetPropertyBase",
             Self::SetPositionBase { .. } => "SetPositionBase",
             Self::SetOpacityBase { .. } => "SetOpacityBase",
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
@@ -226,6 +232,9 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         before: bool,
         after: bool,
+    },
+    PropertyBaseChanged {
+        change: PropertyBaseChange,
     },
     PositionBaseChanged {
         object_id: ObjectId,
@@ -1508,6 +1517,34 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetPropertyBase {
+                object_id,
+                property,
+                value,
+            } => {
+                let before = property_base_value(&self.project, object_id, property)?;
+                if before == value {
+                    return Ok(None);
+                }
+
+                set_property_base_value(&mut self.project, object_id, property, value)?;
+                if let Err(error) = self.project.validate() {
+                    set_property_base_value(&mut self.project, object_id, property, before)?;
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Edit Property",
+                    HistoryPayload::PropertyBaseChanged {
+                        change: PropertyBaseChange {
+                            object_id,
+                            property,
+                            before,
+                            after: value,
+                        },
+                    },
+                )))
+            }
             EditCommand::SetPositionBase { object_id, value } => {
                 let index = self.object_index(object_id)?;
                 let before = *self.project.composition.objects[index]
@@ -2244,6 +2281,14 @@ impl ProjectEditor {
                 let index = self.object_index(*object_id)?;
                 self.project.composition.objects[index].locked = value;
             }
+            (HistoryPayload::PropertyBaseChanged { change }, direction) => {
+                set_property_base_value(
+                    &mut self.project,
+                    change.object_id,
+                    change.property,
+                    *direction.pick(&change.before, &change.after),
+                )?;
+            }
             (
                 HistoryPayload::PositionBaseChanged {
                     object_id,
@@ -2752,6 +2797,41 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn generic_property_base_edit_is_undoable() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+        let scale = Vec2::new(2.0, 3.0).expect("scale");
+
+        assert_eq!(
+            editor.execute(EditCommand::SetPropertyBase {
+                object_id,
+                property: AnimatableProperty::Scale,
+                value: PropertyValue::Vec2(scale),
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(scale))
+        );
+        assert_eq!(editor.history_len(), 1);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(
+                Vec2::new(1.0, 1.0).expect("original scale")
+            ))
+        );
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            property_base_value(editor.project(), object_id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(scale))
+        );
     }
 
     #[test]
