@@ -235,6 +235,7 @@ pub struct EditorSession {
     selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
+    pending_focused_keyframe_action: bool,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
     pending_keyframe_interpolation: Option<Interpolation>,
@@ -262,6 +263,7 @@ impl Default for EditorSession {
             selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
+            pending_focused_keyframe_action: false,
             keyframe_drag: None,
             pending_keyframe_move: None,
             pending_keyframe_interpolation: None,
@@ -1323,6 +1325,27 @@ impl EditorSession {
             object_id,
             property,
         });
+    }
+
+    pub fn request_focused_keyframe_action(
+        &mut self,
+        object_id: ObjectId,
+        property: AnimatableProperty,
+    ) {
+        self.focus_property(object_id, property);
+        self.pending_focused_keyframe_action = true;
+    }
+
+    pub fn commit_pending_focused_keyframe_action(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        if !self.pending_focused_keyframe_action {
+            return Ok(false);
+        }
+
+        self.pending_focused_keyframe_action = false;
+        self.keyframe_action(editor)
     }
 
     pub fn keyframe_action(&mut self, editor: &mut ProjectEditor) -> Result<bool, EditError> {
