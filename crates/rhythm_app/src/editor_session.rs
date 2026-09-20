@@ -244,6 +244,26 @@ pub struct InspectorNumericCommit {
     pub value: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InspectorMultiNumericTarget {
+    pub property: AnimatableProperty,
+    pub component: InspectorNumericComponent,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InspectorMultiNumericEdit {
+    target: InspectorMultiNumericTarget,
+    object_ids: Vec<ObjectId>,
+    buffer: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct InspectorMultiNumericCommit {
+    target: InspectorMultiNumericTarget,
+    object_ids: Vec<ObjectId>,
+    value: f32,
+}
+
 #[derive(Debug)]
 pub struct EditorSession {
     pub preview_quality: PreviewQuality,
@@ -265,6 +285,8 @@ pub struct EditorSession {
     pending_focused_keyframe_action: bool,
     inspector_numeric_edit: Option<InspectorNumericEdit>,
     pending_inspector_numeric_commit: Option<InspectorNumericCommit>,
+    inspector_multi_numeric_edit: Option<InspectorMultiNumericEdit>,
+    pending_inspector_multi_numeric_commit: Option<InspectorMultiNumericCommit>,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
     pending_keyframe_interpolation: Option<Interpolation>,
@@ -295,6 +317,8 @@ impl Default for EditorSession {
             pending_focused_keyframe_action: false,
             inspector_numeric_edit: None,
             pending_inspector_numeric_commit: None,
+            inspector_multi_numeric_edit: None,
+            pending_inspector_multi_numeric_commit: None,
             keyframe_drag: None,
             pending_keyframe_move: None,
             pending_keyframe_interpolation: None,
@@ -1609,6 +1633,194 @@ impl EditorSession {
         };
 
         self.playhead = resolved_time;
+        Ok(changed)
+    }
+
+    pub fn begin_inspector_multi_numeric_edit(
+        &mut self,
+        target: InspectorMultiNumericTarget,
+        mut object_ids: Vec<ObjectId>,
+        buffer: String,
+    ) -> bool {
+        object_ids.sort_by_key(|object_id| object_id.get());
+        object_ids.dedup();
+        if object_ids.len() < 2 {
+            return false;
+        }
+
+        self.inspector_multi_numeric_edit = Some(InspectorMultiNumericEdit {
+            target,
+            object_ids,
+            buffer,
+        });
+        self.pending_inspector_multi_numeric_commit = None;
+        true
+    }
+
+    #[must_use]
+    pub fn inspector_multi_numeric_edit_buffer(
+        &self,
+        target: InspectorMultiNumericTarget,
+    ) -> Option<&str> {
+        self.inspector_multi_numeric_edit
+            .as_ref()
+            .filter(|edit| edit.target == target)
+            .map(|edit| edit.buffer.as_str())
+    }
+
+    pub fn update_inspector_multi_numeric_edit_buffer(
+        &mut self,
+        target: InspectorMultiNumericTarget,
+        buffer: String,
+    ) -> bool {
+        let Some(edit) = self.inspector_multi_numeric_edit.as_mut() else {
+            return false;
+        };
+        if edit.target != target || edit.buffer == buffer {
+            return false;
+        }
+
+        edit.buffer = buffer;
+        true
+    }
+
+    pub fn commit_inspector_multi_numeric_edit(
+        &mut self,
+        target: InspectorMultiNumericTarget,
+    ) -> bool {
+        let Some(edit) = self.inspector_multi_numeric_edit.as_ref() else {
+            return false;
+        };
+        if edit.target != target {
+            return false;
+        }
+
+        let Ok(value) = edit.buffer.trim().parse::<f32>() else {
+            return false;
+        };
+        if !value.is_finite() {
+            return false;
+        }
+
+        self.pending_inspector_multi_numeric_commit = Some(InspectorMultiNumericCommit {
+            target,
+            object_ids: edit.object_ids.clone(),
+            value,
+        });
+        self.inspector_multi_numeric_edit = None;
+        true
+    }
+
+    pub fn cancel_inspector_multi_numeric_edit(
+        &mut self,
+        target: InspectorMultiNumericTarget,
+    ) -> bool {
+        let Some(edit) = self.inspector_multi_numeric_edit.as_ref() else {
+            return false;
+        };
+        if edit.target != target {
+            return false;
+        }
+
+        self.inspector_multi_numeric_edit = None;
+        true
+    }
+
+    pub fn commit_pending_inspector_multi_property_edit(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(commit) = self.pending_inspector_multi_numeric_commit.take() else {
+            return Ok(false);
+        };
+
+        let project_value = match commit.target.property {
+            AnimatableProperty::Scale
+            | AnimatableProperty::Anchor
+            | AnimatableProperty::Opacity => commit.value / 100.0,
+            _ => commit.value,
+        };
+        if !project_value.is_finite() {
+            return Ok(false);
+        }
+
+        let has_animated = commit.object_ids.iter().try_fold(false, |animated, object_id| {
+            Ok::<_, EditError>(
+                animated
+                    || property_keyframe_count(
+                        editor.project(),
+                        *object_id,
+                        commit.target.property,
+                    )? > 0,
+            )
+        })?;
+
+        let (resolved_tick, resolved_time) = if has_animated {
+            let project = editor.project();
+            let Ok(continuous_tick) = project.tempo_map.continuous_tick_position(self.playhead)
+            else {
+                return Ok(false);
+            };
+            let Ok(tick) = snap_tick_position_to_grid(continuous_tick, self.authoring_division)
+            else {
+                return Ok(false);
+            };
+            let Ok(project_time) = project.tempo_map.project_time_for_tick(tick) else {
+                return Ok(false);
+            };
+            (tick, Some(project_time))
+        } else {
+            (MusicalTick::new(0), None)
+        };
+
+        let mut values = Vec::with_capacity(commit.object_ids.len());
+        for object_id in &commit.object_ids {
+            let before = if property_keyframe_count(
+                editor.project(),
+                *object_id,
+                commit.target.property,
+            )? == 0
+            {
+                property_base_value(editor.project(), *object_id, commit.target.property)?
+            } else {
+                evaluate_property_at_tick(
+                    editor.project(),
+                    *object_id,
+                    commit.target.property,
+                    resolved_tick.get() as f64,
+                )?
+            };
+
+            let after = match (before, commit.target.component) {
+                (PropertyValue::Scalar(_), InspectorNumericComponent::Scalar) => {
+                    PropertyValue::Scalar(project_value)
+                }
+                (PropertyValue::Vec2(value), InspectorNumericComponent::X) => {
+                    PropertyValue::Vec2(
+                        Vec2::new(project_value, value.y())
+                            .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+                    )
+                }
+                (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => {
+                    PropertyValue::Vec2(
+                        Vec2::new(value.x(), project_value)
+                            .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+                    )
+                }
+                _ => {
+                    return Err(EditError::HistoryInvariant(
+                        "inspector multi numeric component does not match property value",
+                    ));
+                }
+            };
+            values.push((*object_id, after));
+        }
+
+        let changed =
+            editor.set_property_values_at_tick(commit.target.property, resolved_tick, values)?;
+        if let Some(resolved_time) = resolved_time {
+            self.playhead = resolved_time;
+        }
         Ok(changed)
     }
 
