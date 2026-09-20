@@ -163,11 +163,7 @@ pub fn draw_editor_shell(
                                     let mut visible = object.visible;
                                     if ui
                                         .toggle_value(&mut visible, "V")
-                                        .on_hover_text(if visible {
-                                            "Visible"
-                                        } else {
-                                            "Hidden"
-                                        })
+                                        .on_hover_text(if visible { "Visible" } else { "Hidden" })
                                         .changed()
                                     {
                                         session.queue_object_visibility(object.id, visible);
@@ -176,11 +172,7 @@ pub fn draw_editor_shell(
                                     let mut locked = object.locked;
                                     if ui
                                         .toggle_value(&mut locked, "L")
-                                        .on_hover_text(if locked {
-                                            "Locked"
-                                        } else {
-                                            "Unlocked"
-                                        })
+                                        .on_hover_text(if locked { "Locked" } else { "Unlocked" })
                                         .changed()
                                     {
                                         session.queue_object_locked(object.id, locked);
