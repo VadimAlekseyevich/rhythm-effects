@@ -501,6 +501,7 @@ impl EditorSession {
         self.playing
     }
 
+    #[cfg(test)]
     pub const fn pause_playback(&mut self) -> bool {
         let changed = self.playing;
         self.playing = false;
