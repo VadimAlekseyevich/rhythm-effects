@@ -1,6 +1,4 @@
-use crate::editor_session::{
-    EditorSession, KeyframeDragMember, KeyframeInterpolationPreset,
-};
+use crate::editor_session::{EditorSession, KeyframeDragMember, KeyframeInterpolationPreset};
 use rhythm_core::{
     animation::Animated,
     ids::{EffectId, KeyframeId, ObjectId},
