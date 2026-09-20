@@ -215,7 +215,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-180** — Implement animated direct-transform edits using the accepted property-keyframing behavior.
 - [x] **AI-181** — Implement the Object list with visible/locked/name state.
 - [x] **AI-182** — Synchronize Object list, Viewport and Inspector selection.
-- [ ] **AI-183** — Implement standard Inspector animatable property row.
+- [x] **AI-183** — Implement standard Inspector animatable property row.
 - [ ] **AI-184** — Implement numeric edit commit on Enter/focus-loss and Escape restore.
 - [ ] **AI-185** — Implement static property edit to base_value.
 - [ ] **AI-186** — Implement animated off-key property edit to create/update nearest-grid key and move playhead.
