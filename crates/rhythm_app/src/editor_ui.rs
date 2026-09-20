@@ -1,8 +1,9 @@
 use crate::{
     editor_session::{EditorSession, PreviewQuality},
     timeline::draw_timeline,
+    viewport::pick_topmost_object,
 };
-use rhythm_core::{project::Project, time::ProjectTimeNs};
+use rhythm_core::{domain::Vec2, project::Project, time::ProjectTimeNs};
 
 fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
     const COMPOSITION_ASPECT: f32 = 1920.0 / 1080.0;
@@ -90,6 +91,13 @@ pub fn draw_editor_shell(
                     "Grid 1/{}",
                     session.authoring_division().parts_per_beat()
                 ));
+                let mut follow_playhead = session.follow_playhead();
+                if ui
+                    .toggle_value(&mut follow_playhead, "Follow Playhead")
+                    .changed()
+                {
+                    session.set_follow_playhead(follow_playhead);
+                }
                 ui.separator();
                 egui::ComboBox::from_id_salt("preview_quality")
                     .selected_text(session.preview_quality.label())
@@ -151,13 +159,35 @@ pub fn draw_editor_shell(
         ui.centered_and_justified(|ui| {
             if let Some(texture_id) = composition_texture_id {
                 let preview_size = fit_composition_preview(ui.available_size());
-                ui.add(
+                let response = ui.add(
                     egui::Image::from_texture(egui::load::SizedTexture::new(
                         texture_id,
                         egui::vec2(1920.0, 1080.0),
                     ))
-                    .fit_to_exact_size(preview_size),
+                    .fit_to_exact_size(preview_size)
+                    .sense(egui::Sense::click()),
                 );
+
+                if response.clicked()
+                    && let Some(pointer) = response.interact_pointer_pos()
+                    && response.rect.width() > 0.0
+                    && response.rect.height() > 0.0
+                {
+                    let normalized_x =
+                        ((pointer.x - response.rect.left()) / response.rect.width()).clamp(0.0, 1.0);
+                    let normalized_y =
+                        ((pointer.y - response.rect.top()) / response.rect.height()).clamp(0.0, 1.0);
+                    if let Ok(composition_point) = Vec2::new(
+                        normalized_x * project.settings.composition_width as f32,
+                        normalized_y * project.settings.composition_height as f32,
+                    ) && let Ok(scene) =
+                        rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
+                    {
+                        let picked =
+                            pick_topmost_object(project, &scene, composition_point, |_, _| None);
+                        session.replace_object_selection(picked);
+                    }
+                }
             } else {
                 ui.label("Composition preview unavailable");
             }
