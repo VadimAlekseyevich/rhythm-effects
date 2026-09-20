@@ -222,6 +222,8 @@ Duplicate placement repeats the pattern immediately after itself: the shared off
 
 Fast preset access through context/command/curve UI.
 
+Hold, Linear, Ease In, Ease Out, and Ease In-Out context actions apply to every selected keyframe that owns an outgoing segment. A selected terminal keyframe is left unchanged because it has no outgoing segment.
+
 Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
 ## 21. Playback follow
