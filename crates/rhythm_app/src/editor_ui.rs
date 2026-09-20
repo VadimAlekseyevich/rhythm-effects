@@ -1,5 +1,8 @@
 use crate::{
-    editor_session::{EditorSession, PreviewQuality, ViewportCameraAction},
+    editor_session::{
+        EditorSession, InspectorNumericComponent, InspectorNumericTarget, PreviewQuality,
+        ViewportCameraAction,
+    },
     timeline::draw_timeline,
     viewport::{
         objects_intersecting_box, pick_topmost_object, selected_objects_bounds,
@@ -114,6 +117,49 @@ fn format_inspector_property_value(
     }
 }
 
+fn draw_inspector_numeric_field(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    target: InspectorNumericTarget,
+    value: f32,
+    display_scale: f32,
+    suffix: &str,
+) {
+    let display_value = value * display_scale;
+    let editing_buffer = session
+        .inspector_numeric_edit_buffer(target)
+        .map(str::to_owned);
+
+    if let Some(mut buffer) = editing_buffer {
+        let response = ui.add_sized(
+            [66.0, 24.0],
+            egui::TextEdit::singleline(&mut buffer).horizontal_align(egui::Align::RIGHT),
+        );
+        session.update_inspector_numeric_edit_buffer(target, buffer);
+
+        let escape = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape));
+        let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if escape {
+            session.cancel_inspector_numeric_edit(target);
+            response.surrender_focus();
+        } else if enter || response.lost_focus() {
+            session.commit_inspector_numeric_edit(target);
+        }
+    } else {
+        let label = if suffix.is_empty() {
+            format!("{display_value:.1}")
+        } else {
+            format!("{display_value:.1}{suffix}")
+        };
+        if ui
+            .add_sized([66.0, 24.0], egui::Button::new(label))
+            .clicked()
+        {
+            session.begin_inspector_numeric_edit(target, value, format!("{display_value:.1}"));
+        }
+    }
+}
+
 fn draw_animatable_property_row(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
@@ -132,10 +178,6 @@ fn draw_animatable_property_row(
         return;
     };
 
-    let formatted = format_inspector_property_value(property, value);
-    let focused = session
-        .focused_property()
-        .is_some_and(|focused| focused.object_id == object_id && focused.property == property);
     let (key_label, key_tooltip) = match keyframe_state {
         InspectorKeyframeState::Static => ("K+", "Static — add first keyframe"),
         InspectorKeyframeState::AnimatedOffKey => ("K", "Animated — no key at current grid"),
@@ -144,8 +186,64 @@ fn draw_animatable_property_row(
 
     ui.horizontal(|ui| {
         ui.add_sized([72.0, 24.0], egui::Label::new(label));
-        if ui.selectable_label(focused, formatted).clicked() {
-            session.focus_property(object_id, property);
+        match value {
+            PropertyValue::Vec2(value) => {
+                let display_scale = match property {
+                    AnimatableProperty::Scale | AnimatableProperty::Anchor => 100.0,
+                    _ => 1.0,
+                };
+                let suffix = match property {
+                    AnimatableProperty::Position => " px",
+                    AnimatableProperty::Scale | AnimatableProperty::Anchor => "%",
+                    _ => "",
+                };
+                draw_inspector_numeric_field(
+                    ui,
+                    session,
+                    InspectorNumericTarget {
+                        object_id,
+                        property,
+                        component: InspectorNumericComponent::X,
+                    },
+                    value.x(),
+                    display_scale,
+                    suffix,
+                );
+                draw_inspector_numeric_field(
+                    ui,
+                    session,
+                    InspectorNumericTarget {
+                        object_id,
+                        property,
+                        component: InspectorNumericComponent::Y,
+                    },
+                    value.y(),
+                    display_scale,
+                    suffix,
+                );
+            }
+            PropertyValue::Scalar(value) => {
+                let (display_scale, suffix) = match property {
+                    AnimatableProperty::Opacity => (100.0, "%"),
+                    AnimatableProperty::Rotation => (1.0, "°"),
+                    _ => (1.0, ""),
+                };
+                draw_inspector_numeric_field(
+                    ui,
+                    session,
+                    InspectorNumericTarget {
+                        object_id,
+                        property,
+                        component: InspectorNumericComponent::Scalar,
+                    },
+                    value,
+                    display_scale,
+                    suffix,
+                );
+            }
+            PropertyValue::Color(_) => {
+                ui.label(format_inspector_property_value(property, value));
+            }
         }
         if ui.button(key_label).on_hover_text(key_tooltip).clicked() {
             session.request_focused_keyframe_action(object_id, property);
