@@ -69,10 +69,7 @@ fn bounds_intersect(a: LocalBounds2d, b: LocalBounds2d) -> bool {
     let b_max_x = b.min.x() + b.size.x();
     let b_max_y = b.min.y() + b.size.y();
 
-    a.min.x() <= b_max_x
-        && a_max_x >= b.min.x()
-        && a.min.y() <= b_max_y
-        && a_max_y >= b.min.y()
+    a.min.x() <= b_max_x && a_max_x >= b.min.x() && a.min.y() <= b_max_y && a_max_y >= b.min.y()
 }
 
 fn evaluated_local_bounds<F>(
@@ -87,7 +84,9 @@ where
         EvaluatedObjectContent::Rectangle { size, .. }
         | EvaluatedObjectContent::Ellipse { size, .. } => Some(LocalBounds2d::from_size(*size)),
         EvaluatedObjectContent::Image { .. } => match runtime_bounds(object_id, content) {
-            Some(RuntimeHitBounds::ImageIntrinsicSize(size)) => Some(LocalBounds2d::from_size(size)),
+            Some(RuntimeHitBounds::ImageIntrinsicSize(size)) => {
+                Some(LocalBounds2d::from_size(size))
+            }
             _ => None,
         },
         EvaluatedObjectContent::Text { .. } => match runtime_bounds(object_id, content) {
@@ -133,10 +132,10 @@ where
             Some(current) => {
                 let min_x = current.min.x().min(bounds.min.x());
                 let min_y = current.min.y().min(bounds.min.y());
-                let max_x = (current.min.x() + current.size.x())
-                    .max(bounds.min.x() + bounds.size.x());
-                let max_y = (current.min.y() + current.size.y())
-                    .max(bounds.min.y() + bounds.size.y());
+                let max_x =
+                    (current.min.x() + current.size.x()).max(bounds.min.x() + bounds.size.x());
+                let max_y =
+                    (current.min.y() + current.size.y()).max(bounds.min.y() + bounds.size.y());
                 LocalBounds2d::new(
                     Vec2::new(min_x, min_y).ok()?,
                     Vec2::new(max_x - min_x, max_y - min_y).ok()?,
@@ -158,8 +157,11 @@ pub fn objects_intersecting_box<F>(
 where
     F: FnMut(ObjectId, &EvaluatedObjectContent) -> Option<RuntimeHitBounds>,
 {
-    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> =
-        scene.objects.iter().map(|object| (object.id, object)).collect();
+    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> = scene
+        .objects
+        .iter()
+        .map(|object| (object.id, object))
+        .collect();
     let mut selected = Vec::new();
 
     for object in &project.composition.objects {
@@ -204,8 +206,11 @@ pub fn pick_topmost_object<F>(
 where
     F: FnMut(ObjectId, &EvaluatedObjectContent) -> Option<RuntimeHitBounds>,
 {
-    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> =
-        scene.objects.iter().map(|object| (object.id, object)).collect();
+    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> = scene
+        .objects
+        .iter()
+        .map(|object| (object.id, object))
+        .collect();
 
     for object in project.composition.objects.iter().rev() {
         if !object.visible || object.locked {
