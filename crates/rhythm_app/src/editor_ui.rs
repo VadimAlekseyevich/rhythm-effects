@@ -12,14 +12,57 @@ use crate::{
 use rhythm_core::{
     domain::Vec2,
     geometry::LocalBounds2d,
-    ids::ObjectId,
-    project::{ObjectContent, Project},
+    ids::{AssetId, ObjectId},
+    project::{AssetSource, ObjectContent, Project},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, property_base_value,
         property_keyframe_at_tick, property_keyframe_count,
     },
     time::{ProjectTimeNs, snap_tick_position_to_grid},
 };
+
+fn draw_image_inspector(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    project: &Project,
+    asset_id: AssetId,
+) {
+    ui.add_space(8.0);
+    ui.separator();
+    ui.heading("Image");
+    ui.label(format!("AssetId {}", asset_id.get()));
+
+    if let Some(asset) = project.assets.iter().find(|asset| asset.id == asset_id) {
+        match &asset.source {
+            AssetSource::File {
+                path,
+                relative_to_project,
+            } => {
+                ui.label("Source");
+                ui.monospace(path);
+                ui.small(if *relative_to_project {
+                    "Project-relative path"
+                } else {
+                    "External absolute path"
+                });
+            }
+        }
+    } else {
+        ui.label("Source: missing AssetRecord");
+    }
+
+    ui.label("Intrinsic dimensions: unavailable until image decode");
+    if session.image_relink_requested(asset_id) {
+        ui.add_enabled(false, egui::Button::new("Relink queued"))
+            .on_hover_text("Waiting for native file-dialog / asset relink backend");
+    } else if ui
+        .button("Relink")
+        .on_hover_text("Choose a replacement source while keeping this AssetId stable")
+        .clicked()
+    {
+        session.request_image_relink(asset_id);
+    }
+}
 
 fn rotation_handle_points(corners: [egui::Pos2; 4]) -> (egui::Pos2, egui::Pos2) {
     let center = egui::pos2(
@@ -799,7 +842,10 @@ pub fn draw_editor_shell(
                                     "Fill",
                                 );
                             }
-                            ObjectContent::Image(_) | ObjectContent::Text(_) => {}
+                            ObjectContent::Image(image) => {
+                                draw_image_inspector(ui, session, project, image.asset);
+                            }
+                            ObjectContent::Text(_) => {}
                         }
                     } else {
                         ui.label("Selected object is unavailable");
@@ -889,6 +935,24 @@ pub fn draw_editor_shell(
                             AnimatableProperty::RectangleCornerRadius,
                             "Corner Radius",
                         );
+                    }
+
+                    let all_images = selected.iter().all(|object_id| {
+                        project
+                            .composition
+                            .objects
+                            .iter()
+                            .find(|object| object.id == *object_id)
+                            .is_some_and(|object| matches!(&object.content, ObjectContent::Image(_)))
+                    });
+                    if all_images {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.heading("Image");
+                        ui.label("Multiple image sources selected");
+                        ui.label("Intrinsic dimensions are shown per image when runtime decode is available.");
+                        ui.add_enabled(false, egui::Button::new("Relink"))
+                            .on_hover_text("Relink is a single-asset action");
                     }
 
                     let all_ellipses = selected.iter().all(|object_id| {
