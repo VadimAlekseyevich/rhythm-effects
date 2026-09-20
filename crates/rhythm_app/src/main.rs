@@ -216,7 +216,22 @@ impl ApplicationHandler for RhythmApp {
                         _ => 0,
                     };
 
-                    let handled = if !control
+                    let handled = if direction != 0 && alt && !shift && !super_key {
+                        let result = if control {
+                            self.session
+                                .move_selected_keyframes_by_beat(&mut self.project_editor, direction)
+                        } else {
+                            self.session
+                                .move_selected_keyframes_by_grid(&mut self.project_editor, direction)
+                        };
+                        match result {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "selected keyframe keyboard move failed");
+                                false
+                            }
+                        }
+                    } else if !control
                         && !shift
                         && !alt
                         && !super_key

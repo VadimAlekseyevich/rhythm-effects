@@ -4,8 +4,8 @@ use rhythm_core::{
     editor::{EditError, ProjectEditor, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
-        AnimatableProperty, evaluate_property_at_tick, property_keyframe_at_tick,
-        property_keyframe_count,
+        AnimatableProperty, evaluate_property_at_tick, locate_property_keyframe,
+        property_keyframe_at_tick, property_keyframe_count,
     },
     time::{
         BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
@@ -293,6 +293,61 @@ impl EditorSession {
         let had_drag = self.keyframe_drag.take().is_some();
         self.pending_keyframe_move = None;
         had_drag
+    }
+
+    pub fn move_selected_keyframes_by_ticks(
+        &mut self,
+        editor: &mut ProjectEditor,
+        delta_ticks: i64,
+    ) -> Result<bool, EditError> {
+        if delta_ticks == 0 || self.selected_keyframes.is_empty() {
+            return Ok(false);
+        }
+
+        let mut moves = Vec::with_capacity(self.selected_keyframes.len());
+        for keyframe_id in self.selected_keyframe_ids() {
+            let Some(located) = locate_property_keyframe(editor.project(), keyframe_id) else {
+                return Err(EditError::KeyframeNotFound(keyframe_id));
+            };
+            let target_tick = located
+                .keyframe
+                .tick
+                .get()
+                .checked_add(delta_ticks)
+                .ok_or(EditError::HistoryInvariant("keyframe tick overflow"))?;
+            moves.push(PropertyKeyframeMove {
+                object_id: located.object_id,
+                property: located.property,
+                keyframe_id,
+                target_tick: MusicalTick::new(target_tick),
+            });
+        }
+
+        editor.move_property_keyframes(moves)
+    }
+
+    pub fn move_selected_keyframes_by_grid(
+        &mut self,
+        editor: &mut ProjectEditor,
+        direction: i64,
+    ) -> Result<bool, EditError> {
+        let delta = self
+            .authoring_division
+            .ticks_per_step()
+            .checked_mul(direction)
+            .ok_or(EditError::HistoryInvariant("grid movement overflow"))?;
+        self.move_selected_keyframes_by_ticks(editor, delta)
+    }
+
+    pub fn move_selected_keyframes_by_beat(
+        &mut self,
+        editor: &mut ProjectEditor,
+        direction: i64,
+    ) -> Result<bool, EditError> {
+        let delta = PPQ
+            .checked_mul(direction)
+            .ok_or(EditError::HistoryInvariant("beat movement overflow"))?;
+        self.move_selected_keyframes_by_ticks(editor, delta)
     }
 
     pub fn delete_selected_keyframes(
@@ -742,6 +797,60 @@ mod tests {
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(5_000_000_000),)
         );
+    }
+
+    #[test]
+    fn selected_key_keyboard_moves_use_exact_grid_and_beat_ticks() {
+        use rhythm_core::{
+            property::{AnimatableProperty, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let keyframe_id = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                rhythm_core::property::PropertyValue::Scalar(0.5),
+            )
+            .expect("insert key")
+            .expect("key id");
+
+        let mut session = EditorSession::default();
+        session.select_only_keyframe(keyframe_id);
+
+        assert_eq!(
+            session.move_selected_keyframes_by_grid(&mut editor, 1),
+            Ok(true)
+        );
+        assert!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+            )
+            .expect("property")
+            .is_some()
+        );
+
+        assert_eq!(
+            session.move_selected_keyframes_by_beat(&mut editor, 1),
+            Ok(true)
+        );
+        assert!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(1_200),
+            )
+            .expect("property")
+            .is_some()
+        );
+        assert!(session.is_keyframe_selected(keyframe_id));
     }
 
     #[test]
