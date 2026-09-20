@@ -512,11 +512,12 @@ impl EditorSession {
         effect_id: EffectId,
         target_index: usize,
     ) {
-        self.pending_effect_stack_actions.push(EffectStackAction::Move {
-            object_id,
-            effect_id,
-            target_index,
-        });
+        self.pending_effect_stack_actions
+            .push(EffectStackAction::Move {
+                object_id,
+                effect_id,
+                target_index,
+            });
     }
 
     pub fn queue_effect_remove(&mut self, object_id: ObjectId, effect_id: EffectId) {
