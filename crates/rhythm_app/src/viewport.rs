@@ -4,7 +4,7 @@ use rhythm_core::{
     domain::Vec2,
     geometry::{
         LocalBounds2d, ObjectTransform2d, hit_test_ellipse, hit_test_image_bounds,
-        hit_test_rectangle, hit_test_text_layout_bounds,
+        hit_test_rectangle, hit_test_text_layout_bounds, object_transform_point_in_bounds,
     },
     ids::ObjectId,
     project::Project,
@@ -15,6 +15,132 @@ use rhythm_engine::scene_eval::{EvaluatedObject, EvaluatedObjectContent, Evaluat
 pub enum RuntimeHitBounds {
     ImageIntrinsicSize(Vec2),
     TextLayout(LocalBounds2d),
+}
+
+fn transformed_bounds(
+    transform: ObjectTransform2d,
+    local_bounds: LocalBounds2d,
+) -> Option<LocalBounds2d> {
+    if local_bounds.size.x() < 0.0 || local_bounds.size.y() < 0.0 {
+        return None;
+    }
+
+    let min_x = local_bounds.min.x();
+    let min_y = local_bounds.min.y();
+    let max_x = min_x + local_bounds.size.x();
+    let max_y = min_y + local_bounds.size.y();
+    let corners = [
+        Vec2::new(min_x, min_y).ok()?,
+        Vec2::new(max_x, min_y).ok()?,
+        Vec2::new(max_x, max_y).ok()?,
+        Vec2::new(min_x, max_y).ok()?,
+    ];
+
+    let mut transformed = corners
+        .into_iter()
+        .map(|corner| object_transform_point_in_bounds(corner, transform, local_bounds));
+    let first = transformed.next()??;
+    let mut min_x = first.x();
+    let mut min_y = first.y();
+    let mut max_x = first.x();
+    let mut max_y = first.y();
+
+    for point in transformed {
+        let point = point?;
+        min_x = min_x.min(point.x());
+        min_y = min_y.min(point.y());
+        max_x = max_x.max(point.x());
+        max_y = max_y.max(point.y());
+    }
+
+    Some(LocalBounds2d::new(
+        Vec2::new(min_x, min_y).ok()?,
+        Vec2::new(max_x - min_x, max_y - min_y).ok()?,
+    ))
+}
+
+fn bounds_intersect(a: LocalBounds2d, b: LocalBounds2d) -> bool {
+    if a.size.x() < 0.0 || a.size.y() < 0.0 || b.size.x() < 0.0 || b.size.y() < 0.0 {
+        return false;
+    }
+
+    let a_max_x = a.min.x() + a.size.x();
+    let a_max_y = a.min.y() + a.size.y();
+    let b_max_x = b.min.x() + b.size.x();
+    let b_max_y = b.min.y() + b.size.y();
+
+    a.min.x() <= b_max_x
+        && a_max_x >= b.min.x()
+        && a.min.y() <= b_max_y
+        && a_max_y >= b.min.y()
+}
+
+fn evaluated_local_bounds<F>(
+    object_id: ObjectId,
+    content: &EvaluatedObjectContent,
+    runtime_bounds: &mut F,
+) -> Option<LocalBounds2d>
+where
+    F: FnMut(ObjectId, &EvaluatedObjectContent) -> Option<RuntimeHitBounds>,
+{
+    match content {
+        EvaluatedObjectContent::Rectangle { size, .. }
+        | EvaluatedObjectContent::Ellipse { size, .. } => Some(LocalBounds2d::from_size(*size)),
+        EvaluatedObjectContent::Image { .. } => match runtime_bounds(object_id, content) {
+            Some(RuntimeHitBounds::ImageIntrinsicSize(size)) => Some(LocalBounds2d::from_size(size)),
+            _ => None,
+        },
+        EvaluatedObjectContent::Text { .. } => match runtime_bounds(object_id, content) {
+            Some(RuntimeHitBounds::TextLayout(bounds)) => Some(bounds),
+            _ => None,
+        },
+    }
+}
+
+#[must_use]
+pub fn objects_intersecting_box<F>(
+    project: &Project,
+    scene: &EvaluatedScene,
+    selection_bounds: LocalBounds2d,
+    mut runtime_bounds: F,
+) -> Vec<ObjectId>
+where
+    F: FnMut(ObjectId, &EvaluatedObjectContent) -> Option<RuntimeHitBounds>,
+{
+    let evaluated_by_id: HashMap<ObjectId, &EvaluatedObject> =
+        scene.objects.iter().map(|object| (object.id, object)).collect();
+    let mut selected = Vec::new();
+
+    for object in &project.composition.objects {
+        if !object.visible || object.locked {
+            continue;
+        }
+
+        let Some(evaluated) = evaluated_by_id.get(&object.id).copied() else {
+            continue;
+        };
+        let Some(local_bounds) =
+            evaluated_local_bounds(evaluated.id, &evaluated.content, &mut runtime_bounds)
+        else {
+            continue;
+        };
+
+        let transform = ObjectTransform2d::new(
+            evaluated.transform.position,
+            evaluated.transform.scale,
+            evaluated.transform.rotation_degrees,
+            evaluated.transform.anchor,
+        );
+        let Some(composition_bounds) = transformed_bounds(transform, local_bounds) else {
+            continue;
+        };
+
+        if bounds_intersect(selection_bounds, composition_bounds) {
+            selected.push(evaluated.id);
+        }
+    }
+
+    selected
 }
 
 #[must_use]
@@ -74,7 +200,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::pick_topmost_object;
+    use super::{objects_intersecting_box, pick_topmost_object};
     use rhythm_core::{
         animation::Animated,
         domain::{LinearRgba, Vec2},
@@ -124,6 +250,31 @@ mod tests {
             .push(rectangle(2, "Front", true, false));
         project.next_entity_id = 3;
         project
+    }
+
+    #[test]
+    fn box_selection_returns_intersecting_visible_unlocked_objects() {
+        let mut project = project_with_overlapping_rectangles();
+        project.composition.objects[1].transform.position =
+            Animated::new_static(Vec2::new(400.0, 100.0).expect("position"));
+        project
+            .composition
+            .objects
+            .push(rectangle(3, "Locked", true, true));
+        project.next_entity_id = 4;
+        let scene = evaluate_scene(&project, ProjectTimeNs::new(0)).expect("scene");
+
+        let selected = objects_intersecting_box(
+            &project,
+            &scene,
+            rhythm_core::geometry::LocalBounds2d::new(
+                Vec2::new(140.0, 60.0).expect("box min"),
+                Vec2::new(140.0, 100.0).expect("box size"),
+            ),
+            |_, _| None,
+        );
+
+        assert_eq!(selected, vec![ObjectId::new(1).expect("object id")]);
     }
 
     #[test]
