@@ -1430,7 +1430,7 @@ impl ProjectEditor {
                     property,
                     keyframe,
                     base_before,
-                    base_after,
+                    base_after: _,
                 },
                 HistoryDirection::Undo,
             ) => {
