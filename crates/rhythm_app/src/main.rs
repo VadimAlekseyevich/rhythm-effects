@@ -242,6 +242,10 @@ impl ApplicationHandler for RhythmApp {
                                     }
                                 }
                             }
+                            EditorShortcut::TogglePlayback => {
+                                self.session.toggle_playback();
+                                true
+                            }
                         }
                     } else if control
                         && !shift
