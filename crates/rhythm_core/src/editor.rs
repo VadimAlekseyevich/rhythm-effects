@@ -6,8 +6,7 @@ use crate::{
     ids::{EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{
         Effect, EffectKind, FontStyle, FontWeight, Object, ObjectContent, Project,
-        ProjectValidationError,
-        TextAlignment, TextObject,
+        ProjectValidationError, TextAlignment, TextObject,
     },
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
