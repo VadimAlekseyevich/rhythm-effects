@@ -763,12 +763,9 @@ fn collect_drag_members(
                 continue;
             };
             let animatable_property = property.animatable_property();
-            let Ok(Some(keyframe)) = property_keyframe_by_id(
-                project,
-                *object_id,
-                animatable_property,
-                *keyframe_id,
-            ) else {
+            let Ok(Some(keyframe)) =
+                property_keyframe_by_id(project, *object_id, animatable_property, *keyframe_id)
+            else {
                 continue;
             };
 

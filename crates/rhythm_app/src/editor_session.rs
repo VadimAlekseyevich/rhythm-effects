@@ -233,9 +233,11 @@ impl EditorSession {
         }
 
         let delta = target_tick.get() - drag.anchor_original_tick.get();
-        if drag.members.iter().all(|member| {
-            member.original_tick.get().checked_add(delta).is_some()
-        }) {
+        if drag
+            .members
+            .iter()
+            .all(|member| member.original_tick.get().checked_add(delta).is_some())
+        {
             drag.anchor_target_tick = target_tick;
         }
     }

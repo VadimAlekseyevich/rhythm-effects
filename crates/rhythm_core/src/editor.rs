@@ -1081,9 +1081,7 @@ impl ProjectEditor {
                                 keyframe,
                             );
                         }
-                        return Err(EditError::HistoryInvariant(
-                            "move source payload mismatch",
-                        ));
+                        return Err(EditError::HistoryInvariant("move source payload mismatch"));
                     }
                     removed_sources.push((movement.object_id, movement.property, removed));
                 }
@@ -1373,11 +1371,7 @@ impl ProjectEditor {
                     set_property_base_value(&mut self.project, *object_id, *property, *base_after)?;
                 }
             }
-            (
-                HistoryPayload::PropertyKeyframesMoved { records },
-                direction,
-            ) => {
-                match direction {
+            (HistoryPayload::PropertyKeyframesMoved { records }, direction) => match direction {
                     HistoryDirection::Undo => {
                         for record in records.iter().rev() {
                             remove_property_keyframe_by_id(
@@ -1435,8 +1429,8 @@ impl ProjectEditor {
                             )?;
                         }
                     }
-                }
-            }
+
+            },
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
             }
