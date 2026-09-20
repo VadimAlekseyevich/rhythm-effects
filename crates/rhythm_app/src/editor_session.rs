@@ -593,6 +593,17 @@ impl EditorSession {
         true
     }
 
+    #[must_use]
+    pub fn effect_presets_matching_query(&self) -> Vec<EffectPreset> {
+        let query = self.effect_picker_query.trim().to_ascii_lowercase();
+        EffectPreset::ALL
+            .into_iter()
+            .filter(|preset| {
+                query.is_empty() || preset.label().to_ascii_lowercase().contains(&query)
+            })
+            .collect()
+    }
+
     pub fn choose_effect_preset(&mut self, object_id: ObjectId, preset: EffectPreset) -> bool {
         if self.effect_picker_object != Some(object_id) {
             return false;
@@ -3815,6 +3826,37 @@ mod tests {
             .expect("property")
             .is_some()
         );
+    }
+
+    #[test]
+    fn effect_picker_filters_presets_and_adds_selected_effect() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.toggle_effect_picker(object_id));
+        assert!(session.effect_picker_open_for(object_id));
+        assert!(session.update_effect_picker_query("gl".to_owned()));
+        assert_eq!(
+            session.effect_presets_matching_query(),
+            vec![super::EffectPreset::Glow]
+        );
+
+        assert!(session.choose_effect_preset(object_id, super::EffectPreset::Glow));
+        assert!(!session.effect_picker_open_for(object_id));
+        assert_eq!(
+            session.commit_pending_effect_stack_actions(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(editor.project().composition.objects[0].effects.len(), 1);
+        assert!(matches!(
+            editor.project().composition.objects[0].effects[0].kind,
+            rhythm_core::project::EffectKind::Glow(_)
+        ));
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert!(editor.project().composition.objects[0].effects.is_empty());
     }
 
     #[test]
