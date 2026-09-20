@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use rhythm_core::{
     animation::{BezierEasing, Interpolation},
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
+    geometry::LocalBounds2d,
     ids::{KeyframeId, ObjectId},
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
@@ -98,6 +99,15 @@ struct ViewportBoxSelection {
     current: [f32; 2],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewportCameraAction {
+    FitComposition,
+    FrameSelection,
+}
+
+const MIN_VIEWPORT_ZOOM: f32 = 0.1;
+const MAX_VIEWPORT_ZOOM: f32 = 8.0;
+const FRAME_SELECTION_PADDING_POINTS: f32 = 32.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyframeDragMember {
@@ -155,6 +165,7 @@ pub struct EditorSession {
     follow_playhead: bool,
     viewport_pan_points: [f32; 2],
     viewport_zoom: f32,
+    pending_viewport_camera_action: Option<ViewportCameraAction>,
     selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
@@ -176,6 +187,7 @@ impl Default for EditorSession {
             follow_playhead: false,
             viewport_pan_points: [0.0, 0.0],
             viewport_zoom: 1.0,
+            pending_viewport_camera_action: None,
             selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
@@ -241,9 +253,6 @@ impl EditorSession {
         zoom_factor: f32,
         anchor_from_viewport_center: [f32; 2],
     ) -> bool {
-        const MIN_VIEWPORT_ZOOM: f32 = 0.1;
-        const MAX_VIEWPORT_ZOOM: f32 = 8.0;
-
         if !zoom_factor.is_finite()
             || zoom_factor <= 0.0
             || !anchor_from_viewport_center[0].is_finite()
@@ -267,6 +276,96 @@ impl EditorSession {
         self.viewport_pan_points[1] += offset_from_composition_center[1] * (1.0 - ratio);
         self.viewport_zoom = new_zoom;
         true
+    }
+
+    pub const fn request_viewport_camera_action(&mut self, action: ViewportCameraAction) {
+        self.pending_viewport_camera_action = Some(action);
+    }
+
+    pub const fn take_viewport_camera_action(&mut self) -> Option<ViewportCameraAction> {
+        self.pending_viewport_camera_action.take()
+    }
+
+    pub fn fit_viewport_composition(&mut self) -> bool {
+        let changed = self.viewport_pan_points != [0.0, 0.0]
+            || (self.viewport_zoom - 1.0).abs() >= f32::EPSILON;
+        self.viewport_pan_points = [0.0, 0.0];
+        self.viewport_zoom = 1.0;
+        changed
+    }
+
+    pub fn frame_viewport_bounds(
+        &mut self,
+        bounds: LocalBounds2d,
+        composition_size: [f32; 2],
+        viewport_size_points: [f32; 2],
+        fitted_preview_size_points: [f32; 2],
+    ) -> bool {
+        let [composition_width, composition_height] = composition_size;
+        let [viewport_width, viewport_height] = viewport_size_points;
+        let [preview_width, preview_height] = fitted_preview_size_points;
+
+        if !composition_width.is_finite()
+            || !composition_height.is_finite()
+            || !viewport_width.is_finite()
+            || !viewport_height.is_finite()
+            || !preview_width.is_finite()
+            || !preview_height.is_finite()
+            || composition_width <= 0.0
+            || composition_height <= 0.0
+            || viewport_width <= 0.0
+            || viewport_height <= 0.0
+            || preview_width <= 0.0
+            || preview_height <= 0.0
+            || bounds.size.x() < 0.0
+            || bounds.size.y() < 0.0
+        {
+            return false;
+        }
+
+        let available_width =
+            (viewport_width - FRAME_SELECTION_PADDING_POINTS * 2.0).max(1.0);
+        let available_height =
+            (viewport_height - FRAME_SELECTION_PADDING_POINTS * 2.0).max(1.0);
+        let bounds_width_points = bounds.size.x() * preview_width / composition_width;
+        let bounds_height_points = bounds.size.y() * preview_height / composition_height;
+
+        let zoom_x = if bounds_width_points <= f32::EPSILON {
+            MAX_VIEWPORT_ZOOM
+        } else {
+            available_width / bounds_width_points
+        };
+        let zoom_y = if bounds_height_points <= f32::EPSILON {
+            MAX_VIEWPORT_ZOOM
+        } else {
+            available_height / bounds_height_points
+        };
+        let new_zoom = zoom_x
+            .min(zoom_y)
+            .clamp(MIN_VIEWPORT_ZOOM, MAX_VIEWPORT_ZOOM);
+
+        let selection_center_x = bounds.min.x() + bounds.size.x() * 0.5;
+        let selection_center_y = bounds.min.y() + bounds.size.y() * 0.5;
+        let composition_center_x = composition_width * 0.5;
+        let composition_center_y = composition_height * 0.5;
+        let new_pan = [
+            -(selection_center_x - composition_center_x)
+                * (preview_width / composition_width)
+                * new_zoom,
+            -(selection_center_y - composition_center_y)
+                * (preview_height / composition_height)
+                * new_zoom,
+        ];
+        if !new_pan[0].is_finite() || !new_pan[1].is_finite() || !new_zoom.is_finite() {
+            return false;
+        }
+
+        let changed = (self.viewport_zoom - new_zoom).abs() >= f32::EPSILON
+            || (self.viewport_pan_points[0] - new_pan[0]).abs() >= f32::EPSILON
+            || (self.viewport_pan_points[1] - new_pan[1]).abs() >= f32::EPSILON;
+        self.viewport_zoom = new_zoom;
+        self.viewport_pan_points = new_pan;
+        changed
     }
 
     #[allow(dead_code)]
@@ -1169,7 +1268,10 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSession, KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality};
+    use super::{
+        EditorSession, KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality,
+        ViewportCameraAction,
+    };
     use rhythm_core::{
         ids::{KeyframeId, ObjectId},
         property::AnimatableProperty,
@@ -1269,6 +1371,69 @@ mod tests {
         assert!(session.replace_object_selection(None));
         assert!(session.selected_object_ids().is_empty());
         assert!(!session.replace_object_selection(None));
+    }
+
+    #[test]
+    fn viewport_camera_action_requests_are_consumed_once() {
+        let mut session = EditorSession::default();
+
+        session.request_viewport_camera_action(ViewportCameraAction::FrameSelection);
+        assert_eq!(
+            session.take_viewport_camera_action(),
+            Some(ViewportCameraAction::FrameSelection)
+        );
+        assert_eq!(session.take_viewport_camera_action(), None);
+    }
+
+    #[test]
+    fn fit_composition_resets_manual_viewport_camera() {
+        let mut session = EditorSession::default();
+        assert!(session.pan_viewport_points([30.0, -20.0]));
+        assert!(session.zoom_viewport_around_anchor(2.0, [0.0, 0.0]));
+
+        assert!(session.fit_viewport_composition());
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert!(!session.fit_viewport_composition());
+    }
+
+    #[test]
+    fn frame_viewport_bounds_centers_selection_with_padding() {
+        use rhythm_core::{domain::Vec2, geometry::LocalBounds2d};
+
+        let mut session = EditorSession::default();
+        let bounds = LocalBounds2d::new(
+            Vec2::new(1_200.0, 600.0).expect("bounds min"),
+            Vec2::new(400.0, 300.0).expect("bounds size"),
+        );
+        let composition_size = [1_920.0, 1_080.0];
+        let viewport_size = [1_000.0, 500.0];
+        let fitted_preview_size = [888.8889, 500.0];
+
+        assert!(session.frame_viewport_bounds(
+            bounds,
+            composition_size,
+            viewport_size,
+            fitted_preview_size,
+        ));
+
+        let zoom = session.viewport_zoom();
+        let pan = session.viewport_pan_points();
+        let scale_x = fitted_preview_size[0] / composition_size[0] * zoom;
+        let scale_y = fitted_preview_size[1] / composition_size[1] * zoom;
+        let selection_center_x = bounds.min.x() + bounds.size.x() * 0.5;
+        let selection_center_y = bounds.min.y() + bounds.size.y() * 0.5;
+        let composition_center_x = composition_size[0] * 0.5;
+        let composition_center_y = composition_size[1] * 0.5;
+
+        assert!(
+            (pan[0] + (selection_center_x - composition_center_x) * scale_x).abs() < 0.001
+        );
+        assert!(
+            (pan[1] + (selection_center_y - composition_center_y) * scale_y).abs() < 0.001
+        );
+        assert!(bounds.size.x() * scale_x <= viewport_size[0] - 64.0 + 0.001);
+        assert!(bounds.size.y() * scale_y <= viewport_size[1] - 64.0 + 0.001);
     }
 
     #[test]
