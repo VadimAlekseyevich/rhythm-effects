@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use crate::{
     animation::{AnimationInvariantError, Interpolation, Keyframe},
     domain::Vec2,
-    ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
+    ids::{EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{
-        FontStyle, FontWeight, Object, ObjectContent, Project, ProjectValidationError,
+        Effect, FontStyle, FontWeight, Object, ObjectContent, Project, ProjectValidationError,
         TextAlignment, TextObject,
     },
     property::{
@@ -28,6 +28,7 @@ pub enum EditError {
     ObjectNotFound(ObjectId),
     DuplicateObjectId(ObjectId),
     KeyframeNotFound(KeyframeId),
+    EffectNotFound(EffectId),
     InvalidValue(&'static str),
     HistoryInvariant(&'static str),
 }
@@ -158,6 +159,20 @@ pub enum EditCommand {
         object_id: ObjectId,
         alignment: TextAlignment,
     },
+    SetEffectEnabled {
+        object_id: ObjectId,
+        effect_id: EffectId,
+        enabled: bool,
+    },
+    MoveEffect {
+        object_id: ObjectId,
+        effect_id: EffectId,
+        target_index: usize,
+    },
+    RemoveEffect {
+        object_id: ObjectId,
+        effect_id: EffectId,
+    },
     SetObjectVisible {
         object_id: ObjectId,
         visible: bool,
@@ -224,6 +239,9 @@ impl EditCommand {
             Self::SetTextFontStyle { .. } => "SetTextFontStyle",
             Self::SetTextFontSize { .. } => "SetTextFontSize",
             Self::SetTextAlignment { .. } => "SetTextAlignment",
+            Self::SetEffectEnabled { .. } => "SetEffectEnabled",
+            Self::MoveEffect { .. } => "MoveEffect",
+            Self::RemoveEffect { .. } => "RemoveEffect",
             Self::SetObjectVisible { .. } => "SetObjectVisible",
             Self::SetObjectLocked { .. } => "SetObjectLocked",
             Self::SetPropertyBase { .. } => "SetPropertyBase",
@@ -285,6 +303,23 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         before: TextAlignment,
         after: TextAlignment,
+    },
+    EffectEnabledChanged {
+        object_id: ObjectId,
+        effect_id: EffectId,
+        before: bool,
+        after: bool,
+    },
+    EffectMoved {
+        object_id: ObjectId,
+        effect_id: EffectId,
+        before_index: usize,
+        after_index: usize,
+    },
+    EffectRemoved {
+        object_id: ObjectId,
+        index: usize,
+        effect: Effect,
     },
     ObjectVisibilityChanged {
         object_id: ObjectId,
@@ -1771,6 +1806,80 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetEffectEnabled {
+                object_id,
+                effect_id,
+                enabled,
+            } => {
+                let (object_index, effect_index) = self.effect_index(object_id, effect_id)?;
+                let before = self.project.composition.objects[object_index].effects[effect_index].enabled;
+                if before == enabled {
+                    return Ok(None);
+                }
+
+                self.project.composition.objects[object_index].effects[effect_index].enabled = enabled;
+                Ok(Some(PendingHistoryEntry::new(
+                    if enabled { "Enable Effect" } else { "Disable Effect" },
+                    HistoryPayload::EffectEnabledChanged {
+                        object_id,
+                        effect_id,
+                        before,
+                        after: enabled,
+                    },
+                )))
+            }
+            EditCommand::MoveEffect {
+                object_id,
+                effect_id,
+                target_index,
+            } => {
+                let (object_index, before_index) = self.effect_index(object_id, effect_id)?;
+                let effect_count = self.project.composition.objects[object_index].effects.len();
+                if target_index >= effect_count {
+                    return Err(EditError::InvalidValue("effect target index"));
+                }
+                if before_index == target_index {
+                    return Ok(None);
+                }
+
+                let effect = self.project.composition.objects[object_index]
+                    .effects
+                    .remove(before_index);
+                self.project.composition.objects[object_index]
+                    .effects
+                    .insert(target_index, effect);
+                Ok(Some(PendingHistoryEntry::new(
+                    "Reorder Effect",
+                    HistoryPayload::EffectMoved {
+                        object_id,
+                        effect_id,
+                        before_index,
+                        after_index: target_index,
+                    },
+                )))
+            }
+            EditCommand::RemoveEffect {
+                object_id,
+                effect_id,
+            } => {
+                let (object_index, index) = self.effect_index(object_id, effect_id)?;
+                let effect = self.project.composition.objects[object_index].effects.remove(index);
+                if let Err(error) = self.project.validate() {
+                    self.project.composition.objects[object_index]
+                        .effects
+                        .insert(index, effect);
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Remove Effect",
+                    HistoryPayload::EffectRemoved {
+                        object_id,
+                        index,
+                        effect,
+                    },
+                )))
+            }
             EditCommand::SetObjectVisible { object_id, visible } => {
                 let index = self.object_index(object_id)?;
                 let before = self.project.composition.objects[index].visible;
@@ -2615,6 +2724,81 @@ impl ProjectEditor {
                 self.text_object_mut(*object_id)?.alignment = *direction.pick(before, after);
             }
             (
+                HistoryPayload::EffectEnabledChanged {
+                    object_id,
+                    effect_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let (object_index, effect_index) = self.effect_index(*object_id, *effect_id)?;
+                self.project.composition.objects[object_index].effects[effect_index].enabled =
+                    *direction.pick(before, after);
+            }
+            (
+                HistoryPayload::EffectMoved {
+                    object_id,
+                    effect_id,
+                    before_index,
+                    after_index,
+                },
+                direction,
+            ) => {
+                let (expected_index, target_index) = match direction {
+                    HistoryDirection::Undo => (*after_index, *before_index),
+                    HistoryDirection::Redo => (*before_index, *after_index),
+                };
+                let (object_index, current_index) = self.effect_index(*object_id, *effect_id)?;
+                if current_index != expected_index {
+                    return Err(EditError::HistoryInvariant(
+                        "effect reorder history index mismatch",
+                    ));
+                }
+                let effect = self.project.composition.objects[object_index]
+                    .effects
+                    .remove(current_index);
+                self.project.composition.objects[object_index]
+                    .effects
+                    .insert(target_index, effect);
+            }
+            (
+                HistoryPayload::EffectRemoved {
+                    object_id,
+                    index,
+                    effect,
+                },
+                HistoryDirection::Undo,
+            ) => {
+                let object_index = self.object_index(*object_id)?;
+                if *index > self.project.composition.objects[object_index].effects.len() {
+                    return Err(EditError::HistoryInvariant(
+                        "effect restore index invalid",
+                    ));
+                }
+                self.project.composition.objects[object_index]
+                    .effects
+                    .insert(*index, effect.clone());
+            }
+            (
+                HistoryPayload::EffectRemoved {
+                    object_id,
+                    index,
+                    effect,
+                },
+                HistoryDirection::Redo,
+            ) => {
+                let (object_index, current_index) = self.effect_index(*object_id, effect.id)?;
+                if current_index != *index {
+                    return Err(EditError::HistoryInvariant(
+                        "effect remove history index mismatch",
+                    ));
+                }
+                self.project.composition.objects[object_index]
+                    .effects
+                    .remove(current_index);
+            }
+            (
                 HistoryPayload::ObjectVisibilityChanged {
                     object_id,
                     before,
@@ -3141,6 +3325,20 @@ impl ProjectEditor {
         }
 
         self.project.validate().map_err(EditError::InvalidProject)
+    }
+
+    fn effect_index(
+        &self,
+        object_id: ObjectId,
+        effect_id: EffectId,
+    ) -> Result<(usize, usize), EditError> {
+        let object_index = self.object_index(object_id)?;
+        let effect_index = self.project.composition.objects[object_index]
+            .effects
+            .iter()
+            .position(|effect| effect.id == effect_id)
+            .ok_or(EditError::EffectNotFound(effect_id))?;
+        Ok((object_index, effect_index))
     }
 
     fn text_object(&self, object_id: ObjectId) -> Result<&TextObject, EditError> {
