@@ -233,6 +233,7 @@ Follow Playhead is available but OFF by default.
 When enabled:
 
 - during playback, scroll only when playhead approaches a viewport edge;
+- edge-follow moves the playhead away from that edge rather than constantly recentring it;
 - user manual pan disables follow until explicitly re-enabled.
 
 Avoid constant recentring.
