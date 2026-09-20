@@ -3388,10 +3388,11 @@ mod tests {
     use crate::{
         animation::{Animated, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
-        ids::{KeyframeId, ObjectId},
+        ids::{EffectId, KeyframeId, ObjectId},
         project::{
-            FontReference, FontStyle, FontWeight, Object, ObjectContent, Project, ProjectSettings,
-            RectangleObject, TextAlignment, TextObject, TransformAnimation,
+            BlurEffect, Effect, EffectKind, FontReference, FontStyle, FontWeight, Object,
+            ObjectContent, Project, ProjectSettings, RectangleObject, TextAlignment, TextObject,
+            TransformAnimation,
         },
         property::{AnimatableProperty, PropertyValue, property_base_value},
         time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
@@ -3428,6 +3429,79 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn effect_stack_enable_reorder_remove_are_undoable() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let first_effect_id = EffectId::new(2).expect("effect id");
+        let second_effect_id = EffectId::new(3).expect("effect id");
+        let mut project = editor_with_object().into_project();
+        project.composition.objects[0].effects = vec![
+            Effect {
+                id: first_effect_id,
+                enabled: true,
+                kind: EffectKind::Blur(BlurEffect {
+                    radius_px: Animated::new_static(8.0),
+                }),
+            },
+            Effect {
+                id: second_effect_id,
+                enabled: true,
+                kind: EffectKind::Blur(BlurEffect {
+                    radius_px: Animated::new_static(16.0),
+                }),
+            },
+        ];
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+
+        assert_eq!(
+            editor.execute(EditCommand::SetEffectEnabled {
+                object_id,
+                effect_id: first_effect_id,
+                enabled: false,
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            editor.execute(EditCommand::MoveEffect {
+                object_id,
+                effect_id: second_effect_id,
+                target_index: 0,
+            }),
+            Ok(true)
+        );
+        assert_eq!(
+            editor.execute(EditCommand::RemoveEffect {
+                object_id,
+                effect_id: first_effect_id,
+            }),
+            Ok(true)
+        );
+
+        let effects = &editor.project().composition.objects[0].effects;
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id, second_effect_id);
+        assert_eq!(editor.history_len(), 3);
+
+        assert_eq!(editor.undo(), Ok(true));
+        let effects = &editor.project().composition.objects[0].effects;
+        assert_eq!(
+            effects.iter().map(|effect| effect.id).collect::<Vec<_>>(),
+            vec![second_effect_id, first_effect_id]
+        );
+        assert!(!effects[1].enabled);
+
+        assert_eq!(editor.undo(), Ok(true));
+        let effects = &editor.project().composition.objects[0].effects;
+        assert_eq!(
+            effects.iter().map(|effect| effect.id).collect::<Vec<_>>(),
+            vec![first_effect_id, second_effect_id]
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert!(editor.project().composition.objects[0].effects[0].enabled);
     }
 
     #[test]
