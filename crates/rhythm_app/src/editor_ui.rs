@@ -1,7 +1,7 @@
 use crate::{
-    editor_session::{EditorSession, PreviewQuality},
+    editor_session::{EditorSession, PreviewQuality, ViewportCameraAction},
     timeline::draw_timeline,
-    viewport::{objects_intersecting_box, pick_topmost_object},
+    viewport::{objects_intersecting_box, pick_topmost_object, selected_objects_bounds},
 };
 use rhythm_core::{
     domain::Vec2,
@@ -10,18 +10,21 @@ use rhythm_core::{
     time::ProjectTimeNs,
 };
 
-fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
-    const COMPOSITION_ASPECT: f32 = 1920.0 / 1080.0;
-
-    if available.x <= 0.0 || available.y <= 0.0 {
+fn fit_composition_preview(available: egui::Vec2, composition: egui::Vec2) -> egui::Vec2 {
+    if available.x <= 0.0
+        || available.y <= 0.0
+        || composition.x <= 0.0
+        || composition.y <= 0.0
+    {
         return egui::Vec2::ZERO;
     }
 
+    let composition_aspect = composition.x / composition.y;
     let available_aspect = available.x / available.y;
-    if available_aspect > COMPOSITION_ASPECT {
-        egui::vec2(available.y * COMPOSITION_ASPECT, available.y)
+    if available_aspect > composition_aspect {
+        egui::vec2(available.y * composition_aspect, available.y)
     } else {
-        egui::vec2(available.x, available.x / COMPOSITION_ASPECT)
+        egui::vec2(available.x, available.x / composition_aspect)
     }
 }
 
@@ -159,10 +162,57 @@ pub fn draw_editor_shell(
         });
 
     egui::CentralPanel::default().show(ui, |ui| {
-        ui.heading("Viewport");
+        ui.horizontal(|ui| {
+            ui.heading("Viewport");
+            ui.separator();
+            if ui
+                .button("Fit Composition")
+                .on_hover_text("Shift+F")
+                .clicked()
+            {
+                session.request_viewport_camera_action(ViewportCameraAction::FitComposition);
+            }
+            if ui
+                .button("Frame Selection")
+                .on_hover_text("F")
+                .clicked()
+            {
+                session.request_viewport_camera_action(ViewportCameraAction::FrameSelection);
+            }
+        });
         ui.separator();
 
         let viewport_rect = ui.available_rect_before_wrap();
+        let composition_size = egui::vec2(
+            project.settings.composition_width as f32,
+            project.settings.composition_height as f32,
+        );
+        let fitted_preview_size = fit_composition_preview(viewport_rect.size(), composition_size);
+
+        if let Some(action) = session.take_viewport_camera_action() {
+            match action {
+                ViewportCameraAction::FitComposition => {
+                    session.fit_viewport_composition();
+                }
+                ViewportCameraAction::FrameSelection => {
+                    if let Ok(scene) =
+                        rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
+                    {
+                        let selected = session.selected_object_ids();
+                        if let Some(bounds) =
+                            selected_objects_bounds(&scene, &selected, |_, _| None)
+                        {
+                            session.frame_viewport_bounds(
+                                bounds,
+                                [composition_size.x, composition_size.y],
+                                [viewport_rect.width(), viewport_rect.height()],
+                                [fitted_preview_size.x, fitted_preview_size.y],
+                            );
+                        }
+                    }
+                }
+            }
+        }
         let pan_response = ui.interact(
             viewport_rect,
             ui.id().with("viewport_middle_pan"),
@@ -188,8 +238,7 @@ pub fn draw_editor_shell(
         }
 
         if let Some(texture_id) = composition_texture_id {
-            let preview_size =
-                fit_composition_preview(viewport_rect.size()) * session.viewport_zoom();
+            let preview_size = fitted_preview_size * session.viewport_zoom();
             let pan = session.viewport_pan_points();
             let preview_rect = egui::Rect::from_center_size(
                 viewport_rect.center() + egui::vec2(pan[0], pan[1]),
@@ -336,8 +385,9 @@ mod tests {
 
     #[test]
     fn preview_fit_preserves_composition_aspect() {
-        let wide = fit_composition_preview(egui::vec2(1000.0, 400.0));
-        let tall = fit_composition_preview(egui::vec2(400.0, 1000.0));
+        let composition = egui::vec2(1920.0, 1080.0);
+        let wide = fit_composition_preview(egui::vec2(1000.0, 400.0), composition);
+        let tall = fit_composition_preview(egui::vec2(400.0, 1000.0), composition);
 
         assert!((wide.x / wide.y - 16.0 / 9.0).abs() < 0.0001);
         assert!((tall.x / tall.y - 16.0 / 9.0).abs() < 0.0001);
