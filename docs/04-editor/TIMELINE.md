@@ -216,9 +216,13 @@ Ctrl+D duplicates active keyframe selection and leaves the duplicate selected fo
 
 Relative pattern timing remains unchanged.
 
+Duplicate placement repeats the pattern immediately after itself: the shared offset is the selected tick span plus one current authoring-grid step. This keeps source keys intact, avoids self-collision with the selected pattern, and makes a single-key duplicate land one current grid step to the right.
+
 ## 20. Easing
 
 Fast preset access through context/command/curve UI.
+
+Hold, Linear, Ease In, Ease Out, and Ease In-Out context actions apply to every selected keyframe that owns an outgoing segment. A selected terminal keyframe is left unchanged because it has no outgoing segment.
 
 Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
@@ -229,6 +233,7 @@ Follow Playhead is available but OFF by default.
 When enabled:
 
 - during playback, scroll only when playhead approaches a viewport edge;
+- edge-follow moves the playhead away from that edge rather than constantly recentring it;
 - user manual pan disables follow until explicitly re-enabled.
 
 Avoid constant recentring.
