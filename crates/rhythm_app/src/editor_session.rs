@@ -121,6 +121,7 @@ struct ViewportPositionDrag {
     current_position: Vec2,
     phase: ViewportTransformDragPhase,
     transaction_started: bool,
+    animated_transaction: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,6 +143,7 @@ struct ViewportScaleDrag {
     current_scale: Vec2,
     phase: ViewportTransformDragPhase,
     transaction_started: bool,
+    animated_transaction: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -154,6 +156,7 @@ struct ViewportRotationDrag {
     current_rotation: f32,
     phase: ViewportTransformDragPhase,
     transaction_started: bool,
+    animated_transaction: bool,
 }
 
 const MIN_VIEWPORT_ZOOM: f32 = 0.1;
@@ -448,6 +451,7 @@ impl EditorSession {
             current_position: position_start,
             phase: ViewportTransformDragPhase::Active,
             transaction_started: false,
+            animated_transaction: false,
         });
         true
     }
@@ -525,6 +529,39 @@ impl EditorSession {
         true
     }
 
+    fn begin_direct_transform_transaction(
+        &mut self,
+        editor: &mut ProjectEditor,
+        object_id: ObjectId,
+        property: AnimatableProperty,
+    ) -> Result<Option<bool>, EditError> {
+        if property_keyframe_count(editor.project(), object_id, property)? == 0 {
+            return Ok(Some(false));
+        }
+
+        let project = editor.project();
+        let Ok(continuous_tick) = project.tempo_map.continuous_tick_position(self.playhead) else {
+            return Ok(None);
+        };
+        let Ok(tick) = snap_tick_position_to_grid(continuous_tick, self.authoring_division) else {
+            return Ok(None);
+        };
+        let Ok(project_time) = project.tempo_map.project_time_for_tick(tick) else {
+            return Ok(None);
+        };
+        let initial_value =
+            evaluate_property_at_tick(project, object_id, property, tick.get() as f64)?;
+
+        editor.begin_property_keyframe_value_transaction(
+            object_id,
+            property,
+            tick,
+            initial_value,
+        )?;
+        self.playhead = project_time;
+        Ok(Some(true))
+    }
+
     pub fn sync_viewport_position_drag(
         &mut self,
         editor: &mut ProjectEditor,
@@ -539,11 +576,28 @@ impl EditorSession {
         }
 
         if !drag.transaction_started {
-            if let Err(error) = editor.begin_position_transaction(drag.object_id) {
+            let object_id = drag.object_id;
+            let Some(animated_transaction) =
+                self.begin_direct_transform_transaction(
+                    editor,
+                    object_id,
+                    AnimatableProperty::Position,
+                )?
+            else {
+                self.viewport_position_drag = None;
+                return Ok(false);
+            };
+            if !animated_transaction
+                && let Err(error) = editor.begin_position_transaction(object_id)
+            {
                 self.viewport_position_drag = None;
                 return Err(error);
             }
+            let Some(drag) = self.viewport_position_drag.as_mut() else {
+                return Ok(false);
+            };
             drag.transaction_started = true;
+            drag.animated_transaction = animated_transaction;
         }
 
         if drag.phase == ViewportTransformDragPhase::CancelRequested {
@@ -552,7 +606,13 @@ impl EditorSession {
             return Ok(changed);
         }
 
-        editor.update_position_transaction(drag.current_position)?;
+        if drag.animated_transaction {
+            editor.update_property_keyframe_value_transaction(PropertyValue::Vec2(
+                drag.current_position,
+            ))?;
+        } else {
+            editor.update_position_transaction(drag.current_position)?;
+        }
 
         if drag.phase == ViewportTransformDragPhase::CommitRequested {
             let changed = editor.commit_transaction()?;
@@ -729,6 +789,7 @@ impl EditorSession {
             current_scale: scale_start,
             phase: ViewportTransformDragPhase::Active,
             transaction_started: false,
+            animated_transaction: false,
         });
         true
     }
@@ -835,11 +896,24 @@ impl EditorSession {
         }
 
         if !drag.transaction_started {
-            if let Err(error) = editor.begin_scale_transaction(drag.object_id) {
+            let object_id = drag.object_id;
+            let Some(animated_transaction) =
+                self.begin_direct_transform_transaction(editor, object_id, AnimatableProperty::Scale)?
+            else {
+                self.viewport_scale_drag = None;
+                return Ok(false);
+            };
+            if !animated_transaction
+                && let Err(error) = editor.begin_scale_transaction(object_id)
+            {
                 self.viewport_scale_drag = None;
                 return Err(error);
             }
+            let Some(drag) = self.viewport_scale_drag.as_mut() else {
+                return Ok(false);
+            };
             drag.transaction_started = true;
+            drag.animated_transaction = animated_transaction;
         }
 
         if drag.phase == ViewportTransformDragPhase::CancelRequested {
@@ -848,7 +922,13 @@ impl EditorSession {
             return Ok(changed);
         }
 
-        editor.update_scale_transaction(drag.current_scale)?;
+        if drag.animated_transaction {
+            editor.update_property_keyframe_value_transaction(PropertyValue::Vec2(
+                drag.current_scale,
+            ))?;
+        } else {
+            editor.update_scale_transaction(drag.current_scale)?;
+        }
 
         if drag.phase == ViewportTransformDragPhase::CommitRequested {
             let changed = editor.commit_transaction()?;
@@ -891,6 +971,7 @@ impl EditorSession {
             current_rotation: rotation_start,
             phase: ViewportTransformDragPhase::Active,
             transaction_started: false,
+            animated_transaction: false,
         });
         true
     }
@@ -980,11 +1061,27 @@ impl EditorSession {
         }
 
         if !drag.transaction_started {
-            if let Err(error) = editor.begin_rotation_transaction(drag.object_id) {
+            let object_id = drag.object_id;
+            let Some(animated_transaction) = self.begin_direct_transform_transaction(
+                editor,
+                object_id,
+                AnimatableProperty::Rotation,
+            )?
+            else {
+                self.viewport_rotation_drag = None;
+                return Ok(false);
+            };
+            if !animated_transaction
+                && let Err(error) = editor.begin_rotation_transaction(object_id)
+            {
                 self.viewport_rotation_drag = None;
                 return Err(error);
             }
+            let Some(drag) = self.viewport_rotation_drag.as_mut() else {
+                return Ok(false);
+            };
             drag.transaction_started = true;
+            drag.animated_transaction = animated_transaction;
         }
 
         if drag.phase == ViewportTransformDragPhase::CancelRequested {
@@ -993,7 +1090,13 @@ impl EditorSession {
             return Ok(changed);
         }
 
-        editor.update_rotation_transaction(drag.current_rotation)?;
+        if drag.animated_transaction {
+            editor.update_property_keyframe_value_transaction(PropertyValue::Scalar(
+                drag.current_rotation,
+            ))?;
+        } else {
+            editor.update_rotation_transaction(drag.current_rotation)?;
+        }
 
         if drag.phase == ViewportTransformDragPhase::CommitRequested {
             let changed = editor.commit_transaction()?;
