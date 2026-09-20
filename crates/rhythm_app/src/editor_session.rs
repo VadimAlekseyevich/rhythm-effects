@@ -1952,9 +1952,10 @@ mod tests {
             .base_value();
         assert!((rotation - 20.0).abs() < 0.001);
 
-        assert!(session.update_viewport_rotation_drag(
-            Vec2::new(0.0, -1.0).expect("-90 degree pointer")
-        ));
+        assert!(
+            session
+                .update_viewport_rotation_drag(Vec2::new(0.0, -1.0).expect("-90 degree pointer"))
+        );
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
         let rotation = *editor.project().composition.objects[0]
             .transform
@@ -1979,9 +1980,7 @@ mod tests {
             Vec2::new(1.0, 0.0).expect("pointer"),
             0.0,
         ));
-        assert!(session.update_viewport_rotation_drag(
-            Vec2::new(0.0, 1.0).expect("pointer")
-        ));
+        assert!(session.update_viewport_rotation_drag(Vec2::new(0.0, 1.0).expect("pointer")));
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
         assert!(session.cancel_viewport_rotation_drag());
         assert_eq!(session.sync_viewport_rotation_drag(&mut editor), Ok(true));
