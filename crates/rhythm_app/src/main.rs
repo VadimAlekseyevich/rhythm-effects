@@ -9,7 +9,7 @@ mod viewport;
 use std::sync::Arc;
 use std::time::Instant;
 
-use editor_session::EditorSession;
+use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use rhythm_core::APP_NAME;
@@ -279,6 +279,14 @@ impl ApplicationHandler for RhythmApp {
                         }
                     } else if !control && !shift && !alt && !super_key && code == KeyCode::Escape {
                         self.session.cancel_keyframe_drag()
+                    } else if !control && !alt && !super_key && code == KeyCode::KeyF {
+                        let action = if shift {
+                            ViewportCameraAction::FitComposition
+                        } else {
+                            ViewportCameraAction::FrameSelection
+                        };
+                        self.session.request_viewport_camera_action(action);
+                        true
                     } else if !control && !shift && !alt && !super_key && code == KeyCode::KeyK {
                         match self.session.keyframe_action(&mut self.project_editor) {
                             Ok(changed) => changed,
