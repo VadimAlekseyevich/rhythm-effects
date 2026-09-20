@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use rhythm_core::{
     animation::{BezierEasing, Interpolation},
     domain::Vec2,
-    editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
+    editor::{EditCommand, EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     geometry::LocalBounds2d,
     ids::{KeyframeId, ObjectId},
     property::{
@@ -104,6 +104,12 @@ struct ViewportBoxSelection {
 pub enum ViewportCameraAction {
     FitComposition,
     FrameSelection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ObjectListAction {
+    SetVisible { object_id: ObjectId, visible: bool },
+    SetLocked { object_id: ObjectId, locked: bool },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +227,7 @@ pub struct EditorSession {
     viewport_pan_points: [f32; 2],
     viewport_zoom: f32,
     pending_viewport_camera_action: Option<ViewportCameraAction>,
+    pending_object_list_actions: Vec<ObjectListAction>,
     viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_multi_position_drag: Option<ViewportMultiPositionDrag>,
     viewport_scale_drag: Option<ViewportScaleDrag>,
@@ -247,6 +254,7 @@ impl Default for EditorSession {
             viewport_pan_points: [0.0, 0.0],
             viewport_zoom: 1.0,
             pending_viewport_camera_action: None,
+            pending_object_list_actions: Vec::new(),
             viewport_position_drag: None,
             viewport_multi_position_drag: None,
             viewport_scale_drag: None,
@@ -347,6 +355,40 @@ impl EditorSession {
 
     pub const fn take_viewport_camera_action(&mut self) -> Option<ViewportCameraAction> {
         self.pending_viewport_camera_action.take()
+    }
+
+    pub fn queue_object_visibility(&mut self, object_id: ObjectId, visible: bool) {
+        self.pending_object_list_actions
+            .push(ObjectListAction::SetVisible { object_id, visible });
+    }
+
+    pub fn queue_object_locked(&mut self, object_id: ObjectId, locked: bool) {
+        self.pending_object_list_actions
+            .push(ObjectListAction::SetLocked { object_id, locked });
+    }
+
+    pub fn commit_pending_object_list_actions(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        if self.pending_object_list_actions.is_empty() {
+            return Ok(false);
+        }
+
+        let actions = std::mem::take(&mut self.pending_object_list_actions);
+        let mut changed = false;
+        for action in actions {
+            let action_changed = match action {
+                ObjectListAction::SetVisible { object_id, visible } => {
+                    editor.execute(EditCommand::SetObjectVisible { object_id, visible })?
+                }
+                ObjectListAction::SetLocked { object_id, locked } => {
+                    editor.execute(EditCommand::SetObjectLocked { object_id, locked })?
+                }
+            };
+            changed |= action_changed;
+        }
+        Ok(changed)
     }
 
     pub fn fit_viewport_composition(&mut self) -> bool {
@@ -2174,6 +2216,27 @@ mod tests {
             Some(([10.0, 20.0], [30.0, 40.0], true))
         );
         assert!(session.timeline_box_selection().is_none());
+    }
+
+    #[test]
+    fn object_list_actions_apply_through_project_editor() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        session.queue_object_visibility(object_id, false);
+        session.queue_object_locked(object_id, true);
+        assert_eq!(
+            session.commit_pending_object_list_actions(&mut editor),
+            Ok(true)
+        );
+        assert!(!editor.project().composition.objects[0].visible);
+        assert!(editor.project().composition.objects[0].locked);
+        assert_eq!(editor.history_len(), 2);
+        assert_eq!(
+            session.commit_pending_object_list_actions(&mut editor),
+            Ok(false)
+        );
     }
 
     #[test]
