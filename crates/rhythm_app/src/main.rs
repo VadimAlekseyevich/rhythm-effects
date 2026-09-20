@@ -224,12 +224,7 @@ impl ApplicationHandler for RhythmApp {
                     {
                         self.session
                             .copy_selected_keyframes(self.project_editor.project())
-                    } else if control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::KeyV
-                    {
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyV {
                         match self
                             .session
                             .paste_keyframe_clipboard(&mut self.project_editor)
@@ -240,12 +235,7 @@ impl ApplicationHandler for RhythmApp {
                                 false
                             }
                         }
-                    } else if control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::KeyD
-                    {
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyD {
                         match self
                             .session
                             .duplicate_selected_keyframes(&mut self.project_editor)
