@@ -1812,14 +1812,20 @@ impl ProjectEditor {
                 enabled,
             } => {
                 let (object_index, effect_index) = self.effect_index(object_id, effect_id)?;
-                let before = self.project.composition.objects[object_index].effects[effect_index].enabled;
+                let before =
+                    self.project.composition.objects[object_index].effects[effect_index].enabled;
                 if before == enabled {
                     return Ok(None);
                 }
 
-                self.project.composition.objects[object_index].effects[effect_index].enabled = enabled;
+                self.project.composition.objects[object_index].effects[effect_index].enabled =
+                    enabled;
                 Ok(Some(PendingHistoryEntry::new(
-                    if enabled { "Enable Effect" } else { "Disable Effect" },
+                    if enabled {
+                        "Enable Effect"
+                    } else {
+                        "Disable Effect"
+                    },
                     HistoryPayload::EffectEnabledChanged {
                         object_id,
                         effect_id,
@@ -1863,7 +1869,9 @@ impl ProjectEditor {
                 effect_id,
             } => {
                 let (object_index, index) = self.effect_index(object_id, effect_id)?;
-                let effect = self.project.composition.objects[object_index].effects.remove(index);
+                let effect = self.project.composition.objects[object_index]
+                    .effects
+                    .remove(index);
                 if let Err(error) = self.project.validate() {
                     self.project.composition.objects[object_index]
                         .effects
@@ -2772,9 +2780,7 @@ impl ProjectEditor {
             ) => {
                 let object_index = self.object_index(*object_id)?;
                 if *index > self.project.composition.objects[object_index].effects.len() {
-                    return Err(EditError::HistoryInvariant(
-                        "effect restore index invalid",
-                    ));
+                    return Err(EditError::HistoryInvariant("effect restore index invalid"));
                 }
                 self.project.composition.objects[object_index]
                     .effects
