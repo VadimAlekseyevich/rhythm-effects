@@ -1585,11 +1585,7 @@ mod tests {
             [100.0, 100.0],
             Vec2::new(0.0, 0.0).expect("position"),
         ));
-        assert!(session.update_viewport_position_drag(
-            [130.0, 110.0],
-            [2.0, 2.0],
-            true,
-        ));
+        assert!(session.update_viewport_position_drag([130.0, 110.0], [2.0, 2.0], true,));
         assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
         assert_eq!(
             *editor.project().composition.objects[0]
@@ -1599,11 +1595,7 @@ mod tests {
             Vec2::new(60.0, 0.0).expect("x constrained position")
         );
 
-        assert!(session.update_viewport_position_drag(
-            [105.0, 140.0],
-            [2.0, 2.0],
-            true,
-        ));
+        assert!(session.update_viewport_position_drag([105.0, 140.0], [2.0, 2.0], true,));
         assert_eq!(session.sync_viewport_position_drag(&mut editor), Ok(true));
         assert_eq!(
             *editor.project().composition.objects[0]
