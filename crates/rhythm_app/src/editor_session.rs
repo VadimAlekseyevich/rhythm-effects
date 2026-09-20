@@ -1788,10 +1788,9 @@ mod tests {
             Vec2::new(1.0, 1.0).expect("scale"),
             0.0,
         ));
-        assert!(session.update_viewport_scale_drag(
-            Vec2::new(100.0, 25.0).expect("pointer"),
-            false,
-        ));
+        assert!(
+            session.update_viewport_scale_drag(Vec2::new(100.0, 25.0).expect("pointer"), false,)
+        );
         assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
         assert_eq!(editor.history_len(), 0);
         assert_eq!(
@@ -1828,10 +1827,9 @@ mod tests {
             Vec2::new(2.0, 1.0).expect("scale"),
             0.0,
         ));
-        assert!(session.update_viewport_scale_drag(
-            Vec2::new(100.0, 60.0).expect("pointer"),
-            true,
-        ));
+        assert!(
+            session.update_viewport_scale_drag(Vec2::new(100.0, 60.0).expect("pointer"), true,)
+        );
         assert_eq!(session.sync_viewport_scale_drag(&mut editor), Ok(true));
         assert_eq!(
             *editor.project().composition.objects[0]
