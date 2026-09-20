@@ -1150,48 +1150,6 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
-            ActiveTransaction::DirectPositions {
-                targets,
-                next_entity_id_before,
-            } => {
-                for target in targets {
-                    match target {
-                        DirectPositionTarget::Base { object_id, before } => {
-                            let index = self.object_index(object_id)?;
-                            *self.project.composition.objects[index]
-                                .transform
-                                .position
-                                .base_value_mut() = before;
-                        }
-                        DirectPositionTarget::Keyframe {
-                            object_id,
-                            keyframe_id,
-                            before,
-                            initial: _,
-                        } => {
-                            if let Some(before) = before {
-                                set_property_keyframe_value(
-                                    &mut self.project,
-                                    object_id,
-                                    AnimatableProperty::Position,
-                                    keyframe_id,
-                                    before.value,
-                                )?
-                                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
-                            } else {
-                                remove_property_keyframe_by_id(
-                                    &mut self.project,
-                                    object_id,
-                                    AnimatableProperty::Position,
-                                    keyframe_id,
-                                )?
-                                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
-                            }
-                        }
-                    }
-                }
-                self.project.next_entity_id = next_entity_id_before;
-            }
             ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
@@ -1298,6 +1256,48 @@ impl ProjectEditor {
                         .position
                         .base_value_mut() = position;
                 }
+            }
+            ActiveTransaction::DirectPositions {
+                targets,
+                next_entity_id_before,
+            } => {
+                for target in targets {
+                    match target {
+                        DirectPositionTarget::Base { object_id, before } => {
+                            let index = self.object_index(object_id)?;
+                            *self.project.composition.objects[index]
+                                .transform
+                                .position
+                                .base_value_mut() = before;
+                        }
+                        DirectPositionTarget::Keyframe {
+                            object_id,
+                            keyframe_id,
+                            before,
+                            initial: _,
+                        } => {
+                            if let Some(before) = before {
+                                set_property_keyframe_value(
+                                    &mut self.project,
+                                    object_id,
+                                    AnimatableProperty::Position,
+                                    keyframe_id,
+                                    before.value,
+                                )?
+                                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                            } else {
+                                remove_property_keyframe_by_id(
+                                    &mut self.project,
+                                    object_id,
+                                    AnimatableProperty::Position,
+                                    keyframe_id,
+                                )?
+                                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                            }
+                        }
+                    }
+                }
+                self.project.next_entity_id = next_entity_id_before;
             }
             ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
