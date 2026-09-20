@@ -435,10 +435,8 @@ impl EditorSession {
             return false;
         }
 
-        let delta_x =
-            (pointer[0] - drag.pointer_start[0]) * composition_units_per_point[0];
-        let delta_y =
-            (pointer[1] - drag.pointer_start[1]) * composition_units_per_point[1];
+        let delta_x = (pointer[0] - drag.pointer_start[0]) * composition_units_per_point[0];
+        let delta_y = (pointer[1] - drag.pointer_start[1]) * composition_units_per_point[1];
         let Ok(current_position) = Vec2::new(
             drag.position_start.x() + delta_x,
             drag.position_start.y() + delta_y,
