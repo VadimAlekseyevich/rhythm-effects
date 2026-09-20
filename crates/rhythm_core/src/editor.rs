@@ -1918,6 +1918,95 @@ mod tests {
     }
 
     #[test]
+    fn batch_keyframe_interpolation_change_is_one_undoable_history_entry() {
+        let mut editor = editor_with_object();
+        let object_id = ObjectId::new(1).expect("object id");
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                crate::property::PropertyValue::Scalar(0.1),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                crate::property::PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("second");
+        let third = editor
+            .create_property_keyframe(
+                object_id,
+                crate::property::AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                crate::property::PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("third");
+        let history_before = editor.history_len();
+
+        assert_eq!(
+            editor.set_property_keyframe_interpolations(
+                vec![first, second],
+                Interpolation::Hold,
+            ),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), history_before + 1);
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), second)
+                .expect("second")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), third)
+                .expect("third")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), second)
+                .expect("second")
+                .keyframe
+                .interpolation,
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            crate::property::locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::Hold
+        );
+    }
+
+    #[test]
     fn compound_keyframe_delete_is_one_entry_and_latest_deleted_value_becomes_static() {
         let mut editor = editor_with_object();
         let object_id = ObjectId::new(1).expect("object id");
