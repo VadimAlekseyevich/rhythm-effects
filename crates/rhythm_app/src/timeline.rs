@@ -1,9 +1,9 @@
-use crate::editor_session::EditorSession;
+use crate::editor_session::{EditorSession, KeyframeDragMember};
 use rhythm_core::{
     animation::Animated,
     ids::{EffectId, KeyframeId, ObjectId},
     project::{EffectKind, ObjectContent, Project},
-    property::{AnimatableProperty, EffectAnimatableProperty},
+    property::{AnimatableProperty, EffectAnimatableProperty, property_keyframe_by_id},
     time::{
         BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
         floor_tick_position_to_grid, snap_tick_position_to_grid,
@@ -745,6 +745,46 @@ fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {
     );
 }
 
+fn collect_drag_members(
+    project: &Project,
+    rows: &[TimelineRow<'_>],
+    keyframe_ids: &[KeyframeId],
+) -> Vec<KeyframeDragMember> {
+    let mut members = Vec::with_capacity(keyframe_ids.len());
+
+    for keyframe_id in keyframe_ids {
+        for row in rows {
+            let TimelineRow::Property {
+                object_id,
+                property,
+                ..
+            } = row
+            else {
+                continue;
+            };
+            let animatable_property = property.animatable_property();
+            let Ok(Some(keyframe)) = property_keyframe_by_id(
+                project,
+                *object_id,
+                animatable_property,
+                *keyframe_id,
+            ) else {
+                continue;
+            };
+
+            members.push(KeyframeDragMember {
+                object_id: *object_id,
+                property: animatable_property,
+                keyframe_id: *keyframe_id,
+                original_tick: keyframe.tick,
+            });
+            break;
+        }
+    }
+
+    members
+}
+
 fn draw_timeline_rows(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
@@ -866,13 +906,13 @@ fn draw_timeline_rows(
                                 }
                                 if response.drag_started() {
                                     session.focus_property(*object_id, animatable_property);
-                                    session.select_only_keyframe(keyframe.id);
-                                    session.begin_keyframe_drag(
-                                        *object_id,
-                                        animatable_property,
-                                        keyframe.id,
-                                        keyframe.tick,
-                                    );
+                                    if !session.is_keyframe_selected(keyframe.id) {
+                                        session.select_only_keyframe(keyframe.id);
+                                    }
+                                    let selected_ids = session.selected_keyframe_ids();
+                                    let members =
+                                        collect_drag_members(project, rows, &selected_ids);
+                                    session.begin_keyframe_drag(keyframe.id, members);
                                 }
                                 if response.dragged()
                                     && let Some(pointer) = response.interact_pointer_pos()

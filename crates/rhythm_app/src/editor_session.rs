@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
-    editor::{EditError, ProjectEditor},
+    editor::{EditError, ProjectEditor, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
         AnimatableProperty, evaluate_property_at_tick, property_keyframe_at_tick,
@@ -44,20 +44,24 @@ struct TimelineBoxSelection {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct KeyframeDrag {
-    object_id: ObjectId,
-    property: AnimatableProperty,
-    keyframe_id: KeyframeId,
-    original_tick: MusicalTick,
-    target_tick: MusicalTick,
+pub struct KeyframeDragMember {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub keyframe_id: KeyframeId,
+    pub original_tick: MusicalTick,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KeyframeDrag {
+    anchor_keyframe_id: KeyframeId,
+    anchor_original_tick: MusicalTick,
+    anchor_target_tick: MusicalTick,
+    members: Vec<KeyframeDragMember>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingKeyframeMove {
-    object_id: ObjectId,
-    property: AnimatableProperty,
-    keyframe_id: KeyframeId,
-    target_tick: MusicalTick,
+    moves: Vec<PropertyKeyframeMove>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,54 +203,87 @@ impl EditorSession {
 
     pub fn begin_keyframe_drag(
         &mut self,
-        object_id: ObjectId,
-        property: AnimatableProperty,
-        keyframe_id: KeyframeId,
-        original_tick: MusicalTick,
-    ) {
+        anchor_keyframe_id: KeyframeId,
+        members: Vec<KeyframeDragMember>,
+    ) -> bool {
+        let Some(anchor) = members
+            .iter()
+            .find(|member| member.keyframe_id == anchor_keyframe_id)
+            .copied()
+        else {
+            return false;
+        };
+
         self.keyframe_drag = Some(KeyframeDrag {
-            object_id,
-            property,
-            keyframe_id,
-            original_tick,
-            target_tick: original_tick,
+            anchor_keyframe_id,
+            anchor_original_tick: anchor.original_tick,
+            anchor_target_tick: anchor.original_tick,
+            members,
         });
         self.pending_keyframe_move = None;
+        true
     }
 
     pub fn update_keyframe_drag(&mut self, keyframe_id: KeyframeId, target_tick: MusicalTick) {
-        if let Some(drag) = self.keyframe_drag.as_mut()
-            && drag.keyframe_id == keyframe_id
-        {
-            drag.target_tick = target_tick;
+        let Some(drag) = self.keyframe_drag.as_mut() else {
+            return;
+        };
+        if drag.anchor_keyframe_id != keyframe_id {
+            return;
+        }
+
+        let delta = target_tick.get() - drag.anchor_original_tick.get();
+        if drag.members.iter().all(|member| {
+            member.original_tick.get().checked_add(delta).is_some()
+        }) {
+            drag.anchor_target_tick = target_tick;
         }
     }
 
     #[must_use]
     pub fn keyframe_drag_preview_tick(&self, keyframe_id: KeyframeId) -> Option<MusicalTick> {
-        self.keyframe_drag
-            .filter(|drag| drag.keyframe_id == keyframe_id)
-            .map(|drag| drag.target_tick)
+        let drag = self.keyframe_drag.as_ref()?;
+        let member = drag
+            .members
+            .iter()
+            .find(|member| member.keyframe_id == keyframe_id)?;
+        let delta = drag.anchor_target_tick.get() - drag.anchor_original_tick.get();
+        member
+            .original_tick
+            .get()
+            .checked_add(delta)
+            .map(MusicalTick::new)
     }
 
     pub fn finish_keyframe_drag(&mut self, keyframe_id: KeyframeId) -> bool {
         let Some(drag) = self.keyframe_drag.take() else {
             return false;
         };
-        if drag.keyframe_id != keyframe_id {
+        if drag.anchor_keyframe_id != keyframe_id {
             self.keyframe_drag = Some(drag);
             return false;
         }
-        if drag.target_tick == drag.original_tick {
+
+        let delta = drag.anchor_target_tick.get() - drag.anchor_original_tick.get();
+        if delta == 0 {
             return false;
         }
 
-        self.pending_keyframe_move = Some(PendingKeyframeMove {
-            object_id: drag.object_id,
-            property: drag.property,
-            keyframe_id: drag.keyframe_id,
-            target_tick: drag.target_tick,
-        });
+        let moves = drag
+            .members
+            .into_iter()
+            .filter_map(|member| {
+                let target_tick = member.original_tick.get().checked_add(delta)?;
+                Some(PropertyKeyframeMove {
+                    object_id: member.object_id,
+                    property: member.property,
+                    keyframe_id: member.keyframe_id,
+                    target_tick: MusicalTick::new(target_tick),
+                })
+            })
+            .collect();
+
+        self.pending_keyframe_move = Some(PendingKeyframeMove { moves });
         true
     }
 
@@ -264,12 +301,12 @@ impl EditorSession {
             return Ok(false);
         };
 
-        editor.move_property_keyframe(
-            pending.object_id,
-            pending.property,
-            pending.keyframe_id,
-            pending.target_tick,
-        )
+        editor.move_property_keyframes(pending.moves)
+    }
+
+    #[must_use]
+    pub fn selected_keyframe_ids(&self) -> Vec<KeyframeId> {
+        self.selected_keyframes.iter().copied().collect()
     }
 
     #[must_use]
@@ -690,17 +727,57 @@ mod tests {
     }
 
     #[test]
+    fn multi_key_drag_applies_anchor_delta_to_every_member() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let first = KeyframeId::new(2).expect("key id");
+        let second = KeyframeId::new(3).expect("key id");
+        let mut session = EditorSession::default();
+
+        assert!(session.begin_keyframe_drag(
+            first,
+            vec![
+                KeyframeDragMember {
+                    object_id,
+                    property: AnimatableProperty::Opacity,
+                    keyframe_id: first,
+                    original_tick: MusicalTick::new(0),
+                },
+                KeyframeDragMember {
+                    object_id,
+                    property: AnimatableProperty::Opacity,
+                    keyframe_id: second,
+                    original_tick: MusicalTick::new(240),
+                },
+            ],
+        ));
+        session.update_keyframe_drag(first, MusicalTick::new(480));
+
+        assert_eq!(
+            session.keyframe_drag_preview_tick(first),
+            Some(MusicalTick::new(480))
+        );
+        assert_eq!(
+            session.keyframe_drag_preview_tick(second),
+            Some(MusicalTick::new(720))
+        );
+        assert!(session.finish_keyframe_drag(first));
+    }
+
+    #[test]
     fn keyframe_drag_preview_can_be_cancelled_without_project_mutation() {
         let object_id = ObjectId::new(1).expect("object id");
         let keyframe_id = KeyframeId::new(2).expect("key id");
         let mut session = EditorSession::default();
 
-        session.begin_keyframe_drag(
-            object_id,
-            AnimatableProperty::Opacity,
+        assert!(session.begin_keyframe_drag(
             keyframe_id,
-            MusicalTick::new(0),
-        );
+            vec![KeyframeDragMember {
+                object_id,
+                property: AnimatableProperty::Opacity,
+                keyframe_id,
+                original_tick: MusicalTick::new(0),
+            }],
+        ));
         session.update_keyframe_drag(keyframe_id, MusicalTick::new(240));
 
         assert_eq!(
