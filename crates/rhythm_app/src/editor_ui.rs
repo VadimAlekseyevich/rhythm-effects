@@ -91,29 +91,6 @@ fn inspector_property_value_and_state(
     Some((value, state))
 }
 
-fn format_inspector_property_value(property: AnimatableProperty, value: PropertyValue) -> String {
-    match (property, value) {
-        (AnimatableProperty::Position, PropertyValue::Vec2(value)) => {
-            format!("{:.1}, {:.1} px", value.x(), value.y())
-        }
-        (AnimatableProperty::Scale, PropertyValue::Vec2(value)) => {
-            format!("{:.1}%, {:.1}%", value.x() * 100.0, value.y() * 100.0)
-        }
-        (AnimatableProperty::Rotation, PropertyValue::Scalar(value)) => {
-            format!("{value:.1}°")
-        }
-        (AnimatableProperty::Anchor, PropertyValue::Vec2(value)) => {
-            format!("{:.1}%, {:.1}%", value.x() * 100.0, value.y() * 100.0)
-        }
-        (AnimatableProperty::Opacity, PropertyValue::Scalar(value)) => {
-            format!("{:.1}%", value * 100.0)
-        }
-        (_, PropertyValue::Scalar(value)) => format!("{value:.3}"),
-        (_, PropertyValue::Vec2(value)) => format!("{:.3}, {:.3}", value.x(), value.y()),
-        (_, PropertyValue::Color(_)) => "Color".to_owned(),
-    }
-}
-
 fn draw_inspector_numeric_field(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
