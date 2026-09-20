@@ -1,12 +1,15 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
-    animation::{BezierEasing, Interpolation},
+    animation::{Animated, BezierEasing, Interpolation},
     domain::{LinearRgba, Vec2},
     editor::{EditCommand, EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     geometry::LocalBounds2d,
     ids::{AssetId, EffectId, KeyframeId, ObjectId},
-    project::{FontStyle, FontWeight, TextAlignment},
+    project::{
+        BlurEffect, EffectKind, FontStyle, FontWeight, GlowEffect, NoiseEffect, RgbSplitEffect,
+        TextAlignment, TintEffect,
+    },
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
         property_base_value, property_keyframe_at_tick, property_keyframe_count,
@@ -37,6 +40,66 @@ impl PreviewQuality {
             Self::Full => "Full",
             Self::Half => "Half",
             Self::Quarter => "Quarter",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EffectPreset {
+    Blur,
+    Glow,
+    Tint,
+    Noise,
+    RgbSplit,
+}
+
+impl EffectPreset {
+    pub const ALL: [Self; 5] = [
+        Self::Blur,
+        Self::Glow,
+        Self::Tint,
+        Self::Noise,
+        Self::RgbSplit,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Blur => "Blur",
+            Self::Glow => "Glow",
+            Self::Tint => "Tint",
+            Self::Noise => "Noise",
+            Self::RgbSplit => "RGB Split",
+        }
+    }
+
+    #[must_use]
+    pub fn kind(self) -> EffectKind {
+        let white = LinearRgba::new(1.0, 1.0, 1.0, 1.0).expect("opaque white is valid");
+        match self {
+            Self::Blur => EffectKind::Blur(BlurEffect {
+                radius_px: Animated::new_static(0.0),
+            }),
+            Self::Glow => EffectKind::Glow(GlowEffect {
+                radius_px: Animated::new_static(0.0),
+                intensity: Animated::new_static(0.0),
+                threshold: Animated::new_static(1.0),
+                color: Animated::new_static(white),
+            }),
+            Self::Tint => EffectKind::Tint(TintEffect {
+                color: Animated::new_static(white),
+                amount: Animated::new_static(0.0),
+            }),
+            Self::Noise => EffectKind::Noise(NoiseEffect {
+                amount: Animated::new_static(0.0),
+                size_px: Animated::new_static(1.0),
+                evolution: Animated::new_static(0.0),
+                seed: 0,
+            }),
+            Self::RgbSplit => EffectKind::RgbSplit(RgbSplitEffect {
+                amount_px: Animated::new_static(0.0),
+                angle_degrees: Animated::new_static(0.0),
+            }),
         }
     }
 }
@@ -115,6 +178,10 @@ enum ObjectListAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EffectStackAction {
+    Add {
+        object_id: ObjectId,
+        preset: EffectPreset,
+    },
     SetEnabled {
         object_id: ObjectId,
         effect_id: EffectId,
@@ -346,6 +413,8 @@ pub struct EditorSession {
     pending_viewport_camera_action: Option<ViewportCameraAction>,
     pending_object_list_actions: Vec<ObjectListAction>,
     pending_effect_stack_actions: Vec<EffectStackAction>,
+    effect_picker_object: Option<ObjectId>,
+    effect_picker_query: String,
     pending_image_relink_asset: Option<AssetId>,
     viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_multi_position_drag: Option<ViewportMultiPositionDrag>,
@@ -382,6 +451,8 @@ impl Default for EditorSession {
             pending_viewport_camera_action: None,
             pending_object_list_actions: Vec::new(),
             pending_effect_stack_actions: Vec::new(),
+            effect_picker_object: None,
+            effect_picker_query: String::new(),
             pending_image_relink_asset: None,
             viewport_position_drag: None,
             viewport_multi_position_drag: None,
@@ -492,6 +563,48 @@ impl EditorSession {
         self.pending_viewport_camera_action.take()
     }
 
+    pub fn toggle_effect_picker(&mut self, object_id: ObjectId) -> bool {
+        if self.effect_picker_object == Some(object_id) {
+            self.effect_picker_object = None;
+            self.effect_picker_query.clear();
+            return false;
+        }
+
+        self.effect_picker_object = Some(object_id);
+        self.effect_picker_query.clear();
+        true
+    }
+
+    #[must_use]
+    pub const fn effect_picker_open_for(&self, object_id: ObjectId) -> bool {
+        self.effect_picker_object == Some(object_id)
+    }
+
+    #[must_use]
+    pub fn effect_picker_query(&self) -> &str {
+        &self.effect_picker_query
+    }
+
+    pub fn update_effect_picker_query(&mut self, query: String) -> bool {
+        if self.effect_picker_query == query {
+            return false;
+        }
+        self.effect_picker_query = query;
+        true
+    }
+
+    pub fn choose_effect_preset(&mut self, object_id: ObjectId, preset: EffectPreset) -> bool {
+        if self.effect_picker_object != Some(object_id) {
+            return false;
+        }
+
+        self.pending_effect_stack_actions
+            .push(EffectStackAction::Add { object_id, preset });
+        self.effect_picker_object = None;
+        self.effect_picker_query.clear();
+        true
+    }
+
     pub fn queue_effect_enabled(
         &mut self,
         object_id: ObjectId,
@@ -540,6 +653,12 @@ impl EditorSession {
         let mut changed = false;
         for action in actions {
             let action_changed = match action {
+                EffectStackAction::Add { object_id, preset } => editor.execute(
+                    EditCommand::AddEffect {
+                        object_id,
+                        kind: preset.kind(),
+                    },
+                )?,
                 EffectStackAction::SetEnabled {
                     object_id,
                     effect_id,
