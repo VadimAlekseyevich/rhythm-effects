@@ -3034,7 +3034,8 @@ mod tests {
         project.tempo_map = tempo_120();
         let first = LinearRgba::new(0.0, 0.2, 0.4, 1.0).expect("color");
         let second = LinearRgba::new(1.0, 0.2, 0.4, 1.0).expect("color");
-        let ObjectContent::Rectangle(rectangle) = &mut project.composition.objects[0].content else {
+        let ObjectContent::Rectangle(rectangle) = &mut project.composition.objects[0].content
+        else {
             panic!("test object should be rectangle");
         };
         rectangle.fill = Animated::with_keyframes(
