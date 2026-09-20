@@ -431,6 +431,14 @@ impl ApplicationHandler for RhythmApp {
                     }
                     match self
                         .session
+                        .commit_pending_inspector_animated_property_edit(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector animated property edit failed"),
+                    }
+                    match self
+                        .session
                         .commit_pending_focused_keyframe_action(&mut self.project_editor)
                     {
                         Ok(true) => window.request_redraw(),
