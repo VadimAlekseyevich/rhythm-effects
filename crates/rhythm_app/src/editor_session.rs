@@ -2334,13 +2334,14 @@ impl EditorSession {
 #[cfg(test)]
 mod tests {
     use super::{
-        EditorSession, KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality,
-        ViewportCameraAction,
+        EditorSession, InspectorNumericCommit, InspectorNumericComponent, InspectorNumericTarget,
+        KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality, ViewportCameraAction,
     };
     use rhythm_core::{
         domain::Vec2,
+        editor::ProjectEditor,
         ids::{KeyframeId, ObjectId},
-        property::AnimatableProperty,
+        property::{AnimatableProperty, PropertyValue, property_base_value},
         time::{
             BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
             TempoMap, TimeSignature,
