@@ -156,11 +156,8 @@ impl EditorSession {
             focused.property,
             resolved_tick,
         )? {
-            let changed = editor.remove_property_keyframe(
-                focused.object_id,
-                focused.property,
-                existing,
-            )?;
+            let changed =
+                editor.remove_property_keyframe(focused.object_id, focused.property, existing)?;
             if changed {
                 self.selected_keyframes.remove(&existing.id);
                 self.playhead = resolved_time;
@@ -168,25 +165,22 @@ impl EditorSession {
             return Ok(changed);
         }
 
-        let value = if property_keyframe_count(
-            editor.project(),
-            focused.object_id,
-            focused.property,
-        )? == 0
-        {
-            rhythm_core::property::property_base_value(
-                editor.project(),
-                focused.object_id,
-                focused.property,
-            )?
-        } else {
-            evaluate_property_at_tick(
-                editor.project(),
-                focused.object_id,
-                focused.property,
-                resolved_tick.get() as f64,
-            )?
-        };
+        let value =
+            if property_keyframe_count(editor.project(), focused.object_id, focused.property)? == 0
+            {
+                rhythm_core::property::property_base_value(
+                    editor.project(),
+                    focused.object_id,
+                    focused.property,
+                )?
+            } else {
+                evaluate_property_at_tick(
+                    editor.project(),
+                    focused.object_id,
+                    focused.property,
+                    resolved_tick.get() as f64,
+                )?
+            };
 
         let Some(keyframe_id) = editor.create_property_keyframe(
             focused.object_id,

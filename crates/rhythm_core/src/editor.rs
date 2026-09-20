@@ -797,12 +797,8 @@ impl ProjectEditor {
                             base_before,
                         );
                     }
-                    let _ = insert_property_keyframe(
-                        &mut self.project,
-                        object_id,
-                        property,
-                        keyframe,
-                    );
+                    let _ =
+                        insert_property_keyframe(&mut self.project, object_id, property, keyframe);
                     return Err(EditError::InvalidProject(error));
                 }
 
@@ -1050,12 +1046,7 @@ impl ProjectEditor {
                         *base_before,
                     )?;
                 }
-                insert_property_keyframe(
-                    &mut self.project,
-                    *object_id,
-                    *property,
-                    *keyframe,
-                )?;
+                insert_property_keyframe(&mut self.project, *object_id, *property, *keyframe)?;
             }
             (
                 HistoryPayload::PropertyKeyframeRemoved {
@@ -1075,12 +1066,7 @@ impl ProjectEditor {
                 )?
                 .ok_or(EditError::KeyframeNotFound(keyframe.id))?;
                 if let Some(base_after) = base_after {
-                    set_property_base_value(
-                        &mut self.project,
-                        *object_id,
-                        *property,
-                        *base_after,
-                    )?;
+                    set_property_base_value(&mut self.project, *object_id, *property, *base_after)?;
                 }
             }
             (
