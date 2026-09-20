@@ -98,6 +98,52 @@ where
 }
 
 #[must_use]
+pub fn selected_objects_bounds<F>(
+    scene: &EvaluatedScene,
+    selected_object_ids: &[ObjectId],
+    mut runtime_bounds: F,
+) -> Option<LocalBounds2d>
+where
+    F: FnMut(ObjectId, &EvaluatedObjectContent) -> Option<RuntimeHitBounds>,
+{
+    let mut combined: Option<LocalBounds2d> = None;
+
+    for evaluated in &scene.objects {
+        if !selected_object_ids.contains(&evaluated.id) {
+            continue;
+        }
+
+        let local_bounds =
+            evaluated_local_bounds(evaluated.id, &evaluated.content, &mut runtime_bounds)?;
+        let transform = ObjectTransform2d::new(
+            evaluated.transform.position,
+            evaluated.transform.scale,
+            evaluated.transform.rotation_degrees,
+            evaluated.transform.anchor,
+        );
+        let bounds = transformed_bounds(transform, local_bounds)?;
+
+        combined = Some(match combined {
+            None => bounds,
+            Some(current) => {
+                let min_x = current.min.x().min(bounds.min.x());
+                let min_y = current.min.y().min(bounds.min.y());
+                let max_x = (current.min.x() + current.size.x())
+                    .max(bounds.min.x() + bounds.size.x());
+                let max_y = (current.min.y() + current.size.y())
+                    .max(bounds.min.y() + bounds.size.y());
+                LocalBounds2d::new(
+                    Vec2::new(min_x, min_y).ok()?,
+                    Vec2::new(max_x - min_x, max_y - min_y).ok()?,
+                )
+            }
+        });
+    }
+
+    combined
+}
+
+#[must_use]
 pub fn objects_intersecting_box<F>(
     project: &Project,
     scene: &EvaluatedScene,
@@ -200,7 +246,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{objects_intersecting_box, pick_topmost_object};
+    use super::{objects_intersecting_box, pick_topmost_object, selected_objects_bounds};
     use rhythm_core::{
         animation::Animated,
         domain::{LinearRgba, Vec2},
@@ -250,6 +296,27 @@ mod tests {
             .push(rectangle(2, "Front", true, false));
         project.next_entity_id = 3;
         project
+    }
+
+    #[test]
+    fn selected_object_bounds_combine_transformed_selection() {
+        let mut project = project_with_overlapping_rectangles();
+        project.composition.objects[1].transform.position =
+            Animated::new_static(Vec2::new(400.0, 200.0).expect("position"));
+        let scene = evaluate_scene(&project, ProjectTimeNs::new(0)).expect("scene");
+
+        let bounds = selected_objects_bounds(
+            &scene,
+            &[
+                ObjectId::new(1).expect("object id"),
+                ObjectId::new(2).expect("object id"),
+            ],
+            |_, _| None,
+        )
+        .expect("combined bounds");
+
+        assert_eq!(bounds.min, Vec2::new(150.0, 75.0).expect("bounds min"));
+        assert_eq!(bounds.size, Vec2::new(300.0, 150.0).expect("bounds size"));
     }
 
     #[test]
