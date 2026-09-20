@@ -8,6 +8,25 @@ use crate::{
 };
 use rhythm_core::{domain::Vec2, geometry::LocalBounds2d, project::Project, time::ProjectTimeNs};
 
+fn rotation_handle_points(corners: [egui::Pos2; 4]) -> (egui::Pos2, egui::Pos2) {
+    let center = egui::pos2(
+        corners.iter().map(|point| point.x).sum::<f32>() * 0.25,
+        corners.iter().map(|point| point.y).sum::<f32>() * 0.25,
+    );
+    let top_midpoint = egui::pos2(
+        (corners[0].x + corners[1].x) * 0.5,
+        (corners[0].y + corners[1].y) * 0.5,
+    );
+    let outward = top_midpoint - center;
+    let direction = if outward.length_sq() > f32::EPSILON {
+        outward / outward.length()
+    } else {
+        egui::vec2(0.0, -1.0)
+    };
+
+    (top_midpoint, top_midpoint + direction * 28.0)
+}
+
 fn fit_composition_preview(available: egui::Vec2, composition: egui::Vec2) -> egui::Vec2 {
     if available.x <= 0.0 || available.y <= 0.0 || composition.x <= 0.0 || composition.y <= 0.0 {
         return egui::Vec2::ZERO;
@@ -301,15 +320,18 @@ pub fn draw_editor_shell(
 
             if primary_pressed
                 && let Some(origin) = press_origin
-                && let Some(composition_origin) = screen_to_composition(origin)
                 && let Ok(scene) =
                     rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
             {
                 let ctrl = ui.input(|input| input.modifiers.ctrl);
                 let selected = session.selected_object_ids();
+                let overlay = (selected.len() == 1)
+                    .then(|| selection_overlay_geometry(&scene, &selected, |_, _| None))
+                    .flatten();
                 const SCALE_HANDLE_HIT_RADIUS: f32 = 9.0;
+                const ROTATION_HANDLE_HIT_RADIUS: f32 = 10.0;
 
-                let scale_drag_started = if !ctrl && selected.len() == 1 {
+                let rotation_drag_started = if !ctrl && selected.len() == 1 {
                     let object_id = selected[0];
                     project
                         .composition
@@ -319,11 +341,51 @@ pub fn draw_editor_shell(
                         .filter(|object| {
                             object.visible
                                 && !object.locked
-                                && object.transform.scale.keyframes().is_empty()
+                                && object.transform.rotation_degrees.keyframes().is_empty()
                         })
                         .and_then(|object| {
-                            selection_overlay_geometry(&scene, &selected, |_, _| None).and_then(
-                                |overlay| {
+                            overlay.and_then(|overlay| {
+                                let corners = overlay.corners.map(composition_to_screen);
+                                let (_, handle) = rotation_handle_points(corners);
+                                (handle.distance(origin) <= ROTATION_HANDLE_HIT_RADIUS)
+                                    .then(|| {
+                                        screen_to_composition_unclamped(origin).map(
+                                            |composition_pointer| {
+                                                session.begin_viewport_rotation_drag(
+                                                    object_id,
+                                                    overlay.anchor,
+                                                    composition_pointer,
+                                                    *object
+                                                        .transform
+                                                        .rotation_degrees
+                                                        .base_value(),
+                                                )
+                                            },
+                                        )
+                                    })
+                                    .flatten()
+                            })
+                        })
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+
+                let scale_drag_started =
+                    if !rotation_drag_started && !ctrl && selected.len() == 1 {
+                        let object_id = selected[0];
+                        project
+                            .composition
+                            .objects
+                            .iter()
+                            .find(|object| object.id == object_id)
+                            .filter(|object| {
+                                object.visible
+                                    && !object.locked
+                                    && object.transform.scale.keyframes().is_empty()
+                            })
+                            .and_then(|object| {
+                                overlay.and_then(|overlay| {
                                     overlay
                                         .corners
                                         .iter()
@@ -347,15 +409,17 @@ pub fn draw_editor_shell(
                                                     )
                                                 })
                                         })
-                                },
-                            )
-                        })
-                        .unwrap_or(false)
-                } else {
-                    false
-                };
+                                })
+                            })
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
 
-                if !scale_drag_started {
+                if !rotation_drag_started
+                    && !scale_drag_started
+                    && let Some(composition_origin) = screen_to_composition(origin)
+                {
                     let picked =
                         pick_topmost_object(project, &scene, composition_origin, |_, _| None);
                     if !ctrl
@@ -381,6 +445,13 @@ pub fn draw_editor_shell(
             }
 
             if primary_down
+                && let Some(pointer) = pointer_pos
+                && session.viewport_rotation_drag_active()
+            {
+                if let Some(composition_pointer) = screen_to_composition_unclamped(pointer) {
+                    session.update_viewport_rotation_drag(composition_pointer);
+                }
+            } else if primary_down
                 && let Some(pointer) = pointer_pos
                 && session.viewport_scale_drag_active()
             {
@@ -434,7 +505,19 @@ pub fn draw_editor_shell(
                 }
             }
 
-            let scale_drag_released = primary_released && session.viewport_scale_drag_active();
+            let rotation_drag_released =
+                primary_released && session.viewport_rotation_drag_active();
+            if rotation_drag_released {
+                if let Some(pointer) = pointer_pos
+                    && let Some(composition_pointer) = screen_to_composition_unclamped(pointer)
+                {
+                    session.update_viewport_rotation_drag(composition_pointer);
+                }
+                session.finish_viewport_rotation_drag();
+            }
+
+            let scale_drag_released =
+                primary_released && !rotation_drag_released && session.viewport_scale_drag_active();
             if scale_drag_released {
                 if let Some(pointer) = pointer_pos
                     && let Some(composition_pointer) = screen_to_composition_unclamped(pointer)
@@ -447,8 +530,10 @@ pub fn draw_editor_shell(
                 session.finish_viewport_scale_drag();
             }
 
-            let position_drag_released =
-                primary_released && !scale_drag_released && session.viewport_position_drag_active();
+            let position_drag_released = primary_released
+                && !rotation_drag_released
+                && !scale_drag_released
+                && session.viewport_position_drag_active();
             if position_drag_released {
                 if let Some(pointer) = pointer_pos {
                     session.update_viewport_position_drag(
@@ -464,6 +549,7 @@ pub fn draw_editor_shell(
             }
 
             if primary_released
+                && !rotation_drag_released
                 && !scale_drag_released
                 && !position_drag_released
                 && let Some((start, current)) = session.take_viewport_box_selection()
@@ -525,6 +611,13 @@ pub fn draw_editor_shell(
                                 egui::StrokeKind::Inside,
                             );
                         }
+
+                        let (rotation_stem, rotation_handle) = rotation_handle_points(corners);
+                        ui.painter()
+                            .line_segment([rotation_stem, rotation_handle], stroke);
+                        ui.painter()
+                            .circle_filled(rotation_handle, 5.0, ui.visuals().window_fill());
+                        ui.painter().circle_stroke(rotation_handle, 5.0, stroke);
                     }
 
                     const ANCHOR_RADIUS: f32 = 5.0;
@@ -560,7 +653,21 @@ pub fn draw_editor_shell(
 
 #[cfg(test)]
 mod tests {
-    use super::fit_composition_preview;
+    use super::{fit_composition_preview, rotation_handle_points};
+
+    #[test]
+    fn rotation_handle_extends_outward_from_top_edge() {
+        let (stem, handle) = rotation_handle_points([
+            egui::pos2(0.0, 0.0),
+            egui::pos2(100.0, 0.0),
+            egui::pos2(100.0, 100.0),
+            egui::pos2(0.0, 100.0),
+        ]);
+
+        assert_eq!(stem, egui::pos2(50.0, 0.0));
+        assert!((handle.x - 50.0).abs() < 0.0001);
+        assert!((handle.y + 28.0).abs() < 0.0001);
+    }
 
     #[test]
     fn preview_fit_preserves_composition_aspect() {
