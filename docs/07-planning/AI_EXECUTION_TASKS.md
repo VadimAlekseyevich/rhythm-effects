@@ -224,7 +224,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-189** — Implement Rectangle Inspector controls.
 - [x] **AI-190** — Implement Ellipse Inspector controls.
 - [x] **AI-191** — Implement Image source/intrinsic-dimensions/Relink Inspector controls.
-- [ ] **AI-192** — Implement Text content/font/weight/style/size/alignment/color Inspector controls.
+- [x] **AI-192** — Implement Text content/font/weight/style/size/alignment/color Inspector controls.
 - [ ] **AI-193** — Implement Effect stack Inspector with enable/reorder/remove.
 - [ ] **AI-194** — Implement Add Effect shallow searchable popover.
 - [ ] **AI-195** — Implement physical-key shortcut dispatcher for P/S/R/O/K.
