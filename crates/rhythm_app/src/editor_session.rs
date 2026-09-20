@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use rhythm_core::{
     animation::{BezierEasing, Interpolation},
-    domain::Vec2,
+    domain::{LinearRgba, Vec2},
     editor::{EditCommand, EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     geometry::LocalBounds2d,
     ids::{KeyframeId, ObjectId},
@@ -222,6 +222,10 @@ pub enum InspectorNumericComponent {
     Scalar,
     X,
     Y,
+    R,
+    G,
+    B,
+    A,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1489,11 +1493,21 @@ impl EditorSession {
             return Ok(false);
         }
 
-        let project_value = match commit.target.property {
-            AnimatableProperty::Scale
-            | AnimatableProperty::Anchor
-            | AnimatableProperty::Opacity => commit.value / 100.0,
-            _ => commit.value,
+        let project_value = if matches!(
+            commit.target.component,
+            InspectorNumericComponent::R
+                | InspectorNumericComponent::G
+                | InspectorNumericComponent::B
+                | InspectorNumericComponent::A
+        ) {
+            commit.value / 100.0
+        } else {
+            match commit.target.property {
+                AnimatableProperty::Scale
+                | AnimatableProperty::Anchor
+                | AnimatableProperty::Opacity => commit.value / 100.0,
+                _ => commit.value,
+            }
         };
         if !project_value.is_finite() {
             self.pending_inspector_numeric_commit = None;
@@ -1516,6 +1530,22 @@ impl EditorSession {
             (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => PropertyValue::Vec2(
                 Vec2::new(value.x(), project_value)
                     .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+            ),
+            (PropertyValue::Color(value), InspectorNumericComponent::R) => PropertyValue::Color(
+                LinearRgba::new(project_value, value.g(), value.b(), value.a())
+                    .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+            ),
+            (PropertyValue::Color(value), InspectorNumericComponent::G) => PropertyValue::Color(
+                LinearRgba::new(value.r(), project_value, value.b(), value.a())
+                    .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+            ),
+            (PropertyValue::Color(value), InspectorNumericComponent::B) => PropertyValue::Color(
+                LinearRgba::new(value.r(), value.g(), project_value, value.a())
+                    .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+            ),
+            (PropertyValue::Color(value), InspectorNumericComponent::A) => PropertyValue::Color(
+                LinearRgba::new(value.r(), value.g(), value.b(), project_value)
+                    .map_err(|_| EditError::InvalidValue("inspector color value"))?,
             ),
             _ => {
                 self.pending_inspector_numeric_commit = None;
@@ -1552,11 +1582,21 @@ impl EditorSession {
 
         self.pending_inspector_numeric_commit = None;
 
-        let project_value = match commit.target.property {
-            AnimatableProperty::Scale
-            | AnimatableProperty::Anchor
-            | AnimatableProperty::Opacity => commit.value / 100.0,
-            _ => commit.value,
+        let project_value = if matches!(
+            commit.target.component,
+            InspectorNumericComponent::R
+                | InspectorNumericComponent::G
+                | InspectorNumericComponent::B
+                | InspectorNumericComponent::A
+        ) {
+            commit.value / 100.0
+        } else {
+            match commit.target.property {
+                AnimatableProperty::Scale
+                | AnimatableProperty::Anchor
+                | AnimatableProperty::Opacity => commit.value / 100.0,
+                _ => commit.value,
+            }
         };
         if !project_value.is_finite() {
             return Ok(false);
@@ -1595,6 +1635,22 @@ impl EditorSession {
             (PropertyValue::Vec2(value), InspectorNumericComponent::Y) => PropertyValue::Vec2(
                 Vec2::new(value.x(), project_value)
                     .map_err(|_| EditError::InvalidValue("inspector property value"))?,
+            ),
+            (PropertyValue::Color(value), InspectorNumericComponent::R) => PropertyValue::Color(
+                LinearRgba::new(project_value, value.g(), value.b(), value.a())
+                    .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+            ),
+            (PropertyValue::Color(value), InspectorNumericComponent::G) => PropertyValue::Color(
+                LinearRgba::new(value.r(), project_value, value.b(), value.a())
+                    .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+            ),
+            (PropertyValue::Color(value), InspectorNumericComponent::B) => PropertyValue::Color(
+                LinearRgba::new(value.r(), value.g(), project_value, value.a())
+                    .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+            ),
+            (PropertyValue::Color(value), InspectorNumericComponent::A) => PropertyValue::Color(
+                LinearRgba::new(value.r(), value.g(), value.b(), project_value)
+                    .map_err(|_| EditError::InvalidValue("inspector color value"))?,
             ),
             _ => {
                 return Err(EditError::HistoryInvariant(
@@ -1735,11 +1791,21 @@ impl EditorSession {
             return Ok(false);
         };
 
-        let project_value = match commit.target.property {
-            AnimatableProperty::Scale
-            | AnimatableProperty::Anchor
-            | AnimatableProperty::Opacity => commit.value / 100.0,
-            _ => commit.value,
+        let project_value = if matches!(
+            commit.target.component,
+            InspectorNumericComponent::R
+                | InspectorNumericComponent::G
+                | InspectorNumericComponent::B
+                | InspectorNumericComponent::A
+        ) {
+            commit.value / 100.0
+        } else {
+            match commit.target.property {
+                AnimatableProperty::Scale
+                | AnimatableProperty::Anchor
+                | AnimatableProperty::Opacity => commit.value / 100.0,
+                _ => commit.value,
+            }
         };
         if !project_value.is_finite() {
             return Ok(false);
@@ -1805,6 +1871,30 @@ impl EditorSession {
                     Vec2::new(value.x(), project_value)
                         .map_err(|_| EditError::InvalidValue("inspector property value"))?,
                 ),
+                (PropertyValue::Color(value), InspectorNumericComponent::R) => {
+                    PropertyValue::Color(
+                        LinearRgba::new(project_value, value.g(), value.b(), value.a())
+                            .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+                    )
+                }
+                (PropertyValue::Color(value), InspectorNumericComponent::G) => {
+                    PropertyValue::Color(
+                        LinearRgba::new(value.r(), project_value, value.b(), value.a())
+                            .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+                    )
+                }
+                (PropertyValue::Color(value), InspectorNumericComponent::B) => {
+                    PropertyValue::Color(
+                        LinearRgba::new(value.r(), value.g(), project_value, value.a())
+                            .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+                    )
+                }
+                (PropertyValue::Color(value), InspectorNumericComponent::A) => {
+                    PropertyValue::Color(
+                        LinearRgba::new(value.r(), value.g(), value.b(), project_value)
+                            .map_err(|_| EditError::InvalidValue("inspector color value"))?,
+                    )
+                }
                 _ => {
                     return Err(EditError::HistoryInvariant(
                         "inspector multi numeric component does not match property value",
@@ -2653,7 +2743,7 @@ mod tests {
         KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality, ViewportCameraAction,
     };
     use rhythm_core::{
-        domain::Vec2,
+        domain::{LinearRgba, Vec2},
         editor::ProjectEditor,
         ids::{KeyframeId, ObjectId},
         property::{
@@ -2845,6 +2935,48 @@ mod tests {
             })
         );
         assert_eq!(editor.history_len(), 0);
+    }
+
+    #[test]
+    fn inspector_static_color_channel_commit_updates_fill_with_one_history_entry() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+        let target = InspectorNumericTarget {
+            object_id,
+            property: AnimatableProperty::RectangleFill,
+            component: InspectorNumericComponent::R,
+        };
+
+        session.begin_inspector_numeric_edit(target, 0.0, "0.0".to_owned());
+        assert!(session.update_inspector_numeric_edit_buffer(target, "50.0".to_owned()));
+        assert!(session.commit_inspector_numeric_edit(target));
+        assert_eq!(
+            session.commit_pending_inspector_static_property_edit(&mut editor),
+            Ok(true)
+        );
+
+        let fill = property_base_value(
+            editor.project(),
+            object_id,
+            AnimatableProperty::RectangleFill,
+        )
+        .expect("fill");
+        let PropertyValue::Color(fill) = fill else {
+            panic!("fill should be color");
+        };
+        assert!((fill.r() - 0.5).abs() < f32::EPSILON);
+        assert_eq!(editor.history_len(), 1);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            property_base_value(
+                editor.project(),
+                object_id,
+                AnimatableProperty::RectangleFill,
+            ),
+            Ok(PropertyValue::Color(LinearRgba::black_opaque()))
+        );
     }
 
     #[test]
