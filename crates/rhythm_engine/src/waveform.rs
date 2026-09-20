@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::audio::{AudioChannelLayout, DecodedAudio};
+use crate::audio::DecodedAudio;
 use rhythm_core::ids::AssetId;
 
 pub const BASE_BUCKET_FRAMES: usize = 64;
