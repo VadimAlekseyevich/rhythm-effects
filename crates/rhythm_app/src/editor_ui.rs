@@ -173,8 +173,23 @@ pub fn draw_editor_shell(
             session.pan_viewport_points([delta.x, delta.y]);
         }
 
+        if let Some(pointer) = ui.input(|input| input.pointer.hover_pos())
+            && viewport_rect.contains(pointer)
+        {
+            let scroll_y = ui.input(|input| input.smooth_scroll_delta().y);
+            if scroll_y.abs() > f32::EPSILON {
+                let zoom_factor = (scroll_y * 0.002).exp();
+                let anchor = [
+                    pointer.x - viewport_rect.center().x,
+                    pointer.y - viewport_rect.center().y,
+                ];
+                session.zoom_viewport_around_anchor(zoom_factor, anchor);
+            }
+        }
+
         if let Some(texture_id) = composition_texture_id {
-            let preview_size = fit_composition_preview(viewport_rect.size());
+            let preview_size =
+                fit_composition_preview(viewport_rect.size()) * session.viewport_zoom();
             let pan = session.viewport_pan_points();
             let preview_rect = egui::Rect::from_center_size(
                 viewport_rect.center() + egui::vec2(pan[0], pan[1]),
