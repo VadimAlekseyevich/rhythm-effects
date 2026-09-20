@@ -303,8 +303,7 @@ pub fn draw_editor_shell(
                 && let Ok(scene) =
                     rhythm_engine::scene_eval::evaluate_scene(project, session.playhead())
             {
-                let picked =
-                    pick_topmost_object(project, &scene, composition_origin, |_, _| None);
+                let picked = pick_topmost_object(project, &scene, composition_origin, |_, _| None);
                 let ctrl = ui.input(|input| input.modifiers.ctrl);
                 let selected = session.selected_object_ids();
 
