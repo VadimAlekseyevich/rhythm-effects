@@ -1,12 +1,12 @@
-use crate::editor_session::{EditorSession, KeyframeDragMember};
+use crate::editor_session::{EditorSession, KeyframeDragMember, KeyframeInterpolationPreset};
 use rhythm_core::{
     animation::Animated,
     ids::{EffectId, KeyframeId, ObjectId},
     project::{EffectKind, ObjectContent, Project},
     property::{AnimatableProperty, EffectAnimatableProperty, property_keyframe_by_id},
     time::{
-        BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
-        floor_tick_position_to_grid, snap_tick_position_to_grid,
+        BeatDivision, MusicalTick, PPQ, ProjectTimeNs, TempoMap, floor_tick_position_to_grid,
+        snap_tick_position_to_grid,
     },
 };
 use rhythm_engine::waveform::{WaveformData, WaveformSlice};
@@ -901,6 +901,21 @@ fn draw_timeline_rows(
                                         session.select_only_keyframe(keyframe.id);
                                     }
                                 }
+                                if response.secondary_clicked() {
+                                    session.focus_property(*object_id, animatable_property);
+                                    if !session.is_keyframe_selected(keyframe.id) {
+                                        session.select_only_keyframe(keyframe.id);
+                                    }
+                                }
+                                response.context_menu(|ui| {
+                                    ui.label("Interpolation");
+                                    for preset in KeyframeInterpolationPreset::ALL {
+                                        if ui.button(preset.label()).clicked() {
+                                            session.queue_selected_keyframe_interpolation(preset);
+                                            ui.close();
+                                        }
+                                    }
+                                });
                                 if response.drag_started() {
                                     session.focus_property(*object_id, animatable_property);
                                     if !session.is_keyframe_selected(keyframe.id) {
@@ -1594,6 +1609,106 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    fn timeline_stress_project() -> rhythm_core::project::Project {
+        use rhythm_core::{
+            animation::{Animated, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            ids::{KeyframeId, ObjectId},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, MusicalTick, TempoMap},
+        };
+
+        const OBJECT_COUNT: usize = 500;
+        const KEYS_PER_OBJECT: usize = 20;
+
+        let mut project = Project::new(
+            "Timeline Stress",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut next_keyframe_id = 1_001_u64;
+
+        for object_index in 0..OBJECT_COUNT {
+            let object_id = ObjectId::new((object_index + 1) as u64).expect("object id");
+            let mut opacity_keys = Vec::with_capacity(KEYS_PER_OBJECT);
+            for key_index in 0..KEYS_PER_OBJECT {
+                opacity_keys.push(Keyframe::new(
+                    KeyframeId::new(next_keyframe_id).expect("keyframe id"),
+                    MusicalTick::new((key_index as i64) * 60),
+                    key_index as f32 / (KEYS_PER_OBJECT - 1) as f32,
+                    Interpolation::Linear,
+                ));
+                next_keyframe_id += 1;
+            }
+
+            project.composition.objects.push(Object {
+                id: object_id,
+                name: format!("Stress Rect {object_index}"),
+                visible: true,
+                locked: false,
+                transform: TransformAnimation::new(
+                    Animated::new_static(Vec2::new(0.0, 0.0).expect("position")),
+                    Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                    Animated::new_static(0.0),
+                    Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                    Animated::with_keyframes(1.0, opacity_keys).expect("sorted opacity keys"),
+                ),
+                content: ObjectContent::Rectangle(RectangleObject {
+                    size: Animated::new_static(Vec2::new(100.0, 50.0).expect("size")),
+                    fill: Animated::new_static(LinearRgba::black_opaque()),
+                    corner_radius: Animated::new_static(0.0),
+                }),
+                effects: Vec::new(),
+            });
+        }
+
+        project.next_entity_id = next_keyframe_id;
+        project
+            .validate()
+            .expect("timeline stress fixture is valid");
+        project
+    }
+
+    #[test]
+    fn timeline_stress_fixture_limits_row_and_key_work_to_visible_ranges() {
+        let project = timeline_stress_project();
+        let rows = super::build_timeline_rows(&project);
+        let total_keyframes: usize = rows
+            .iter()
+            .filter_map(|row| match row {
+                TimelineRow::Property { keyframe_count, .. } => Some(*keyframe_count),
+                TimelineRow::Object { .. } => None,
+            })
+            .sum();
+
+        assert_eq!(project.composition.objects.len(), 500);
+        assert_eq!(total_keyframes, 10_000);
+
+        let layout = TimelineRowLayout::new(&rows);
+        let visible_rows = layout.visible_range(0.0, 300.0);
+        assert!(visible_rows.len() < 20);
+        assert!(visible_rows.len() < rows.len() / 100);
+
+        let visible_keys = query_visible_keyframes(
+            &project,
+            rhythm_core::ids::ObjectId::new(1).expect("object id"),
+            super::TimelineProperty::Opacity,
+            rhythm_core::time::MusicalTick::new(300),
+            rhythm_core::time::MusicalTick::new(420),
+        );
+        assert_eq!(visible_keys.len(), 3);
+        assert_eq!(
+            visible_keys
+                .iter()
+                .map(|keyframe| keyframe.tick.get())
+                .collect::<Vec<_>>(),
+            vec![300, 360, 420]
+        );
     }
 
     #[test]
