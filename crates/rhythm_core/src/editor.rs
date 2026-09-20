@@ -408,6 +408,7 @@ enum ActiveTransaction {
         property: AnimatableProperty,
         keyframe_id: KeyframeId,
         before: Option<PropertyKeyframe>,
+        initial_value: PropertyValue,
         inserted_next_entity_id_before: Option<u64>,
     },
 }
@@ -666,6 +667,7 @@ impl ProjectEditor {
             property,
             keyframe_id,
             before: existing,
+            initial_value,
             inserted_next_entity_id_before,
         });
         Ok(keyframe_id)
@@ -953,6 +955,7 @@ impl ProjectEditor {
                 property,
                 keyframe_id,
                 before,
+                initial_value,
                 inserted_next_entity_id_before,
             } => {
                 let after = property_keyframe_by_id(
@@ -966,15 +969,7 @@ impl ProjectEditor {
                 if before.as_ref().is_some_and(|before| *before == after) {
                     return Ok(false);
                 }
-                if before.is_none() && after.value == property_keyframe_by_id(
-                    &self.project,
-                    object_id,
-                    property,
-                    keyframe_id,
-                )?
-                .ok_or(EditError::KeyframeNotFound(keyframe_id))?
-                .value
-                {
+                if before.is_none() && after.value == initial_value {
                     if let Some(previous_next_entity_id) = inserted_next_entity_id_before {
                         remove_property_keyframe_by_id(
                             &mut self.project,
@@ -1043,6 +1038,7 @@ impl ProjectEditor {
                 property,
                 keyframe_id,
                 before,
+                initial_value: _,
                 inserted_next_entity_id_before,
             } => {
                 if let Some(before) = before {
