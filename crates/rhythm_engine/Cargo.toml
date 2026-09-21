@@ -10,6 +10,7 @@ rubato.workspace = true
 symphonia.workspace = true
 cpal.workspace = true
 wgpu.workspace = true
+image.workspace = true
 rhythm_core = { path = "../rhythm_core" }
 
 [lints]
