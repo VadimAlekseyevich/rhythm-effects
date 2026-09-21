@@ -630,12 +630,27 @@ impl EditorSession {
     #[must_use]
     pub fn command_search_matches(&self) -> Vec<CommandSearchCommand> {
         let query = self.command_search_query.trim().to_ascii_lowercase();
+        let query_words: Vec<_> = query
+            .split(|character: char| !character.is_ascii_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .collect();
+
         CommandSearchCommand::ALL
             .into_iter()
             .filter(|command| {
-                query.is_empty()
-                    || command.label().to_ascii_lowercase().contains(&query)
-                    || command.shortcut().to_ascii_lowercase().contains(&query)
+                query_words.is_empty()
+                    || query_words.iter().all(|query_word| {
+                        command
+                            .label()
+                            .split(|character: char| !character.is_ascii_alphanumeric())
+                            .chain(
+                                command
+                                    .shortcut()
+                                    .split(|character: char| !character.is_ascii_alphanumeric()),
+                            )
+                            .filter(|word| !word.is_empty())
+                            .any(|word| word.to_ascii_lowercase().starts_with(query_word))
+                    })
             })
             .collect()
     }
