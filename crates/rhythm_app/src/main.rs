@@ -2,6 +2,7 @@
 
 mod editor_session;
 mod editor_ui;
+mod file_dialogs;
 mod gpu;
 mod shortcuts;
 mod timeline;
@@ -237,16 +238,30 @@ impl ApplicationHandler for RhythmApp {
                                 true
                             }
                             EditorShortcut::OpenProject => {
-                                info!("Open Project command requested; native dialog is attached in AI-200");
-                                true
+                                if let Some(path) = file_dialogs::pick_project_to_open() {
+                                    info!(
+                                        path = %path.display(),
+                                        "project open path selected; transactional loading is implemented in AI-235"
+                                    );
+                                    true
+                                } else {
+                                    false
+                                }
                             }
-                            EditorShortcut::SaveProject => {
-                                info!("Save Project command requested; native dialog/path handling is attached in AI-200");
-                                true
-                            }
-                            EditorShortcut::SaveProjectAs => {
-                                info!("Save As command requested; native dialog is attached in AI-200");
-                                true
+                            EditorShortcut::SaveProject | EditorShortcut::SaveProjectAs => {
+                                let suggested_name =
+                                    self.project_editor.project().metadata.name.clone();
+                                if let Some(path) =
+                                    file_dialogs::pick_project_save_path(&suggested_name)
+                                {
+                                    info!(
+                                        path = %path.display(),
+                                        "project save path selected; serialization/publication is implemented in AI-236 through AI-240"
+                                    );
+                                    true
+                                } else {
+                                    false
+                                }
                             }
                             EditorShortcut::Undo => match self.project_editor.undo() {
                                 Ok(changed) => changed,
@@ -441,6 +456,16 @@ impl ApplicationHandler for RhythmApp {
                             );
                         }
                     });
+
+                    if self.session.take_import_dialog_request()
+                        && let Some(path) = file_dialogs::pick_media_to_import()
+                    {
+                        info!(
+                            path = %path.display(),
+                            "media import path selected; image decoding starts in AI-201"
+                        );
+                    }
+
                     match self
                         .session
                         .sync_viewport_position_drag(&mut self.project_editor)
