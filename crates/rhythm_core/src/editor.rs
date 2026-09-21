@@ -3,10 +3,10 @@ use std::collections::HashSet;
 use crate::{
     animation::{AnimationInvariantError, Interpolation, Keyframe},
     domain::Vec2,
-    ids::{EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
+    ids::{AssetId, EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{
-        Effect, EffectKind, FontStyle, FontWeight, Object, ObjectContent, Project,
-        ProjectValidationError, TextAlignment, TextObject,
+        AssetKind, AssetRecord, AssetSource, Effect, EffectKind, FontStyle, FontWeight, Object,
+        ObjectContent, Project, ProjectValidationError, TextAlignment, TextObject,
     },
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
@@ -125,6 +125,10 @@ pub struct PropertyKeyframeValueRecord {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
+    AddAsset {
+        kind: AssetKind,
+        source: AssetSource,
+    },
     AddObject {
         object: Box<Object>,
     },
@@ -237,6 +241,7 @@ impl EditCommand {
     #[must_use]
     pub const fn semantic_name(&self) -> &'static str {
         match self {
+            Self::AddAsset { .. } => "AddAsset",
             Self::AddObject { .. } => "AddObject",
             Self::DeleteObject { .. } => "DeleteObject",
             Self::DeleteObjects { .. } => "DeleteObjects",
@@ -270,6 +275,10 @@ impl EditCommand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HistoryPayload {
+    AssetInserted {
+        index: usize,
+        asset: AssetRecord,
+    },
     ObjectInserted {
         index: usize,
         object: Box<Object>,
@@ -661,6 +670,35 @@ impl ProjectEditor {
 
     pub fn mark_saved(&mut self) {
         self.history.mark_saved();
+    }
+
+    pub fn ensure_asset_record(
+        &mut self,
+        kind: AssetKind,
+        source: AssetSource,
+    ) -> Result<AssetId, EditError> {
+        if let Some(existing) = self
+            .project
+            .assets
+            .iter()
+            .find(|asset| asset.kind == kind && asset.source == source)
+        {
+            return Ok(existing.id);
+        }
+
+        self.execute(EditCommand::AddAsset {
+            kind,
+            source: source.clone(),
+        })?;
+
+        self.project
+            .assets
+            .iter()
+            .find(|asset| asset.kind == kind && asset.source == source)
+            .map(|asset| asset.id)
+            .ok_or(EditError::HistoryInvariant(
+                "asset insert command did not create requested source",
+            ))
     }
 
     pub fn next_keyframe_id(&self) -> Result<KeyframeId, EditError> {
@@ -1653,6 +1691,38 @@ impl ProjectEditor {
         command: EditCommand,
     ) -> Result<Option<PendingHistoryEntry>, EditError> {
         match command {
+            EditCommand::AddAsset { kind, source } => {
+                if self
+                    .project
+                    .assets
+                    .iter()
+                    .any(|asset| asset.kind == kind && asset.source == source)
+                {
+                    return Ok(None);
+                }
+
+                let previous_next_entity_id = self.project.next_entity_id;
+                let mut allocator = EntityIdAllocator::new(previous_next_entity_id)?;
+                let asset = AssetRecord {
+                    id: allocator.allocate_asset()?,
+                    kind,
+                    source,
+                };
+                let index = self.project.assets.len();
+                self.project.assets.push(asset.clone());
+                self.project.next_entity_id = allocator.next_entity_id();
+
+                if let Err(error) = self.project.validate() {
+                    self.project.assets.pop();
+                    self.project.next_entity_id = previous_next_entity_id;
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Add Asset",
+                    HistoryPayload::AssetInserted { index, asset },
+                )))
+            }
             EditCommand::AddObject { object } => {
                 if self
                     .project
@@ -2725,6 +2795,23 @@ impl ProjectEditor {
         direction: HistoryDirection,
     ) -> Result<(), EditError> {
         match (&entry.payload, direction) {
+            (HistoryPayload::AssetInserted { index, asset }, HistoryDirection::Undo) => {
+                let removed = self
+                    .project
+                    .assets
+                    .get(*index)
+                    .ok_or(EditError::HistoryInvariant("asset index missing"))?;
+                if removed.id != asset.id {
+                    return Err(EditError::HistoryInvariant("asset identity mismatch"));
+                }
+                self.project.assets.remove(*index);
+            }
+            (HistoryPayload::AssetInserted { index, asset }, HistoryDirection::Redo) => {
+                if *index > self.project.assets.len() {
+                    return Err(EditError::HistoryInvariant("asset restore index invalid"));
+                }
+                self.project.assets.insert(*index, asset.clone());
+            }
             (HistoryPayload::ObjectInserted { index, object }, HistoryDirection::Undo)
             | (HistoryPayload::ObjectDeleted { index, object }, HistoryDirection::Redo) => {
                 let removed = self
@@ -3551,9 +3638,9 @@ mod tests {
         domain::{LinearRgba, Vec2},
         ids::{EffectId, KeyframeId, ObjectId},
         project::{
-            BlurEffect, Effect, EffectKind, FontReference, FontStyle, FontWeight, Object,
-            ObjectContent, Project, ProjectSettings, RectangleObject, TextAlignment, TextObject,
-            TransformAnimation,
+            AssetKind, AssetSource, BlurEffect, Effect, EffectKind, FontReference, FontStyle,
+            FontWeight, Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+            TextAlignment, TextObject, TransformAnimation,
         },
         property::{AnimatableProperty, PropertyValue, property_base_value},
         time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
@@ -3748,6 +3835,68 @@ mod tests {
         assert_eq!(text.font.style, FontStyle::Normal);
         assert_eq!(text.font_size, 48.0);
         assert_eq!(text.alignment, TextAlignment::Left);
+    }
+
+    #[test]
+    fn ensure_asset_record_reuses_duplicate_semantic_source_without_new_history() {
+        let mut editor = editor_with_object();
+        let source = AssetSource::File {
+            path: "assets/image.png".to_owned(),
+            relative_to_project: true,
+        };
+
+        let first = editor
+            .ensure_asset_record(AssetKind::Image, source.clone())
+            .expect("first asset");
+        let next_after_first = editor.project().next_entity_id;
+        let history_after_first = editor.history_len();
+        let second = editor
+            .ensure_asset_record(AssetKind::Image, source)
+            .expect("reused asset");
+
+        assert_eq!(first, second);
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.project().next_entity_id, next_after_first);
+        assert_eq!(editor.history_len(), history_after_first);
+    }
+
+    #[test]
+    fn ensure_asset_record_keeps_kind_part_of_dedup_identity() {
+        let mut editor = editor_with_object();
+        let source = AssetSource::File {
+            path: "external.dat".to_owned(),
+            relative_to_project: false,
+        };
+
+        let image = editor
+            .ensure_asset_record(AssetKind::Image, source.clone())
+            .expect("image asset");
+        let audio = editor
+            .ensure_asset_record(AssetKind::Audio, source)
+            .expect("audio asset");
+
+        assert_ne!(image, audio);
+        assert_eq!(editor.project().assets.len(), 2);
+        assert_eq!(editor.history_len(), 2);
+    }
+
+    #[test]
+    fn inserted_asset_record_is_undoable_and_redoable() {
+        let mut editor = editor_with_object();
+        let source = AssetSource::File {
+            path: "assets/image.png".to_owned(),
+            relative_to_project: true,
+        };
+        let asset_id = editor
+            .ensure_asset_record(AssetKind::Image, source)
+            .expect("asset");
+
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.undo(), Ok(true));
+        assert!(editor.project().assets.is_empty());
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.project().assets[0].id, asset_id);
     }
 
     #[test]
