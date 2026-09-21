@@ -5,9 +5,9 @@ use crate::{
     domain::Vec2,
     ids::{AssetId, EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{
-        AssetKind, AssetRecord, AssetSource, Effect, EffectKind, FontStyle, FontWeight, ImageObject,
-        Object, ObjectContent, Project, ProjectValidationError, TextAlignment, TextObject,
-        TransformAnimation,
+        AssetKind, AssetRecord, AssetSource, Effect, EffectKind, FontStyle, FontWeight,
+        ImageObject, Object, ObjectContent, Project, ProjectValidationError, TextAlignment,
+        TextObject, TransformAnimation,
     },
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
@@ -3017,7 +3017,9 @@ impl ProjectEditor {
                     .get(*object_index)
                     .ok_or(EditError::HistoryInvariant("image object index missing"))?;
                 if current.id != object.id {
-                    return Err(EditError::HistoryInvariant("image object identity mismatch"));
+                    return Err(EditError::HistoryInvariant(
+                        "image object identity mismatch",
+                    ));
                 }
                 self.project.composition.objects.remove(*object_index);
 
