@@ -13,7 +13,7 @@ use rhythm_core::{
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
         property_base_value, property_keyframe_at_tick, property_keyframe_count,
-        property_keyframe_has_successor, property_value_compatible,
+        property_keyframe_has_successor, property_keyframes, property_value_compatible,
     },
     time::{
         BeatDivision, DurationNs, MVP_BEAT_DIVISIONS, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
@@ -580,6 +580,7 @@ impl EditorSession {
         true
     }
 
+    #[cfg(test)]
     pub fn open_command_search(&mut self) -> bool {
         if self.command_search_open {
             return false;
@@ -1871,6 +1872,55 @@ impl EditorSession {
 
         self.selected_objects = replacement;
         true
+    }
+
+    pub fn select_all_semantic(
+        &mut self,
+        project: &rhythm_core::project::Project,
+    ) -> Result<bool, EditError> {
+        if let Some(anchor_keyframe_id) = self.selected_keyframe_ids().first().copied()
+            && let Some(located) = locate_property_keyframe(project, anchor_keyframe_id)
+        {
+            let replacement: HashSet<_> =
+                property_keyframes(project, located.object_id, located.property)?
+                    .into_iter()
+                    .map(|keyframe| keyframe.id)
+                    .collect();
+            if replacement == self.selected_keyframes {
+                return Ok(false);
+            }
+            self.selected_keyframes = replacement;
+            return Ok(true);
+        }
+
+        Ok(self.replace_object_selection_many(
+            project
+                .composition
+                .objects
+                .iter()
+                .map(|object| object.id),
+        ))
+    }
+
+    pub fn delete_active_selection(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        if !self.selected_keyframes.is_empty() {
+            return self.delete_selected_keyframes(editor);
+        }
+
+        let object_ids = self.selected_object_ids();
+        if object_ids.is_empty() {
+            return Ok(false);
+        }
+
+        let changed = editor.execute(EditCommand::DeleteObjects { object_ids })?;
+        if changed {
+            self.selected_objects.clear();
+            self.focused_property = None;
+        }
+        Ok(changed)
     }
 
     pub fn begin_viewport_box_selection(&mut self, start: [f32; 2]) {
@@ -4378,6 +4428,70 @@ mod tests {
                 property: AnimatableProperty::Scale,
             })
         );
+    }
+
+    #[test]
+    fn select_all_semantic_prefers_selected_keyframe_property_then_objects() {
+        use rhythm_core::animation::{Animated, Interpolation, Keyframe};
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let first_key = KeyframeId::new(2).expect("keyframe id");
+        let second_key = KeyframeId::new(3).expect("keyframe id");
+        let mut project = editor_with_object_for_drag().into_project();
+        project.composition.objects[0].transform.opacity = Animated::with_keyframes(
+            1.0,
+            vec![
+                Keyframe::new(
+                    first_key,
+                    MusicalTick::new(0),
+                    0.25,
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    second_key,
+                    MusicalTick::new(240),
+                    0.75,
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("animated opacity");
+        project.next_entity_id = 4;
+
+        let mut session = EditorSession::default();
+        session.select_only_keyframe(first_key);
+        assert_eq!(session.select_all_semantic(&project), Ok(true));
+        let mut selected = session.selected_keyframe_ids();
+        selected.sort_by_key(|keyframe_id| keyframe_id.get());
+        assert_eq!(selected, vec![first_key, second_key]);
+
+        session.clear_keyframe_selection();
+        assert_eq!(session.select_all_semantic(&project), Ok(true));
+        assert!(session.is_object_selected(object_id));
+    }
+
+    #[test]
+    fn delete_active_selection_deletes_multiple_objects_in_one_history_entry() {
+        let first_id = ObjectId::new(1).expect("first object");
+        let second_id = ObjectId::new(2).expect("second object");
+        let mut project = editor_with_object_for_drag().into_project();
+        let mut second = project.composition.objects[0].clone();
+        second.id = second_id;
+        second.name = "Second".to_owned();
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut session = EditorSession::default();
+        session.replace_object_selection_many([first_id, second_id]);
+
+        assert_eq!(session.delete_active_selection(&mut editor), Ok(true));
+        assert!(editor.project().composition.objects.is_empty());
+        assert_eq!(editor.history_len(), 1);
+        assert!(session.selected_object_ids().is_empty());
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(editor.project().composition.objects.len(), 2);
     }
 
     #[test]
