@@ -889,6 +889,88 @@ fn draw_multi_animatable_property_row(
     });
 }
 
+fn draw_command_search(context: &egui::Context, session: &mut EditorSession) {
+    if !session.command_search_open() {
+        return;
+    }
+
+    let mut window_open = true;
+    egui::Window::new("Command Search")
+        .id(egui::Id::new("command_search"))
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 72.0))
+        .default_width(440.0)
+        .collapsible(false)
+        .resizable(false)
+        .open(&mut window_open)
+        .show(context, |ui| {
+            let mut query = session.command_search_query().to_owned();
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut query)
+                    .hint_text("Search commands")
+                    .desired_width(f32::INFINITY),
+            );
+            if session.take_command_search_focus_request() {
+                response.request_focus();
+            }
+            if response.changed() {
+                session.update_command_search_query(query);
+            }
+
+            if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                session.close_command_search();
+                return;
+            }
+
+            let commands = session.command_search_matches();
+            if response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                && let Some(command) = commands
+                    .iter()
+                    .copied()
+                    .find(|command| session.command_search_command_enabled(*command))
+            {
+                session.choose_command_search_command(command);
+                return;
+            }
+
+            ui.separator();
+            if commands.is_empty() {
+                ui.label("No matching commands");
+                return;
+            }
+
+            for command in commands {
+                let enabled = session.command_search_command_enabled(command);
+                let clicked = ui
+                    .horizontal(|ui| {
+                        let clicked = ui
+                            .add_enabled(
+                                enabled,
+                                egui::Button::new(command.label())
+                                    .min_size(egui::vec2(210.0, 26.0)),
+                            )
+                            .clicked();
+                        let shortcut = command.shortcut();
+                        if !shortcut.is_empty() {
+                            ui.weak(shortcut);
+                        }
+                        if let Some(reason) = session.command_search_disabled_reason(command) {
+                            ui.weak(reason);
+                        }
+                        clicked
+                    })
+                    .inner;
+                if clicked {
+                    session.choose_command_search_command(command);
+                    break;
+                }
+            }
+        });
+
+    if !window_open {
+        session.close_command_search();
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DiagnosticsView {
     pub adapter_name: String,
@@ -937,6 +1019,13 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.heading("Rhythm Effects");
+                if ui
+                    .button("Commands")
+                    .on_hover_text("Ctrl+K")
+                    .clicked()
+                {
+                    session.toggle_command_search();
+                }
                 ui.separator();
                 ui.label("Transport");
                 if ui
@@ -1884,6 +1973,9 @@ pub fn draw_editor_shell(
             );
         }
     });
+
+    let context = ui.ctx().clone();
+    draw_command_search(&context, session);
 }
 
 #[cfg(test)]
