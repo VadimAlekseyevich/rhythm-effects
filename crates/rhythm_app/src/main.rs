@@ -232,6 +232,79 @@ impl ApplicationHandler for RhythmApp {
 
                     let handled = if let Some(shortcut) = shortcut {
                         match shortcut {
+                            EditorShortcut::NewProject => {
+                                info!("New Project command requested; native project lifecycle is attached in AI-200");
+                                true
+                            }
+                            EditorShortcut::OpenProject => {
+                                info!("Open Project command requested; native dialog is attached in AI-200");
+                                true
+                            }
+                            EditorShortcut::SaveProject => {
+                                info!("Save Project command requested; native dialog/path handling is attached in AI-200");
+                                true
+                            }
+                            EditorShortcut::SaveProjectAs => {
+                                info!("Save As command requested; native dialog is attached in AI-200");
+                                true
+                            }
+                            EditorShortcut::Undo => match self.project_editor.undo() {
+                                Ok(changed) => changed,
+                                Err(error) => {
+                                    warn!(?error, "undo failed");
+                                    false
+                                }
+                            },
+                            EditorShortcut::Redo => match self.project_editor.redo() {
+                                Ok(changed) => changed,
+                                Err(error) => {
+                                    warn!(?error, "redo failed");
+                                    false
+                                }
+                            },
+                            EditorShortcut::Copy => self
+                                .session
+                                .copy_selected_keyframes(self.project_editor.project()),
+                            EditorShortcut::Paste => match self
+                                .session
+                                .paste_keyframe_clipboard(&mut self.project_editor)
+                            {
+                                Ok(changed) => changed,
+                                Err(error) => {
+                                    warn!(?error, "paste selection failed");
+                                    false
+                                }
+                            },
+                            EditorShortcut::Duplicate => match self
+                                .session
+                                .duplicate_selected_keyframes(&mut self.project_editor)
+                            {
+                                Ok(changed) => changed,
+                                Err(error) => {
+                                    warn!(?error, "duplicate selection failed");
+                                    false
+                                }
+                            },
+                            EditorShortcut::SelectAll => match self
+                                .session
+                                .select_all_semantic(self.project_editor.project())
+                            {
+                                Ok(changed) => changed,
+                                Err(error) => {
+                                    warn!(?error, "select all failed");
+                                    false
+                                }
+                            },
+                            EditorShortcut::DeleteSelection => match self
+                                .session
+                                .delete_active_selection(&mut self.project_editor)
+                            {
+                                Ok(changed) => changed,
+                                Err(error) => {
+                                    warn!(?error, "delete selection failed");
+                                    false
+                                }
+                            },
                             EditorShortcut::FocusProperty(property) => {
                                 self.session.focus_selected_property(property)
                             }
@@ -253,31 +326,6 @@ impl ApplicationHandler for RhythmApp {
                                 true
                             }
                         }
-                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyC {
-                        self.session
-                            .copy_selected_keyframes(self.project_editor.project())
-                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyV {
-                        match self
-                            .session
-                            .paste_keyframe_clipboard(&mut self.project_editor)
-                        {
-                            Ok(changed) => changed,
-                            Err(error) => {
-                                warn!(?error, "paste keyframes failed");
-                                false
-                            }
-                        }
-                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyD {
-                        match self
-                            .session
-                            .duplicate_selected_keyframes(&mut self.project_editor)
-                        {
-                            Ok(changed) => changed,
-                            Err(error) => {
-                                warn!(?error, "duplicate selected keyframes failed");
-                                false
-                            }
-                        }
                     } else if direction != 0 && alt && !shift && !super_key {
                         let result = if control {
                             self.session.move_selected_keyframes_by_beat(
@@ -294,17 +342,6 @@ impl ApplicationHandler for RhythmApp {
                             Ok(changed) => changed,
                             Err(error) => {
                                 warn!(?error, "selected keyframe keyboard move failed");
-                                false
-                            }
-                        }
-                    } else if !control && !shift && !alt && !super_key && code == KeyCode::Delete {
-                        match self
-                            .session
-                            .delete_selected_keyframes(&mut self.project_editor)
-                        {
-                            Ok(changed) => changed,
-                            Err(error) => {
-                                warn!(?error, "delete selected keyframes failed");
                                 false
                             }
                         }
