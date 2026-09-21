@@ -12,6 +12,7 @@ egui.workspace = true
 wgpu.workspace = true
 thiserror.workspace = true
 pollster.workspace = true
+rfd.workspace = true
 rhythm_core = { path = "../rhythm_core" }
 rhythm_engine = { path = "../rhythm_engine" }
 tracing.workspace = true
