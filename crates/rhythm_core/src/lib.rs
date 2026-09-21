@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod animation;
+pub mod asset_paths;
 pub mod domain;
 pub mod editor;
 pub mod geometry;
