@@ -6,6 +6,7 @@ pub enum EditorShortcut {
     FocusProperty(AnimatableProperty),
     KeyframeAction,
     TogglePlayback,
+    ToggleCommandSearch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -28,6 +29,15 @@ pub const fn dispatch_physical_shortcut(
     code: KeyCode,
     modifiers: ShortcutModifiers,
 ) -> Option<EditorShortcut> {
+    if modifiers.control
+        && !modifiers.shift
+        && !modifiers.alt
+        && !modifiers.super_key
+        && matches!(code, KeyCode::KeyK)
+    {
+        return Some(EditorShortcut::ToggleCommandSearch);
+    }
+
     if !modifiers.is_empty() {
         return None;
     }
@@ -74,6 +84,20 @@ mod tests {
         assert_eq!(
             dispatch_physical_shortcut(KeyCode::Space, ShortcutModifiers::default()),
             Some(EditorShortcut::TogglePlayback)
+        );
+    }
+
+    #[test]
+    fn ctrl_k_dispatches_command_search() {
+        assert_eq!(
+            dispatch_physical_shortcut(
+                KeyCode::KeyK,
+                ShortcutModifiers {
+                    control: true,
+                    ..ShortcutModifiers::default()
+                },
+            ),
+            Some(EditorShortcut::ToggleCommandSearch)
         );
     }
 
