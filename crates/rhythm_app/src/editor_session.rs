@@ -1914,11 +1914,7 @@ impl EditorSession {
         }
 
         Ok(self.replace_object_selection_many(
-            project
-                .composition
-                .objects
-                .iter()
-                .map(|object| object.id),
+            project.composition.objects.iter().map(|object| object.id),
         ))
     }
 
@@ -4474,12 +4470,7 @@ mod tests {
         project.composition.objects[0].transform.opacity = Animated::with_keyframes(
             1.0,
             vec![
-                Keyframe::new(
-                    first_key,
-                    MusicalTick::new(0),
-                    0.25,
-                    Interpolation::Linear,
-                ),
+                Keyframe::new(first_key, MusicalTick::new(0), 0.25, Interpolation::Linear),
                 Keyframe::new(
                     second_key,
                     MusicalTick::new(240),

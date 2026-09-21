@@ -55,9 +55,12 @@ pub fn relative_asset_source(
     };
 
     if relative.as_os_str().is_empty()
-        || relative
-            .components()
-            .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
     {
         return Ok(None);
     }

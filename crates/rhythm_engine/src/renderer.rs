@@ -7,10 +7,7 @@ use std::collections::HashMap;
 
 use rhythm_core::ids::AssetId;
 
-use crate::{
-    image_decode::ImageDecodeGeneration,
-    runtime_assets::ValidatedDecodedImage,
-};
+use crate::{image_decode::ImageDecodeGeneration, runtime_assets::ValidatedDecodedImage};
 
 pub const INITIAL_COMPOSITION_WIDTH: u32 = 1920;
 pub const INITIAL_COMPOSITION_HEIGHT: u32 = 1080;
@@ -94,7 +91,9 @@ impl ImageTextureCache {
         let asset_id = decoded.asset_id();
         let generation = decoded.generation();
         let decision = image_texture_cache_decision(
-            self.entries.get(&asset_id).map(CachedImageTexture::generation),
+            self.entries
+                .get(&asset_id)
+                .map(CachedImageTexture::generation),
             generation,
         )?;
         if decision == ImageTextureCacheDecision::Unchanged {
@@ -497,8 +496,8 @@ impl Renderer {
 mod tests {
     use super::{
         COMPOSITION_FORMAT, IMAGE_TEXTURE_FORMAT, INITIAL_COMPOSITION_HEIGHT,
-        INITIAL_COMPOSITION_WIDTH, PREVIEW_DISPLAY_FORMAT, ImageTextureCacheDecision,
-        ImageTextureUploadError, image_texture_cache_decision, validate_rgba8_payload,
+        INITIAL_COMPOSITION_WIDTH, ImageTextureCacheDecision, ImageTextureUploadError,
+        PREVIEW_DISPLAY_FORMAT, image_texture_cache_decision, validate_rgba8_payload,
     };
     use crate::image_decode::ImageDecodeGeneration;
 

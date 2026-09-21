@@ -234,7 +234,9 @@ impl ApplicationHandler for RhythmApp {
                     let handled = if let Some(shortcut) = shortcut {
                         match shortcut {
                             EditorShortcut::NewProject => {
-                                info!("New Project command requested; native project lifecycle is attached in AI-200");
+                                info!(
+                                    "New Project command requested; native project lifecycle is attached in AI-200"
+                                );
                                 true
                             }
                             EditorShortcut::OpenProject => {
@@ -473,14 +475,13 @@ impl ApplicationHandler for RhythmApp {
                                     path: path.to_owned(),
                                     relative_to_project: false,
                                 };
-                                match self.project_editor.execute(EditCommand::RelinkAsset {
-                                    asset_id,
-                                    source,
-                                }) {
+                                match self
+                                    .project_editor
+                                    .execute(EditCommand::RelinkAsset { asset_id, source })
+                                {
                                     Ok(true) => info!(
                                         asset_id = asset_id.get(),
-                                        path,
-                                        "image asset relinked while preserving AssetId"
+                                        path, "image asset relinked while preserving AssetId"
                                     ),
                                     Ok(false) => {}
                                     Err(error) => warn!(

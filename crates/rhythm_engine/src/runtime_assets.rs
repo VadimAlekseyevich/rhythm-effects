@@ -65,18 +65,10 @@ pub enum RuntimeAssetError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeImageState {
-    Missing {
-        generation: ImageDecodeGeneration,
-    },
-    Decoding {
-        generation: ImageDecodeGeneration,
-    },
-    Ready {
-        generation: ImageDecodeGeneration,
-    },
-    Failed {
-        generation: ImageDecodeGeneration,
-    },
+    Missing { generation: ImageDecodeGeneration },
+    Decoding { generation: ImageDecodeGeneration },
+    Ready { generation: ImageDecodeGeneration },
+    Failed { generation: ImageDecodeGeneration },
 }
 
 impl RuntimeImageState {
@@ -99,10 +91,7 @@ pub struct RuntimeAssetManager {
 
 impl RuntimeAssetManager {
     #[must_use]
-    pub fn current_image_generation(
-        &self,
-        asset_id: AssetId,
-    ) -> Option<ImageDecodeGeneration> {
+    pub fn current_image_generation(&self, asset_id: AssetId) -> Option<ImageDecodeGeneration> {
         self.image_generations.get(&asset_id).copied()
     }
 
@@ -116,10 +105,8 @@ impl RuntimeAssetManager {
         asset_id: AssetId,
     ) -> Result<ImageDecodeGeneration, RuntimeAssetError> {
         let next = self.next_image_generation(asset_id)?;
-        self.image_states.insert(
-            asset_id,
-            RuntimeImageState::Decoding { generation: next },
-        );
+        self.image_states
+            .insert(asset_id, RuntimeImageState::Decoding { generation: next });
         Ok(next)
     }
 
@@ -128,10 +115,8 @@ impl RuntimeAssetManager {
         asset_id: AssetId,
     ) -> Result<ImageDecodeGeneration, RuntimeAssetError> {
         let next = self.next_image_generation(asset_id)?;
-        self.image_states.insert(
-            asset_id,
-            RuntimeImageState::Missing { generation: next },
-        );
+        self.image_states
+            .insert(asset_id, RuntimeImageState::Missing { generation: next });
         Ok(next)
     }
 
@@ -210,10 +195,7 @@ mod tests {
     use rhythm_core::ids::AssetId;
     use std::path::PathBuf;
 
-    fn success_result(
-        asset_id: AssetId,
-        generation: ImageDecodeGeneration,
-    ) -> ImageDecodeResult {
+    fn success_result(asset_id: AssetId, generation: ImageDecodeGeneration) -> ImageDecodeResult {
         ImageDecodeResult {
             asset_id,
             generation,
@@ -250,13 +232,17 @@ mod tests {
     fn missing_state_invalidates_previous_decode_and_relink_starts_new_generation() {
         let asset_id = AssetId::new(6).expect("asset id");
         let mut assets = RuntimeAssetManager::default();
-        let first = assets.begin_image_decode(asset_id).expect("first generation");
+        let first = assets
+            .begin_image_decode(asset_id)
+            .expect("first generation");
         assert_eq!(
             assets.image_state(asset_id),
             Some(RuntimeImageState::Decoding { generation: first })
         );
 
-        let missing = assets.mark_image_missing(asset_id).expect("missing generation");
+        let missing = assets
+            .mark_image_missing(asset_id)
+            .expect("missing generation");
         assert!(missing.get() > first.get());
         assert_eq!(
             assets.image_state(asset_id),
@@ -274,7 +260,9 @@ mod tests {
             })
         );
 
-        let relinked = assets.begin_image_decode(asset_id).expect("relink generation");
+        let relinked = assets
+            .begin_image_decode(asset_id)
+            .expect("relink generation");
         assert!(relinked.get() > missing.get());
         assert_eq!(
             assets.image_state(asset_id),

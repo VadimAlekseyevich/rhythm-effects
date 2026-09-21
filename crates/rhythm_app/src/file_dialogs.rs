@@ -44,7 +44,11 @@ pub fn pick_image_to_relink() -> Option<PathBuf> {
 
 fn project_file_name(project_name: &str) -> String {
     let trimmed = project_name.trim();
-    let stem = if trimmed.is_empty() { "Untitled" } else { trimmed };
+    let stem = if trimmed.is_empty() {
+        "Untitled"
+    } else {
+        trimmed
+    };
     if Path::new(stem)
         .extension()
         .and_then(|extension| extension.to_str())

@@ -79,7 +79,8 @@ pub struct ImageDecodeWorker {
 
 impl ImageDecodeWorker {
     pub fn spawn() -> std::io::Result<Self> {
-        let (request_tx, request_rx) = sync_channel::<ImageDecodeRequest>(IMAGE_DECODE_QUEUE_CAPACITY);
+        let (request_tx, request_rx) =
+            sync_channel::<ImageDecodeRequest>(IMAGE_DECODE_QUEUE_CAPACITY);
         let (result_tx, result_rx) = sync_channel::<ImageDecodeResult>(IMAGE_DECODE_QUEUE_CAPACITY);
 
         let thread = thread::Builder::new()
@@ -107,10 +108,14 @@ impl ImageDecodeWorker {
     }
 
     pub fn try_submit(&self, request: ImageDecodeRequest) -> Result<(), ImageDecodeSubmitError> {
-        self.request_tx.try_send(request).map_err(|error| match error {
-            TrySendError::Full(request) => ImageDecodeSubmitError::QueueFull(request),
-            TrySendError::Disconnected(request) => ImageDecodeSubmitError::Disconnected(request),
-        })
+        self.request_tx
+            .try_send(request)
+            .map_err(|error| match error {
+                TrySendError::Full(request) => ImageDecodeSubmitError::QueueFull(request),
+                TrySendError::Disconnected(request) => {
+                    ImageDecodeSubmitError::Disconnected(request)
+                }
+            })
     }
 
     pub fn try_recv(&self) -> Result<Option<ImageDecodeResult>, TryRecvError> {
@@ -127,7 +132,8 @@ impl ImageDecodeWorker {
 }
 
 fn decode_image_file(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
-    let reader = ImageReader::open(path).map_err(|error| ImageDecodeError::Io(error.to_string()))?;
+    let reader =
+        ImageReader::open(path).map_err(|error| ImageDecodeError::Io(error.to_string()))?;
     let reader = reader
         .with_guessed_format()
         .map_err(|error| ImageDecodeError::Io(error.to_string()))?;
@@ -212,10 +218,7 @@ mod tests {
         assert_eq!(decoded.width, 2);
         assert_eq!(decoded.height, 1);
         assert_eq!(decoded.byte_len(), 8);
-        assert_eq!(
-            decoded.rgba8,
-            vec![255, 0, 0, 255, 0, 128, 255, 64]
-        );
+        assert_eq!(decoded.rgba8, vec![255, 0, 0, 255, 0, 128, 255, 64]);
 
         fs::remove_file(path).expect("remove fixture");
     }
@@ -244,10 +247,7 @@ mod tests {
         assert_eq!(decoded.width, 2);
         assert_eq!(decoded.height, 1);
         assert_eq!(decoded.byte_len(), 8);
-        assert_eq!(
-            decoded.rgba8,
-            vec![12, 34, 56, 78, 90, 123, 210, 255]
-        );
+        assert_eq!(decoded.rgba8, vec![12, 34, 56, 78, 90, 123, 210, 255]);
 
         fs::remove_file(path).expect("remove fixture");
     }
@@ -287,7 +287,10 @@ mod tests {
         assert_eq!(result.asset_id, asset_id);
         assert_eq!(result.generation, generation);
         assert_eq!(result.path, path);
-        assert_eq!(result.result.expect("decoded image").rgba8, vec![10, 20, 30, 40]);
+        assert_eq!(
+            result.result.expect("decoded image").rgba8,
+            vec![10, 20, 30, 40]
+        );
 
         fs::remove_file(result.path).expect("remove fixture");
     }
