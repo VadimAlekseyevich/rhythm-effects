@@ -246,6 +246,10 @@ impl ApplicationHandler for RhythmApp {
                                 self.session.toggle_playback();
                                 true
                             }
+                            EditorShortcut::ToggleCommandSearch => {
+                                self.session.toggle_command_search();
+                                true
+                            }
                         }
                     } else if control && !shift && !alt && !super_key && code == KeyCode::KeyC {
                         self.session
@@ -429,6 +433,14 @@ impl ApplicationHandler for RhythmApp {
                         Ok(true) => window.request_redraw(),
                         Ok(false) => {}
                         Err(error) => warn!(?error, "viewport rotation drag failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_command_search_command(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "command search action failed"),
                     }
                     match self
                         .session
