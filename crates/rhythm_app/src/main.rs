@@ -3,16 +3,19 @@
 mod editor_session;
 mod editor_ui;
 mod gpu;
+mod shortcuts;
 mod timeline;
+mod viewport;
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use editor_session::EditorSession;
+use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use rhythm_core::APP_NAME;
 use rhythm_engine::renderer::Renderer;
+use shortcuts::{EditorShortcut, ShortcutModifiers, dispatch_physical_shortcut};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use winit::{
@@ -198,12 +201,14 @@ impl ApplicationHandler for RhythmApp {
                 is_synthetic,
                 ..
             } => {
-                if !is_synthetic
-                    && event.state == ElementState::Pressed
-                    && !self
+                let text_or_numeric_input_active = self.session.text_or_numeric_edit_active()
+                    || self
                         .egui_context
                         .as_ref()
-                        .is_some_and(egui::Context::wants_keyboard_input)
+                        .is_some_and(|context| context.egui_wants_keyboard_input());
+                if !is_synthetic
+                    && event.state == ElementState::Pressed
+                    && !text_or_numeric_input_active
                     && let PhysicalKey::Code(code) = event.physical_key
                 {
                     let control = self.modifiers.control_key();
@@ -215,21 +220,43 @@ impl ApplicationHandler for RhythmApp {
                         KeyCode::ArrowRight => 1,
                         _ => 0,
                     };
+                    let shortcut = dispatch_physical_shortcut(
+                        code,
+                        ShortcutModifiers {
+                            control,
+                            shift,
+                            alt,
+                            super_key,
+                        },
+                    );
 
-                    let handled = if control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::KeyC
-                    {
+                    let handled = if let Some(shortcut) = shortcut {
+                        match shortcut {
+                            EditorShortcut::FocusProperty(property) => {
+                                self.session.focus_selected_property(property)
+                            }
+                            EditorShortcut::KeyframeAction => {
+                                match self.session.keyframe_action(&mut self.project_editor) {
+                                    Ok(changed) => changed,
+                                    Err(error) => {
+                                        warn!(?error, "keyframe action failed");
+                                        false
+                                    }
+                                }
+                            }
+                            EditorShortcut::TogglePlayback => {
+                                self.session.toggle_playback();
+                                true
+                            }
+                            EditorShortcut::ToggleCommandSearch => {
+                                self.session.toggle_command_search();
+                                true
+                            }
+                        }
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyC {
                         self.session
                             .copy_selected_keyframes(self.project_editor.project())
-                    } else if control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::KeyV
-                    {
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyV {
                         match self
                             .session
                             .paste_keyframe_clipboard(&mut self.project_editor)
@@ -237,6 +264,17 @@ impl ApplicationHandler for RhythmApp {
                             Ok(changed) => changed,
                             Err(error) => {
                                 warn!(?error, "paste keyframes failed");
+                                false
+                            }
+                        }
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyD {
+                        match self
+                            .session
+                            .duplicate_selected_keyframes(&mut self.project_editor)
+                        {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "duplicate selected keyframes failed");
                                 false
                             }
                         }
@@ -271,15 +309,25 @@ impl ApplicationHandler for RhythmApp {
                             }
                         }
                     } else if !control && !shift && !alt && !super_key && code == KeyCode::Escape {
-                        self.session.cancel_keyframe_drag()
-                    } else if !control && !shift && !alt && !super_key && code == KeyCode::KeyK {
-                        match self.session.keyframe_action(&mut self.project_editor) {
-                            Ok(changed) => changed,
-                            Err(error) => {
-                                warn!(?error, "keyframe action failed");
-                                false
-                            }
-                        }
+                        let cancelled_keyframe_drag = self.session.cancel_keyframe_drag();
+                        let cancelled_position_drag = self.session.cancel_viewport_position_drag();
+                        let cancelled_multi_position_drag =
+                            self.session.cancel_viewport_multi_position_drag();
+                        let cancelled_scale_drag = self.session.cancel_viewport_scale_drag();
+                        let cancelled_rotation_drag = self.session.cancel_viewport_rotation_drag();
+                        cancelled_keyframe_drag
+                            || cancelled_position_drag
+                            || cancelled_multi_position_drag
+                            || cancelled_scale_drag
+                            || cancelled_rotation_drag
+                    } else if !control && !alt && !super_key && code == KeyCode::KeyF {
+                        let action = if shift {
+                            ViewportCameraAction::FitComposition
+                        } else {
+                            ViewportCameraAction::FrameSelection
+                        };
+                        self.session.request_viewport_camera_action(action);
+                        true
                     } else if direction != 0 && !alt && !super_key {
                         let project = self.project_editor.project();
                         if control && shift {
@@ -356,6 +404,110 @@ impl ApplicationHandler for RhythmApp {
                             );
                         }
                     });
+                    match self
+                        .session
+                        .sync_viewport_position_drag(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "viewport position drag failed"),
+                    }
+                    match self
+                        .session
+                        .sync_viewport_multi_position_drag(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "viewport multi-position drag failed"),
+                    }
+                    match self
+                        .session
+                        .sync_viewport_scale_drag(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "viewport scale drag failed"),
+                    }
+                    match self
+                        .session
+                        .sync_viewport_rotation_drag(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "viewport rotation drag failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_command_search_command(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "command search action failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_object_list_actions(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "object list state edit failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_effect_stack_actions(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector Effect stack edit failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_text_inspector_actions(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector Text edit failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_inspector_static_property_edit(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector static property edit failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_inspector_animated_property_edit(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector animated property edit failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_inspector_multi_property_edit(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector multi-property edit failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_focused_keyframe_action(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "inspector keyframe action failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_keyframe_interpolation(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "keyframe interpolation change failed"),
+                    }
                     match self
                         .session
                         .commit_pending_keyframe_move(&mut self.project_editor)
