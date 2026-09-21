@@ -3,10 +3,196 @@
 //! This module owns renderer/backend concerns inside `rhythm_engine`.
 //! `rhythm_core` stays independent from wgpu and other graphics APIs.
 
+use std::collections::HashMap;
+
+use rhythm_core::ids::AssetId;
+
+use crate::{
+    image_decode::ImageDecodeGeneration,
+    runtime_assets::ValidatedDecodedImage,
+};
+
 pub const INITIAL_COMPOSITION_WIDTH: u32 = 1920;
 pub const INITIAL_COMPOSITION_HEIGHT: u32 = 1080;
 pub const COMPOSITION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 pub const PREVIEW_DISPLAY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub const IMAGE_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageTextureUpload {
+    Inserted,
+    Replaced,
+    Unchanged,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageTextureUploadError {
+    InvalidDimensions,
+    SizeOverflow,
+    ByteLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    OlderThanCached {
+        cached: ImageDecodeGeneration,
+        incoming: ImageDecodeGeneration,
+    },
+}
+
+pub struct CachedImageTexture {
+    generation: ImageDecodeGeneration,
+    size: [u32; 2],
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+}
+
+impl CachedImageTexture {
+    #[must_use]
+    pub const fn generation(&self) -> ImageDecodeGeneration {
+        self.generation
+    }
+
+    #[must_use]
+    pub const fn size(&self) -> [u32; 2] {
+        self.size
+    }
+
+    #[must_use]
+    pub const fn view(&self) -> &wgpu::TextureView {
+        &self.view
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ImageTextureCacheDecision {
+    Insert,
+    Replace,
+    Unchanged,
+}
+
+#[derive(Default)]
+struct ImageTextureCache {
+    entries: HashMap<AssetId, CachedImageTexture>,
+}
+
+impl ImageTextureCache {
+    fn get(&self, asset_id: AssetId) -> Option<&CachedImageTexture> {
+        self.entries.get(&asset_id)
+    }
+
+    fn remove(&mut self, asset_id: AssetId) -> bool {
+        self.entries.remove(&asset_id).is_some()
+    }
+
+    fn upload(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        decoded: ValidatedDecodedImage,
+    ) -> Result<ImageTextureUpload, ImageTextureUploadError> {
+        let asset_id = decoded.asset_id();
+        let generation = decoded.generation();
+        let decision = image_texture_cache_decision(
+            self.entries.get(&asset_id).map(CachedImageTexture::generation),
+            generation,
+        )?;
+        if decision == ImageTextureCacheDecision::Unchanged {
+            return Ok(ImageTextureUpload::Unchanged);
+        }
+
+        let image = decoded.image();
+        let bytes_per_row = image
+            .width
+            .checked_mul(4)
+            .ok_or(ImageTextureUploadError::SizeOverflow)?;
+        validate_rgba8_payload(image.width, image.height, image.rgba8.len())?;
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Rhythm Effects image asset"),
+            size: wgpu::Extent3d {
+                width: image.width,
+                height: image.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: IMAGE_TEXTURE_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &image.rgba8,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(bytes_per_row),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: image.width,
+                height: image.height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.entries.insert(
+            asset_id,
+            CachedImageTexture {
+                generation,
+                size: [image.width, image.height],
+                _texture: texture,
+                view,
+            },
+        );
+
+        Ok(match decision {
+            ImageTextureCacheDecision::Insert => ImageTextureUpload::Inserted,
+            ImageTextureCacheDecision::Replace => ImageTextureUpload::Replaced,
+            ImageTextureCacheDecision::Unchanged => unreachable!("handled before upload"),
+        })
+    }
+}
+
+fn image_texture_cache_decision(
+    cached: Option<ImageDecodeGeneration>,
+    incoming: ImageDecodeGeneration,
+) -> Result<ImageTextureCacheDecision, ImageTextureUploadError> {
+    match cached {
+        None => Ok(ImageTextureCacheDecision::Insert),
+        Some(cached) if cached == incoming => Ok(ImageTextureCacheDecision::Unchanged),
+        Some(cached) if cached.get() < incoming.get() => Ok(ImageTextureCacheDecision::Replace),
+        Some(cached) => Err(ImageTextureUploadError::OlderThanCached { cached, incoming }),
+    }
+}
+
+fn validate_rgba8_payload(
+    width: u32,
+    height: u32,
+    actual: usize,
+) -> Result<(), ImageTextureUploadError> {
+    if width == 0 || height == 0 {
+        return Err(ImageTextureUploadError::InvalidDimensions);
+    }
+
+    let expected_u64 = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(ImageTextureUploadError::SizeOverflow)?;
+    let expected =
+        usize::try_from(expected_u64).map_err(|_| ImageTextureUploadError::SizeOverflow)?;
+    if expected != actual {
+        return Err(ImageTextureUploadError::ByteLengthMismatch { expected, actual });
+    }
+    Ok(())
+}
 
 const PREVIEW_SHADER: &str = r#"
 @group(0) @binding(0) var composition_texture: texture_2d<f32>;
@@ -75,6 +261,7 @@ pub struct Renderer {
     preview_display_view: wgpu::TextureView,
     preview_bind_group: wgpu::BindGroup,
     preview_pipeline: wgpu::RenderPipeline,
+    image_textures: ImageTextureCache,
 }
 
 impl Renderer {
@@ -205,6 +392,7 @@ impl Renderer {
             preview_display_view,
             preview_bind_group,
             preview_pipeline,
+            image_textures: ImageTextureCache::default(),
         }
     }
 
@@ -221,6 +409,24 @@ impl Renderer {
     #[must_use]
     pub fn preview_display_view(&self) -> &wgpu::TextureView {
         &self.preview_display_view
+    }
+
+    #[must_use]
+    pub fn image_texture(&self, asset_id: AssetId) -> Option<&CachedImageTexture> {
+        self.image_textures.get(asset_id)
+    }
+
+    pub fn upload_validated_image(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        decoded: ValidatedDecodedImage,
+    ) -> Result<ImageTextureUpload, ImageTextureUploadError> {
+        self.image_textures.upload(device, queue, decoded)
+    }
+
+    pub fn remove_image_texture(&mut self, asset_id: AssetId) -> bool {
+        self.image_textures.remove(asset_id)
     }
 
     pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -289,9 +495,11 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::{
-        COMPOSITION_FORMAT, INITIAL_COMPOSITION_HEIGHT, INITIAL_COMPOSITION_WIDTH,
-        PREVIEW_DISPLAY_FORMAT,
+        COMPOSITION_FORMAT, IMAGE_TEXTURE_FORMAT, INITIAL_COMPOSITION_HEIGHT,
+        INITIAL_COMPOSITION_WIDTH, PREVIEW_DISPLAY_FORMAT, ImageTextureCacheDecision,
+        ImageTextureUploadError, image_texture_cache_decision, validate_rgba8_payload,
     };
+    use crate::image_decode::ImageDecodeGeneration;
 
     #[test]
     fn initial_composition_contract_is_1080p_rgba16float() {
@@ -299,5 +507,48 @@ mod tests {
         assert_eq!(INITIAL_COMPOSITION_HEIGHT, 1080);
         assert_eq!(COMPOSITION_FORMAT, wgpu::TextureFormat::Rgba16Float);
         assert_eq!(PREVIEW_DISPLAY_FORMAT, wgpu::TextureFormat::Rgba8Unorm);
+        assert_eq!(IMAGE_TEXTURE_FORMAT, wgpu::TextureFormat::Rgba8UnormSrgb);
+    }
+
+    #[test]
+    fn image_texture_cache_skips_same_generation_and_replaces_newer() {
+        let first = ImageDecodeGeneration::new(1);
+        let second = ImageDecodeGeneration::new(2);
+
+        assert_eq!(
+            image_texture_cache_decision(None, first),
+            Ok(ImageTextureCacheDecision::Insert)
+        );
+        assert_eq!(
+            image_texture_cache_decision(Some(first), first),
+            Ok(ImageTextureCacheDecision::Unchanged)
+        );
+        assert_eq!(
+            image_texture_cache_decision(Some(first), second),
+            Ok(ImageTextureCacheDecision::Replace)
+        );
+        assert_eq!(
+            image_texture_cache_decision(Some(second), first),
+            Err(ImageTextureUploadError::OlderThanCached {
+                cached: second,
+                incoming: first,
+            })
+        );
+    }
+
+    #[test]
+    fn image_texture_upload_validates_rgba8_payload_shape() {
+        assert_eq!(validate_rgba8_payload(2, 1, 8), Ok(()));
+        assert_eq!(
+            validate_rgba8_payload(0, 1, 0),
+            Err(ImageTextureUploadError::InvalidDimensions)
+        );
+        assert_eq!(
+            validate_rgba8_payload(2, 2, 15),
+            Err(ImageTextureUploadError::ByteLengthMismatch {
+                expected: 16,
+                actual: 15,
+            })
+        );
     }
 }
