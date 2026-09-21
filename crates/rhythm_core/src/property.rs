@@ -182,6 +182,30 @@ pub fn property_keyframe_at_tick(
     })
 }
 
+pub fn property_keyframes(
+    project: &Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+) -> Result<Vec<PropertyKeyframe>, PropertyAccessError> {
+    Ok(match animated_ref(project, object_id, property)? {
+        AnimatedRef::Scalar(animated) => animated
+            .keyframes()
+            .iter()
+            .map(pack_scalar_keyframe)
+            .collect(),
+        AnimatedRef::Vec2(animated) => animated
+            .keyframes()
+            .iter()
+            .map(pack_vec2_keyframe)
+            .collect(),
+        AnimatedRef::Color(animated) => animated
+            .keyframes()
+            .iter()
+            .map(pack_color_keyframe)
+            .collect(),
+    })
+}
+
 pub fn property_keyframe_by_id(
     project: &Project,
     object_id: ObjectId,
