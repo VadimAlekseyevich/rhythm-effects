@@ -922,7 +922,8 @@ fn draw_command_search(context: &egui::Context, session: &mut EditorSession) {
             }
 
             let commands = session.command_search_matches();
-            if response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))
+            if response.has_focus()
+                && ui.input(|input| input.key_pressed(egui::Key::Enter))
                 && let Some(command) = commands
                     .iter()
                     .copied()
@@ -1019,11 +1020,7 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.heading("Rhythm Effects");
-                if ui
-                    .button("Commands")
-                    .on_hover_text("Ctrl+K")
-                    .clicked()
-                {
+                if ui.button("Commands").on_hover_text("Ctrl+K").clicked() {
                     session.toggle_command_search();
                 }
                 ui.separator();
