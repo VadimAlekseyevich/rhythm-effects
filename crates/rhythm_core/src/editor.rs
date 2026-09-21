@@ -4090,9 +4090,8 @@ mod tests {
                 relative_to_project: false,
             },
         });
-        project.composition.objects[0].content = ObjectContent::Image(ImageObject {
-            asset: asset_id,
-        });
+        project.composition.objects[0].content =
+            ObjectContent::Image(ImageObject { asset: asset_id });
         project.next_entity_id = 3;
         let mut editor = ProjectEditor::new(project).expect("valid image project");
 
