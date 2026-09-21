@@ -232,7 +232,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-197** — Implement Ctrl+K command search surface.
 - [x] **AI-198** — Implement focus routing so active text/numeric controls suppress editor letter shortcuts.
 - [x] **AI-199** — Implement Ctrl+N/O/S/Shift+S/Z/Shift+Z/Y/C/V/D/A and Delete command bindings.
-- [ ] **AI-200** — Add rfd native file-dialog dependency and Open/Save/Import dialog wrapper.
+- [x] **AI-200** — Add rfd native file-dialog dependency and Open/Save/Import dialog wrapper.
 - [ ] **AI-201** — Implement PNG image decode worker.
 - [ ] **AI-202** — Implement JPEG image decode worker.
 - [ ] **AI-203** — Implement WebP image decode worker.
