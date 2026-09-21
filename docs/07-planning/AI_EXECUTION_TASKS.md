@@ -238,7 +238,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-203** — Implement WebP image decode worker.
 - [x] **AI-204** — Implement decoded-image generation validation before GPU upload.
 - [x] **AI-205** — Implement image GPU texture caching by AssetId generation.
-- [ ] **AI-206** — Implement relative asset paths for files under the saved project directory.
+- [x] **AI-206** — Implement relative asset paths for files under the saved project directory.
 - [ ] **AI-207** — Implement absolute paths for external files.
 - [ ] **AI-208** — Implement duplicate-path AssetRecord reuse within the project/session.
 - [ ] **AI-209** — Implement missing-asset runtime state and Relink while keeping AssetId stable.
