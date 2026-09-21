@@ -5,7 +5,7 @@ use rhythm_core::{
     project::{EffectKind, ObjectContent, Project},
     property::{AnimatableProperty, EffectAnimatableProperty, property_keyframe_by_id},
     time::{
-        BeatDivision, DurationNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
+        BeatDivision, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
         floor_tick_position_to_grid, snap_tick_position_to_grid,
     },
 };
