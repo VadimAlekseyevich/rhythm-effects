@@ -26,6 +26,7 @@ pub enum EditError {
     PropertyAccess(PropertyAccessError),
     IdAllocation(IdAllocationError),
     ObjectNotFound(ObjectId),
+    AssetNotFound(AssetId),
     DuplicateObjectId(ObjectId),
     KeyframeNotFound(KeyframeId),
     EffectNotFound(EffectId),
@@ -127,6 +128,10 @@ pub struct PropertyKeyframeValueRecord {
 pub enum EditCommand {
     AddAsset {
         kind: AssetKind,
+        source: AssetSource,
+    },
+    RelinkAsset {
+        asset_id: AssetId,
         source: AssetSource,
     },
     AddObject {
@@ -242,6 +247,7 @@ impl EditCommand {
     pub const fn semantic_name(&self) -> &'static str {
         match self {
             Self::AddAsset { .. } => "AddAsset",
+            Self::RelinkAsset { .. } => "RelinkAsset",
             Self::AddObject { .. } => "AddObject",
             Self::DeleteObject { .. } => "DeleteObject",
             Self::DeleteObjects { .. } => "DeleteObjects",
@@ -278,6 +284,11 @@ pub enum HistoryPayload {
     AssetInserted {
         index: usize,
         asset: AssetRecord,
+    },
+    AssetSourceChanged {
+        asset_id: AssetId,
+        before: AssetSource,
+        after: AssetSource,
     },
     ObjectInserted {
         index: usize,
@@ -1723,6 +1734,33 @@ impl ProjectEditor {
                     HistoryPayload::AssetInserted { index, asset },
                 )))
             }
+            EditCommand::RelinkAsset { asset_id, source } => {
+                let index = self
+                    .project
+                    .assets
+                    .iter()
+                    .position(|asset| asset.id == asset_id)
+                    .ok_or(EditError::AssetNotFound(asset_id))?;
+                let before = self.project.assets[index].source.clone();
+                if before == source {
+                    return Ok(None);
+                }
+
+                self.project.assets[index].source = source.clone();
+                if let Err(error) = self.project.validate() {
+                    self.project.assets[index].source = before;
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Relink Asset",
+                    HistoryPayload::AssetSourceChanged {
+                        asset_id,
+                        before,
+                        after: source,
+                    },
+                )))
+            }
             EditCommand::AddObject { object } => {
                 if self
                     .project
@@ -2812,6 +2850,22 @@ impl ProjectEditor {
                 }
                 self.project.assets.insert(*index, asset.clone());
             }
+            (
+                HistoryPayload::AssetSourceChanged {
+                    asset_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let asset = self
+                    .project
+                    .assets
+                    .iter_mut()
+                    .find(|asset| asset.id == *asset_id)
+                    .ok_or(EditError::AssetNotFound(*asset_id))?;
+                asset.source = direction.pick(before, after).clone();
+            }
             (HistoryPayload::ObjectInserted { index, object }, HistoryDirection::Undo)
             | (HistoryPayload::ObjectDeleted { index, object }, HistoryDirection::Redo) => {
                 let removed = self
@@ -3878,6 +3932,48 @@ mod tests {
         assert_ne!(image, audio);
         assert_eq!(editor.project().assets.len(), 2);
         assert_eq!(editor.history_len(), 2);
+    }
+
+    #[test]
+    fn relink_asset_keeps_stable_id_and_is_undoable() {
+        let mut editor = editor_with_object();
+        let before = AssetSource::File {
+            path: "missing.png".to_owned(),
+            relative_to_project: false,
+        };
+        let asset_id = editor
+            .ensure_asset_record(AssetKind::Image, before.clone())
+            .expect("asset");
+        let history_before_relink = editor.history_len();
+        let after = AssetSource::File {
+            path: "replacement.png".to_owned(),
+            relative_to_project: false,
+        };
+
+        assert_eq!(
+            editor.execute(EditCommand::RelinkAsset {
+                asset_id,
+                source: after.clone(),
+            }),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), history_before_relink + 1);
+        assert_eq!(editor.project().assets[0].id, asset_id);
+        assert_eq!(editor.project().assets[0].source, after);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(editor.project().assets[0].id, asset_id);
+        assert_eq!(editor.project().assets[0].source, before);
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(editor.project().assets[0].id, asset_id);
+        assert_eq!(
+            editor.project().assets[0].source,
+            AssetSource::File {
+                path: "replacement.png".to_owned(),
+                relative_to_project: false,
+            }
+        );
     }
 
     #[test]
