@@ -34,6 +34,14 @@ pub fn pick_media_to_import() -> Option<PathBuf> {
         .pick_file()
 }
 
+#[must_use]
+pub fn pick_image_to_relink() -> Option<PathBuf> {
+    FileDialog::new()
+        .set_title("Relink Image")
+        .add_filter("Images", IMAGE_EXTENSIONS)
+        .pick_file()
+}
+
 fn project_file_name(project_name: &str) -> String {
     let trimmed = project_name.trim();
     let stem = if trimmed.is_empty() { "Untitled" } else { trimmed };

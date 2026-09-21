@@ -945,6 +945,10 @@ impl EditorSession {
         self.pending_image_relink_asset == Some(asset_id)
     }
 
+    pub fn take_image_relink_request(&mut self) -> Option<AssetId> {
+        self.pending_image_relink_asset.take()
+    }
+
     pub fn request_import_dialog(&mut self) -> bool {
         if self.pending_import_dialog {
             return false;
@@ -4320,6 +4324,9 @@ mod tests {
         assert!(session.request_image_relink(second));
         assert!(!session.image_relink_requested(first));
         assert!(session.image_relink_requested(second));
+        assert_eq!(session.take_image_relink_request(), Some(second));
+        assert!(!session.image_relink_requested(second));
+        assert_eq!(session.take_image_relink_request(), None);
     }
 
     #[test]

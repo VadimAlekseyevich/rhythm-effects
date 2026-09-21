@@ -369,7 +369,7 @@ fn draw_image_inspector(
     ui.label("Intrinsic dimensions: unavailable until image decode");
     if session.image_relink_requested(asset_id) {
         ui.add_enabled(false, egui::Button::new("Relink queued"))
-            .on_hover_text("Waiting for native file-dialog / asset relink backend");
+            .on_hover_text("Waiting for the native replacement-file dialog");
     } else if ui
         .button("Relink")
         .on_hover_text("Choose a replacement source while keeping this AssetId stable")

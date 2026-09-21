@@ -14,7 +14,7 @@ use std::time::Instant;
 use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
-use rhythm_core::APP_NAME;
+use rhythm_core::{APP_NAME, editor::EditCommand, project::AssetSource};
 use rhythm_engine::renderer::Renderer;
 use shortcuts::{EditorShortcut, ShortcutModifiers, dispatch_physical_shortcut};
 use tracing::{error, info, warn};
@@ -464,6 +464,39 @@ impl ApplicationHandler for RhythmApp {
                             path = %path.display(),
                             "media import path selected; image decoding starts in AI-201"
                         );
+                    }
+
+                    if let Some(asset_id) = self.session.take_image_relink_request() {
+                        if let Some(path) = file_dialogs::pick_image_to_relink() {
+                            if let Some(path) = path.to_str() {
+                                let source = AssetSource::File {
+                                    path: path.to_owned(),
+                                    relative_to_project: false,
+                                };
+                                match self.project_editor.execute(EditCommand::RelinkAsset {
+                                    asset_id,
+                                    source,
+                                }) {
+                                    Ok(true) => info!(
+                                        asset_id = asset_id.get(),
+                                        path,
+                                        "image asset relinked while preserving AssetId"
+                                    ),
+                                    Ok(false) => {}
+                                    Err(error) => warn!(
+                                        ?error,
+                                        asset_id = asset_id.get(),
+                                        "image asset relink failed"
+                                    ),
+                                }
+                            } else {
+                                warn!(
+                                    path = %path.display(),
+                                    "image relink path cannot be represented in the project schema"
+                                );
+                            }
+                        }
+                        window.request_redraw();
                     }
 
                     match self
