@@ -203,7 +203,7 @@ impl ApplicationHandler for RhythmApp {
                     && !self
                         .egui_context
                         .as_ref()
-                        .is_some_and(egui::Context::wants_keyboard_input)
+                        .is_some_and(|context| context.egui_wants_keyboard_input())
                     && let PhysicalKey::Code(code) = event.physical_key
                 {
                     let control = self.modifiers.control_key();
