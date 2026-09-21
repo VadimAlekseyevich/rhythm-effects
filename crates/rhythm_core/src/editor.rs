@@ -27,6 +27,7 @@ pub enum EditError {
     IdAllocation(IdAllocationError),
     ObjectNotFound(ObjectId),
     AssetNotFound(AssetId),
+    AssetInUse(AssetId),
     DuplicateObjectId(ObjectId),
     KeyframeNotFound(KeyframeId),
     EffectNotFound(EffectId),
@@ -133,6 +134,9 @@ pub enum EditCommand {
     RelinkAsset {
         asset_id: AssetId,
         source: AssetSource,
+    },
+    DeleteAsset {
+        asset_id: AssetId,
     },
     AddObject {
         object: Box<Object>,
@@ -248,6 +252,7 @@ impl EditCommand {
         match self {
             Self::AddAsset { .. } => "AddAsset",
             Self::RelinkAsset { .. } => "RelinkAsset",
+            Self::DeleteAsset { .. } => "DeleteAsset",
             Self::AddObject { .. } => "AddObject",
             Self::DeleteObject { .. } => "DeleteObject",
             Self::DeleteObjects { .. } => "DeleteObjects",
@@ -282,6 +287,10 @@ impl EditCommand {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HistoryPayload {
     AssetInserted {
+        index: usize,
+        asset: AssetRecord,
+    },
+    AssetDeleted {
         index: usize,
         asset: AssetRecord,
     },
@@ -1761,6 +1770,39 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::DeleteAsset { asset_id } => {
+                let index = self
+                    .project
+                    .assets
+                    .iter()
+                    .position(|asset| asset.id == asset_id)
+                    .ok_or(EditError::AssetNotFound(asset_id))?;
+                let referenced_by_image = self.project.composition.objects.iter().any(|object| {
+                    matches!(
+                        &object.content,
+                        ObjectContent::Image(image) if image.asset == asset_id
+                    )
+                });
+                let referenced_by_audio = self
+                    .project
+                    .audio_track
+                    .as_ref()
+                    .is_some_and(|track| track.asset_id == asset_id);
+                if referenced_by_image || referenced_by_audio {
+                    return Err(EditError::AssetInUse(asset_id));
+                }
+
+                let asset = self.project.assets.remove(index);
+                if let Err(error) = self.project.validate() {
+                    self.project.assets.insert(index, asset);
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Delete Asset",
+                    HistoryPayload::AssetDeleted { index, asset },
+                )))
+            }
             EditCommand::AddObject { object } => {
                 if self
                     .project
@@ -2844,11 +2886,23 @@ impl ProjectEditor {
                 }
                 self.project.assets.remove(*index);
             }
-            (HistoryPayload::AssetInserted { index, asset }, HistoryDirection::Redo) => {
+            (HistoryPayload::AssetInserted { index, asset }, HistoryDirection::Redo)
+            | (HistoryPayload::AssetDeleted { index, asset }, HistoryDirection::Undo) => {
                 if *index > self.project.assets.len() {
                     return Err(EditError::HistoryInvariant("asset restore index invalid"));
                 }
                 self.project.assets.insert(*index, asset.clone());
+            }
+            (HistoryPayload::AssetDeleted { index, asset }, HistoryDirection::Redo) => {
+                let removed = self
+                    .project
+                    .assets
+                    .get(*index)
+                    .ok_or(EditError::HistoryInvariant("asset index missing"))?;
+                if removed.id != asset.id {
+                    return Err(EditError::HistoryInvariant("asset identity mismatch"));
+                }
+                self.project.assets.remove(*index);
             }
             (
                 HistoryPayload::AssetSourceChanged {
@@ -3690,11 +3744,11 @@ mod tests {
     use crate::{
         animation::{Animated, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
-        ids::{EffectId, KeyframeId, ObjectId},
+        ids::{AssetId, EffectId, KeyframeId, ObjectId},
         project::{
-            AssetKind, AssetSource, BlurEffect, Effect, EffectKind, FontReference, FontStyle,
-            FontWeight, Object, ObjectContent, Project, ProjectSettings, RectangleObject,
-            TextAlignment, TextObject, TransformAnimation,
+            AssetKind, AssetRecord, AssetSource, AudioTrack, BlurEffect, Effect, EffectKind,
+            FontReference, FontStyle, FontWeight, ImageObject, Object, ObjectContent, Project,
+            ProjectSettings, RectangleObject, TextAlignment, TextObject, TransformAnimation,
         },
         property::{AnimatableProperty, PropertyValue, property_base_value},
         time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
@@ -3993,6 +4047,85 @@ mod tests {
         assert_eq!(editor.redo(), Ok(true));
         assert_eq!(editor.project().assets.len(), 1);
         assert_eq!(editor.project().assets[0].id, asset_id);
+    }
+
+    #[test]
+    fn delete_unreferenced_asset_is_undoable_and_redoable() {
+        let mut editor = editor_with_object();
+        let asset_id = editor
+            .ensure_asset_record(
+                AssetKind::Image,
+                AssetSource::File {
+                    path: "unused.png".to_owned(),
+                    relative_to_project: false,
+                },
+            )
+            .expect("asset");
+        let history_before_delete = editor.history_len();
+
+        assert_eq!(
+            editor.execute(EditCommand::DeleteAsset { asset_id }),
+            Ok(true)
+        );
+        assert!(editor.project().assets.is_empty());
+        assert_eq!(editor.history_len(), history_before_delete + 1);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.project().assets[0].id, asset_id);
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert!(editor.project().assets.is_empty());
+    }
+
+    #[test]
+    fn delete_asset_is_blocked_while_referenced_by_image_object() {
+        let mut project = editor_with_object().into_project();
+        let asset_id = AssetId::new(2).expect("asset id");
+        project.assets.push(AssetRecord {
+            id: asset_id,
+            kind: AssetKind::Image,
+            source: AssetSource::File {
+                path: "image.png".to_owned(),
+                relative_to_project: false,
+            },
+        });
+        project.composition.objects[0].content = ObjectContent::Image(ImageObject {
+            asset: asset_id,
+        });
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid image project");
+
+        assert_eq!(
+            editor.execute(EditCommand::DeleteAsset { asset_id }),
+            Err(super::EditError::AssetInUse(asset_id))
+        );
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.history_len(), 0);
+    }
+
+    #[test]
+    fn delete_asset_is_blocked_while_referenced_by_primary_audio() {
+        let mut project = editor_with_object().into_project();
+        let asset_id = AssetId::new(2).expect("asset id");
+        project.assets.push(AssetRecord {
+            id: asset_id,
+            kind: AssetKind::Audio,
+            source: AssetSource::File {
+                path: "audio.wav".to_owned(),
+                relative_to_project: false,
+            },
+        });
+        project.audio_track = Some(AudioTrack::new(asset_id));
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid audio project");
+
+        assert_eq!(
+            editor.execute(EditCommand::DeleteAsset { asset_id }),
+            Err(super::EditError::AssetInUse(asset_id))
+        );
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]
