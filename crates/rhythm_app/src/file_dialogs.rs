@@ -39,6 +39,7 @@ fn project_file_name(project_name: &str) -> String {
     let stem = if trimmed.is_empty() { "Untitled" } else { trimmed };
     if Path::new(stem)
         .extension()
+        .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case(PROJECT_EXTENSION))
     {
         stem.to_owned()
@@ -50,6 +51,7 @@ fn project_file_name(project_name: &str) -> String {
 fn ensure_extension(mut path: PathBuf, extension: &str) -> PathBuf {
     if path
         .extension()
+        .and_then(|observed| observed.to_str())
         .is_none_or(|observed| !observed.eq_ignore_ascii_case(extension))
     {
         path.set_extension(extension);
