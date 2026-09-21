@@ -580,6 +580,7 @@ impl EditorSession {
         true
     }
 
+    #[cfg(test)]
     pub fn open_command_search(&mut self) -> bool {
         if self.command_search_open {
             return false;
