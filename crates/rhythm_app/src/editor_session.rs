@@ -3404,8 +3404,9 @@ impl EditorSession {
 #[cfg(test)]
 mod tests {
     use super::{
-        EditorSession, InspectorNumericCommit, InspectorNumericComponent, InspectorNumericTarget,
-        KeyframeDragMember, KeyframeInterpolationPreset, PreviewQuality, ViewportCameraAction,
+        CommandSearchCommand, EditorSession, FocusedProperty, InspectorNumericCommit,
+        InspectorNumericComponent, InspectorNumericTarget, KeyframeDragMember,
+        KeyframeInterpolationPreset, PreviewQuality, ViewportCameraAction,
     };
     use rhythm_core::{
         domain::{LinearRgba, Vec2},
