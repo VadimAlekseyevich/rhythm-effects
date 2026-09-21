@@ -131,7 +131,10 @@ fn decode_image_file(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
     let reader = reader
         .with_guessed_format()
         .map_err(|error| ImageDecodeError::Io(error.to_string()))?;
-    if !matches!(reader.format(), Some(ImageFormat::Png | ImageFormat::Jpeg)) {
+    if !matches!(
+        reader.format(),
+        Some(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP)
+    ) {
         return Err(ImageDecodeError::UnsupportedFormat);
     }
 
@@ -156,7 +159,7 @@ mod tests {
     };
     use image::{
         ExtendedColorType, ImageEncoder,
-        codecs::{jpeg::JpegEncoder, png::PngEncoder},
+        codecs::{jpeg::JpegEncoder, png::PngEncoder, webp::WebPEncoder},
     };
     use rhythm_core::ids::AssetId;
     use std::{
@@ -192,6 +195,14 @@ mod tests {
         fs::write(path, encoded).expect("write JPEG fixture");
     }
 
+    fn write_rgba_webp(path: &PathBuf, width: u32, height: u32, rgba: &[u8]) {
+        let mut encoded = Vec::new();
+        WebPEncoder::new_lossless(&mut encoded)
+            .write_image(rgba, width, height, ExtendedColorType::Rgba8)
+            .expect("encode WebP fixture");
+        fs::write(path, encoded).expect("write WebP fixture");
+    }
+
     #[test]
     fn png_decode_returns_rgba8_pixels_and_intrinsic_dimensions() {
         let path = unique_temp_path("png");
@@ -220,6 +231,23 @@ mod tests {
         assert_eq!(decoded.byte_len(), 8);
         assert_eq!(decoded.rgba8[3], 255);
         assert_eq!(decoded.rgba8[7], 255);
+
+        fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn webp_decode_returns_rgba8_pixels_and_intrinsic_dimensions() {
+        let path = unique_temp_path("webp");
+        write_rgba_webp(&path, 2, 1, &[12, 34, 56, 78, 90, 123, 210, 255]);
+
+        let decoded = decode_image_file(&path).expect("decode WebP");
+        assert_eq!(decoded.width, 2);
+        assert_eq!(decoded.height, 1);
+        assert_eq!(decoded.byte_len(), 8);
+        assert_eq!(
+            decoded.rgba8,
+            vec![12, 34, 56, 78, 90, 123, 210, 255]
+        );
 
         fs::remove_file(path).expect("remove fixture");
     }
