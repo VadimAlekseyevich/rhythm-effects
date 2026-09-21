@@ -86,7 +86,7 @@ impl ImageDecodeWorker {
             .name("rhythm-image-decode".to_owned())
             .spawn(move || {
                 while let Ok(request) = request_rx.recv() {
-                    let result = decode_png_file(&request.path);
+                    let result = decode_image_file(&request.path);
                     let response = ImageDecodeResult {
                         asset_id: request.asset_id,
                         generation: request.generation,
@@ -126,12 +126,12 @@ impl ImageDecodeWorker {
     }
 }
 
-fn decode_png_file(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
+fn decode_image_file(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
     let reader = ImageReader::open(path).map_err(|error| ImageDecodeError::Io(error.to_string()))?;
     let reader = reader
         .with_guessed_format()
         .map_err(|error| ImageDecodeError::Io(error.to_string()))?;
-    if reader.format() != Some(ImageFormat::Png) {
+    if !matches!(reader.format(), Some(ImageFormat::Png | ImageFormat::Jpeg)) {
         return Err(ImageDecodeError::UnsupportedFormat);
     }
 
@@ -152,9 +152,12 @@ fn decode_png_file(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
 mod tests {
     use super::{
         IMAGE_DECODE_QUEUE_CAPACITY, ImageDecodeError, ImageDecodeGeneration, ImageDecodeRequest,
-        ImageDecodeWorker, decode_png_file,
+        ImageDecodeWorker, decode_image_file,
     };
-    use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
+    use image::{
+        ExtendedColorType, ImageEncoder,
+        codecs::{jpeg::JpegEncoder, png::PngEncoder},
+    };
     use rhythm_core::ids::AssetId;
     use std::{
         fs,
@@ -181,12 +184,20 @@ mod tests {
         fs::write(path, encoded).expect("write PNG fixture");
     }
 
+    fn write_rgb_jpeg(path: &PathBuf, width: u32, height: u32, rgb: &[u8]) {
+        let mut encoded = Vec::new();
+        JpegEncoder::new_with_quality(&mut encoded, 100)
+            .write_image(rgb, width, height, ExtendedColorType::Rgb8)
+            .expect("encode JPEG fixture");
+        fs::write(path, encoded).expect("write JPEG fixture");
+    }
+
     #[test]
     fn png_decode_returns_rgba8_pixels_and_intrinsic_dimensions() {
         let path = unique_temp_path("png");
         write_rgba_png(&path, 2, 1, &[255, 0, 0, 255, 0, 128, 255, 64]);
 
-        let decoded = decode_png_file(&path).expect("decode PNG");
+        let decoded = decode_image_file(&path).expect("decode PNG");
         assert_eq!(decoded.width, 2);
         assert_eq!(decoded.height, 1);
         assert_eq!(decoded.byte_len(), 8);
@@ -199,12 +210,27 @@ mod tests {
     }
 
     #[test]
-    fn non_png_input_is_rejected_before_decode() {
+    fn jpeg_decode_returns_rgba8_pixels_and_intrinsic_dimensions() {
+        let path = unique_temp_path("jpg");
+        write_rgb_jpeg(&path, 2, 1, &[240, 20, 10, 10, 220, 40]);
+
+        let decoded = decode_image_file(&path).expect("decode JPEG");
+        assert_eq!(decoded.width, 2);
+        assert_eq!(decoded.height, 1);
+        assert_eq!(decoded.byte_len(), 8);
+        assert_eq!(decoded.rgba8[3], 255);
+        assert_eq!(decoded.rgba8[7], 255);
+
+        fs::remove_file(path).expect("remove fixture");
+    }
+
+    #[test]
+    fn unsupported_input_is_rejected_before_decode() {
         let path = unique_temp_path("bin");
         fs::write(&path, b"not an image").expect("write invalid fixture");
 
         assert_eq!(
-            decode_png_file(&path),
+            decode_image_file(&path),
             Err(ImageDecodeError::UnsupportedFormat)
         );
 
