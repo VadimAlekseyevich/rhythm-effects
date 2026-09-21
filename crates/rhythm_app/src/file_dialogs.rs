@@ -42,6 +42,17 @@ pub fn pick_image_to_relink() -> Option<PathBuf> {
         .pick_file()
 }
 
+#[must_use]
+pub fn is_supported_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            IMAGE_EXTENSIONS
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
+}
+
 fn project_file_name(project_name: &str) -> String {
     let trimmed = project_name.trim();
     let stem = if trimmed.is_empty() {
@@ -73,8 +84,17 @@ fn ensure_extension(mut path: PathBuf, extension: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_extension, project_file_name};
-    use std::path::PathBuf;
+    use super::{ensure_extension, is_supported_image_path, project_file_name};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn supported_image_path_is_extension_case_insensitive() {
+        assert!(is_supported_image_path(Path::new("image.png")));
+        assert!(is_supported_image_path(Path::new("photo.JPEG")));
+        assert!(is_supported_image_path(Path::new("art.WebP")));
+        assert!(!is_supported_image_path(Path::new("audio.wav")));
+        assert!(!is_supported_image_path(Path::new("README")));
+    }
 
     #[test]
     fn project_file_name_uses_rhfx_once() {

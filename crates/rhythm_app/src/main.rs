@@ -14,7 +14,7 @@ use std::time::Instant;
 use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
-use rhythm_core::{APP_NAME, editor::EditCommand, project::AssetSource};
+use rhythm_core::{APP_NAME, domain::Vec2, editor::EditCommand, project::AssetSource};
 use rhythm_engine::renderer::Renderer;
 use shortcuts::{EditorShortcut, ShortcutModifiers, dispatch_physical_shortcut};
 use tracing::{error, info, warn};
@@ -418,6 +418,76 @@ impl ApplicationHandler for RhythmApp {
                     if handled {
                         window.request_redraw();
                     }
+                }
+            }
+            WindowEvent::DroppedFile(path) => {
+                if !file_dialogs::is_supported_image_path(&path) {
+                    warn!(
+                        path = %path.display(),
+                        "ignored dropped file because it is not a supported image"
+                    );
+                    return;
+                }
+                if !path.is_absolute() {
+                    warn!(
+                        path = %path.display(),
+                        "ignored dropped image because OS drop path is not absolute"
+                    );
+                    return;
+                }
+                let Some(source_path) = path.to_str() else {
+                    warn!(
+                        path = %path.display(),
+                        "ignored dropped image because its path is not valid UTF-8"
+                    );
+                    return;
+                };
+
+                let project = self.project_editor.project();
+                let position = Vec2::new(
+                    project.settings.composition_width as f32 * 0.5,
+                    project.settings.composition_height as f32 * 0.5,
+                )
+                .expect("composition dimensions produce a finite center");
+                let name = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .filter(|stem| !stem.is_empty())
+                    .unwrap_or("Image")
+                    .to_owned();
+                let source = AssetSource::File {
+                    path: source_path.to_owned(),
+                    relative_to_project: false,
+                };
+
+                match self.project_editor.execute(EditCommand::AddImageFromFile {
+                    source,
+                    name,
+                    position,
+                }) {
+                    Ok(true) => {
+                        if let Some(object_id) = self
+                            .project_editor
+                            .project()
+                            .composition
+                            .objects
+                            .last()
+                            .map(|object| object.id)
+                        {
+                            self.session.replace_object_selection(Some(object_id));
+                        }
+                        info!(
+                            path = %path.display(),
+                            "dropped image imported and added as one compound edit"
+                        );
+                        window.request_redraw();
+                    }
+                    Ok(false) => {}
+                    Err(error) => warn!(
+                        ?error,
+                        path = %path.display(),
+                        "failed to add dropped image"
+                    ),
                 }
             }
             WindowEvent::CloseRequested => {

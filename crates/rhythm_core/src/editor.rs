@@ -5,8 +5,9 @@ use crate::{
     domain::Vec2,
     ids::{AssetId, EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{
-        AssetKind, AssetRecord, AssetSource, Effect, EffectKind, FontStyle, FontWeight, Object,
-        ObjectContent, Project, ProjectValidationError, TextAlignment, TextObject,
+        AssetKind, AssetRecord, AssetSource, Effect, EffectKind, FontStyle, FontWeight, ImageObject,
+        Object, ObjectContent, Project, ProjectValidationError, TextAlignment, TextObject,
+        TransformAnimation,
     },
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
@@ -138,6 +139,11 @@ pub enum EditCommand {
     DeleteAsset {
         asset_id: AssetId,
     },
+    AddImageFromFile {
+        source: AssetSource,
+        name: String,
+        position: Vec2,
+    },
     AddObject {
         object: Box<Object>,
     },
@@ -253,6 +259,7 @@ impl EditCommand {
             Self::AddAsset { .. } => "AddAsset",
             Self::RelinkAsset { .. } => "RelinkAsset",
             Self::DeleteAsset { .. } => "DeleteAsset",
+            Self::AddImageFromFile { .. } => "AddImageFromFile",
             Self::AddObject { .. } => "AddObject",
             Self::DeleteObject { .. } => "DeleteObject",
             Self::DeleteObjects { .. } => "DeleteObjects",
@@ -298,6 +305,11 @@ pub enum HistoryPayload {
         asset_id: AssetId,
         before: AssetSource,
         after: AssetSource,
+    },
+    ImageFromFileAdded {
+        inserted_asset: Option<(usize, AssetRecord)>,
+        object_index: usize,
+        object: Box<Object>,
     },
     ObjectInserted {
         index: usize,
@@ -1803,6 +1815,76 @@ impl ProjectEditor {
                     HistoryPayload::AssetDeleted { index, asset },
                 )))
             }
+            EditCommand::AddImageFromFile {
+                source,
+                name,
+                position,
+            } => {
+                let previous_next_entity_id = self.project.next_entity_id;
+                let mut allocator = EntityIdAllocator::new(previous_next_entity_id)?;
+
+                let existing_asset_id = self
+                    .project
+                    .assets
+                    .iter()
+                    .find(|asset| asset.kind == AssetKind::Image && asset.source == source)
+                    .map(|asset| asset.id);
+
+                let (asset_id, inserted_asset) = if let Some(asset_id) = existing_asset_id {
+                    (asset_id, None)
+                } else {
+                    let asset = AssetRecord {
+                        id: allocator.allocate_asset()?,
+                        kind: AssetKind::Image,
+                        source,
+                    };
+                    let asset_id = asset.id;
+                    let asset_index = self.project.assets.len();
+                    self.project.assets.push(asset.clone());
+                    (asset_id, Some((asset_index, asset)))
+                };
+
+                let object = Object {
+                    id: allocator.allocate_object()?,
+                    name,
+                    visible: true,
+                    locked: false,
+                    transform: TransformAnimation::new(
+                        crate::animation::Animated::new_static(position),
+                        crate::animation::Animated::new_static(
+                            Vec2::new(1.0, 1.0).expect("finite default image scale"),
+                        ),
+                        crate::animation::Animated::new_static(0.0),
+                        crate::animation::Animated::new_static(
+                            Vec2::new(0.5, 0.5).expect("finite default image anchor"),
+                        ),
+                        crate::animation::Animated::new_static(1.0),
+                    ),
+                    content: ObjectContent::Image(ImageObject { asset: asset_id }),
+                    effects: Vec::new(),
+                };
+                let object_index = self.project.composition.objects.len();
+                self.project.composition.objects.push(object.clone());
+                self.project.next_entity_id = allocator.next_entity_id();
+
+                if let Err(error) = self.project.validate() {
+                    self.project.composition.objects.pop();
+                    if inserted_asset.is_some() {
+                        self.project.assets.pop();
+                    }
+                    self.project.next_entity_id = previous_next_entity_id;
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Add Image from File",
+                    HistoryPayload::ImageFromFileAdded {
+                        inserted_asset,
+                        object_index,
+                        object: Box::new(object),
+                    },
+                )))
+            }
             EditCommand::AddObject { object } => {
                 if self
                     .project
@@ -2919,6 +3001,63 @@ impl ProjectEditor {
                     .find(|asset| asset.id == *asset_id)
                     .ok_or(EditError::AssetNotFound(*asset_id))?;
                 asset.source = direction.pick(before, after).clone();
+            }
+            (
+                HistoryPayload::ImageFromFileAdded {
+                    inserted_asset,
+                    object_index,
+                    object,
+                },
+                HistoryDirection::Undo,
+            ) => {
+                let current = self
+                    .project
+                    .composition
+                    .objects
+                    .get(*object_index)
+                    .ok_or(EditError::HistoryInvariant("image object index missing"))?;
+                if current.id != object.id {
+                    return Err(EditError::HistoryInvariant("image object identity mismatch"));
+                }
+                self.project.composition.objects.remove(*object_index);
+
+                if let Some((asset_index, asset)) = inserted_asset {
+                    let current = self
+                        .project
+                        .assets
+                        .get(*asset_index)
+                        .ok_or(EditError::HistoryInvariant("image asset index missing"))?;
+                    if current.id != asset.id {
+                        return Err(EditError::HistoryInvariant("image asset identity mismatch"));
+                    }
+                    self.project.assets.remove(*asset_index);
+                }
+            }
+            (
+                HistoryPayload::ImageFromFileAdded {
+                    inserted_asset,
+                    object_index,
+                    object,
+                },
+                HistoryDirection::Redo,
+            ) => {
+                if let Some((asset_index, asset)) = inserted_asset {
+                    if *asset_index > self.project.assets.len() {
+                        return Err(EditError::HistoryInvariant(
+                            "image asset restore index invalid",
+                        ));
+                    }
+                    self.project.assets.insert(*asset_index, asset.clone());
+                }
+                if *object_index > self.project.composition.objects.len() {
+                    return Err(EditError::HistoryInvariant(
+                        "image object restore index invalid",
+                    ));
+                }
+                self.project
+                    .composition
+                    .objects
+                    .insert(*object_index, object.as_ref().clone());
             }
             (HistoryPayload::ObjectInserted { index, object }, HistoryDirection::Undo)
             | (HistoryPayload::ObjectDeleted { index, object }, HistoryDirection::Redo) => {
@@ -4125,6 +4264,95 @@ mod tests {
         );
         assert_eq!(editor.project().assets.len(), 1);
         assert_eq!(editor.history_len(), 0);
+    }
+
+    #[test]
+    fn add_image_from_file_is_one_compound_undoable_edit() {
+        let project = Project::new(
+            "Untitled",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let position = Vec2::new(960.0, 540.0).expect("position");
+
+        assert_eq!(
+            editor.execute(EditCommand::AddImageFromFile {
+                source: AssetSource::File {
+                    path: "C:\\media\\drop.png".to_owned(),
+                    relative_to_project: false,
+                },
+                name: "drop".to_owned(),
+                position,
+            }),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.project().composition.objects.len(), 1);
+        assert_eq!(editor.project().next_entity_id, 3);
+
+        let asset_id = editor.project().assets[0].id;
+        let object_id = editor.project().composition.objects[0].id;
+        let ObjectContent::Image(image) = &editor.project().composition.objects[0].content else {
+            panic!("drop must create an image object");
+        };
+        assert_eq!(image.asset, asset_id);
+        assert_eq!(
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            position
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert!(editor.project().assets.is_empty());
+        assert!(editor.project().composition.objects.is_empty());
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(editor.project().assets[0].id, asset_id);
+        assert_eq!(editor.project().composition.objects[0].id, object_id);
+    }
+
+    #[test]
+    fn add_image_from_file_reuses_existing_asset_source() {
+        let project = Project::new(
+            "Untitled",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let source = AssetSource::File {
+            path: "C:\\media\\shared.png".to_owned(),
+            relative_to_project: false,
+        };
+        let asset_id = editor
+            .ensure_asset_record(AssetKind::Image, source.clone())
+            .expect("asset");
+        let history_before_drop = editor.history_len();
+
+        assert_eq!(
+            editor.execute(EditCommand::AddImageFromFile {
+                source,
+                name: "shared".to_owned(),
+                position: Vec2::new(100.0, 200.0).expect("position"),
+            }),
+            Ok(true)
+        );
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.history_len(), history_before_drop + 1);
+        let ObjectContent::Image(image) = &editor.project().composition.objects[0].content else {
+            panic!("drop must create an image object");
+        };
+        assert_eq!(image.asset, asset_id);
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(editor.project().assets.len(), 1);
+        assert!(editor.project().composition.objects.is_empty());
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(editor.project().assets.len(), 1);
+        assert_eq!(editor.project().composition.objects.len(), 1);
     }
 
     #[test]
