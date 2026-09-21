@@ -940,7 +940,11 @@ pub fn draw_editor_shell(
                 ui.separator();
                 ui.label("Transport");
                 if ui
-                    .button(if session.is_playing() { "Pause" } else { "Play" })
+                    .button(if session.is_playing() {
+                        "Pause"
+                    } else {
+                        "Play"
+                    })
                     .on_hover_text("Space")
                     .clicked()
                 {
