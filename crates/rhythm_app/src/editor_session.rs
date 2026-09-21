@@ -304,6 +304,58 @@ pub struct FocusedProperty {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandSearchCommand {
+    FocusProperty(AnimatableProperty),
+    KeyframeAction,
+    TogglePlayback,
+    FrameSelection,
+    FitComposition,
+}
+
+impl CommandSearchCommand {
+    pub const ALL: [Self; 8] = [
+        Self::FocusProperty(AnimatableProperty::Position),
+        Self::FocusProperty(AnimatableProperty::Scale),
+        Self::FocusProperty(AnimatableProperty::Rotation),
+        Self::FocusProperty(AnimatableProperty::Opacity),
+        Self::KeyframeAction,
+        Self::TogglePlayback,
+        Self::FrameSelection,
+        Self::FitComposition,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FocusProperty(AnimatableProperty::Position) => "Focus Position",
+            Self::FocusProperty(AnimatableProperty::Scale) => "Focus Scale",
+            Self::FocusProperty(AnimatableProperty::Rotation) => "Focus Rotation",
+            Self::FocusProperty(AnimatableProperty::Opacity) => "Focus Opacity",
+            Self::FocusProperty(_) => "Focus Property",
+            Self::KeyframeAction => "Toggle Keyframe",
+            Self::TogglePlayback => "Play / Pause",
+            Self::FrameSelection => "Frame Selection",
+            Self::FitComposition => "Fit Composition",
+        }
+    }
+
+    #[must_use]
+    pub const fn shortcut(self) -> &'static str {
+        match self {
+            Self::FocusProperty(AnimatableProperty::Position) => "P",
+            Self::FocusProperty(AnimatableProperty::Scale) => "S",
+            Self::FocusProperty(AnimatableProperty::Rotation) => "R",
+            Self::FocusProperty(AnimatableProperty::Opacity) => "O",
+            Self::FocusProperty(_) => "",
+            Self::KeyframeAction => "K",
+            Self::TogglePlayback => "Space",
+            Self::FrameSelection => "F",
+            Self::FitComposition => "Shift+F",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InspectorNumericComponent {
     Scalar,
     X,
@@ -424,6 +476,10 @@ pub struct EditorSession {
     selected_objects: HashSet<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
+    command_search_open: bool,
+    command_search_query: String,
+    command_search_focus_requested: bool,
+    pending_command_search_command: Option<CommandSearchCommand>,
     pending_focused_keyframe_action: bool,
     inspector_numeric_edit: Option<InspectorNumericEdit>,
     pending_inspector_numeric_commit: Option<InspectorNumericCommit>,
@@ -463,6 +519,10 @@ impl Default for EditorSession {
             selected_objects: HashSet::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
+            command_search_open: false,
+            command_search_query: String::new(),
+            command_search_focus_requested: false,
+            pending_command_search_command: None,
             pending_focused_keyframe_action: false,
             inspector_numeric_edit: None,
             pending_inspector_numeric_commit: None,
@@ -506,6 +566,145 @@ impl EditorSession {
         let changed = self.playing;
         self.playing = false;
         changed
+    }
+
+    pub fn toggle_command_search(&mut self) -> bool {
+        if self.command_search_open {
+            self.close_command_search();
+            return false;
+        }
+
+        self.command_search_open = true;
+        self.command_search_query.clear();
+        self.command_search_focus_requested = true;
+        true
+    }
+
+    pub fn open_command_search(&mut self) -> bool {
+        if self.command_search_open {
+            return false;
+        }
+        self.command_search_open = true;
+        self.command_search_query.clear();
+        self.command_search_focus_requested = true;
+        true
+    }
+
+    pub fn close_command_search(&mut self) -> bool {
+        if !self.command_search_open {
+            return false;
+        }
+        self.command_search_open = false;
+        self.command_search_query.clear();
+        self.command_search_focus_requested = false;
+        true
+    }
+
+    #[must_use]
+    pub const fn command_search_open(&self) -> bool {
+        self.command_search_open
+    }
+
+    #[must_use]
+    pub fn command_search_query(&self) -> &str {
+        &self.command_search_query
+    }
+
+    pub fn update_command_search_query(&mut self, query: String) -> bool {
+        if self.command_search_query == query {
+            return false;
+        }
+        self.command_search_query = query;
+        true
+    }
+
+    pub const fn take_command_search_focus_request(&mut self) -> bool {
+        let requested = self.command_search_focus_requested;
+        self.command_search_focus_requested = false;
+        requested
+    }
+
+    #[must_use]
+    pub fn command_search_matches(&self) -> Vec<CommandSearchCommand> {
+        let query = self.command_search_query.trim().to_ascii_lowercase();
+        CommandSearchCommand::ALL
+            .into_iter()
+            .filter(|command| {
+                query.is_empty()
+                    || command.label().to_ascii_lowercase().contains(&query)
+                    || command.shortcut().to_ascii_lowercase().contains(&query)
+            })
+            .collect()
+    }
+
+    #[must_use]
+    pub fn command_search_command_enabled(&self, command: CommandSearchCommand) -> bool {
+        match command {
+            CommandSearchCommand::FocusProperty(_) => self.selected_objects.len() == 1,
+            CommandSearchCommand::KeyframeAction => self.focused_property.is_some(),
+            CommandSearchCommand::TogglePlayback | CommandSearchCommand::FitComposition => true,
+            CommandSearchCommand::FrameSelection => !self.selected_objects.is_empty(),
+        }
+    }
+
+    #[must_use]
+    pub fn command_search_disabled_reason(
+        &self,
+        command: CommandSearchCommand,
+    ) -> Option<&'static str> {
+        if self.command_search_command_enabled(command) {
+            return None;
+        }
+
+        Some(match command {
+            CommandSearchCommand::FocusProperty(_) => "Select exactly one object",
+            CommandSearchCommand::KeyframeAction => "Focus an animatable property first",
+            CommandSearchCommand::FrameSelection => "Select one or more objects",
+            CommandSearchCommand::TogglePlayback | CommandSearchCommand::FitComposition => {
+                return None;
+            }
+        })
+    }
+
+    pub fn choose_command_search_command(&mut self, command: CommandSearchCommand) -> bool {
+        if !self.command_search_open || !self.command_search_command_enabled(command) {
+            return false;
+        }
+
+        self.pending_command_search_command = Some(command);
+        self.close_command_search();
+        true
+    }
+
+    pub fn commit_pending_command_search_command(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(command) = self.pending_command_search_command.take() else {
+            return Ok(false);
+        };
+
+        match command {
+            CommandSearchCommand::FocusProperty(property) => {
+                Ok(self.focus_selected_property(property))
+            }
+            CommandSearchCommand::KeyframeAction => self.keyframe_action(editor),
+            CommandSearchCommand::TogglePlayback => {
+                self.toggle_playback();
+                Ok(true)
+            }
+            CommandSearchCommand::FrameSelection => {
+                if self.selected_objects.is_empty() {
+                    return Ok(false);
+                }
+                self.request_viewport_camera_action(ViewportCameraAction::FrameSelection);
+                Ok(true)
+            }
+            CommandSearchCommand::FitComposition => {
+                self.request_viewport_camera_action(ViewportCameraAction::FitComposition);
+                Ok(true)
+            }
+        }
     }
 
     #[must_use]
@@ -4036,6 +4235,57 @@ mod tests {
         assert!(session.request_image_relink(second));
         assert!(!session.image_relink_requested(first));
         assert!(session.image_relink_requested(second));
+    }
+
+    #[test]
+    fn command_search_filters_and_dispatches_existing_editor_actions() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+
+        assert!(session.open_command_search());
+        assert!(session.take_command_search_focus_request());
+        assert!(!session.take_command_search_focus_request());
+        assert!(session.update_command_search_query("position".to_owned()));
+        assert_eq!(
+            session.command_search_matches(),
+            vec![CommandSearchCommand::FocusProperty(
+                AnimatableProperty::Position
+            )]
+        );
+        assert_eq!(
+            session.command_search_disabled_reason(CommandSearchCommand::FocusProperty(
+                AnimatableProperty::Position
+            )),
+            Some("Select exactly one object")
+        );
+
+        assert!(session.replace_object_selection(Some(object_id)));
+        assert!(session.choose_command_search_command(CommandSearchCommand::FocusProperty(
+            AnimatableProperty::Position
+        )));
+        assert_eq!(
+            session.commit_pending_command_search_command(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            session.focused_property(),
+            Some(FocusedProperty {
+                object_id,
+                property: AnimatableProperty::Position,
+            })
+        );
+
+        assert!(session.open_command_search());
+        assert!(session.choose_command_search_command(CommandSearchCommand::FitComposition));
+        assert_eq!(
+            session.commit_pending_command_search_command(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            session.take_viewport_camera_action(),
+            Some(ViewportCameraAction::FitComposition)
+        );
     }
 
     #[test]
