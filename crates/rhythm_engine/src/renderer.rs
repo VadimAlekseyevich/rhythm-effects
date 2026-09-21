@@ -39,6 +39,7 @@ pub enum ImageTextureUploadError {
     },
 }
 
+#[derive(Debug)]
 pub struct CachedImageTexture {
     generation: ImageDecodeGeneration,
     size: [u32; 2],
@@ -70,7 +71,7 @@ enum ImageTextureCacheDecision {
     Unchanged,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ImageTextureCache {
     entries: HashMap<AssetId, CachedImageTexture>,
 }
