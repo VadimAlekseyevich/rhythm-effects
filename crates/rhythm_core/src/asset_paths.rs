@@ -7,7 +7,33 @@ pub enum AssetPathError {
     ProjectPathNotAbsolute,
     AssetPathNotAbsolute,
     ProjectPathHasNoDirectory,
+    UnnormalizedAssetPath,
     NonUtf8Path,
+}
+
+pub fn asset_source_for_saved_project(
+    saved_project_path: &Path,
+    asset_path: &Path,
+) -> Result<AssetSource, AssetPathError> {
+    if let Some(relative) = relative_asset_source(saved_project_path, asset_path)? {
+        return Ok(relative);
+    }
+
+    if asset_path
+        .components()
+        .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        return Err(AssetPathError::UnnormalizedAssetPath);
+    }
+
+    let path = asset_path
+        .to_str()
+        .ok_or(AssetPathError::NonUtf8Path)?
+        .to_owned();
+    Ok(AssetSource::File {
+        path,
+        relative_to_project: false,
+    })
 }
 
 pub fn relative_asset_source(
@@ -49,7 +75,7 @@ pub fn relative_asset_source(
 
 #[cfg(test)]
 mod tests {
-    use super::{AssetPathError, relative_asset_source};
+    use super::{AssetPathError, asset_source_for_saved_project, relative_asset_source};
     use crate::project::AssetSource;
     use std::path::PathBuf;
 
@@ -90,6 +116,54 @@ mod tests {
             .join("outside.png");
 
         assert_eq!(relative_asset_source(&project, &outside), Ok(None));
+    }
+
+    #[test]
+    fn external_file_is_persisted_as_absolute_source() {
+        let project = saved_project_path();
+        let project_directory = project.parent().expect("project directory");
+        let outside = project_directory
+            .parent()
+            .expect("parent directory")
+            .join("outside.png");
+
+        assert_eq!(
+            asset_source_for_saved_project(&project, &outside),
+            Ok(AssetSource::File {
+                path: outside.to_string_lossy().into_owned(),
+                relative_to_project: false,
+            })
+        );
+    }
+
+    #[test]
+    fn combined_policy_keeps_in_project_files_relative() {
+        let project = saved_project_path();
+        let asset = project
+            .parent()
+            .expect("project directory")
+            .join("assets")
+            .join("image.png");
+
+        assert_eq!(
+            asset_source_for_saved_project(&project, &asset),
+            relative_asset_source(&project, &asset).map(Option::unwrap)
+        );
+    }
+
+    #[test]
+    fn combined_policy_rejects_unnormalized_external_path() {
+        let project = saved_project_path();
+        let asset = project
+            .parent()
+            .expect("project directory")
+            .join("..")
+            .join("outside.png");
+
+        assert_eq!(
+            asset_source_for_saved_project(&project, &asset),
+            Err(AssetPathError::UnnormalizedAssetPath)
+        );
     }
 
     #[test]
