@@ -201,12 +201,14 @@ impl ApplicationHandler for RhythmApp {
                 is_synthetic,
                 ..
             } => {
-                if !is_synthetic
-                    && event.state == ElementState::Pressed
-                    && !self
+                let text_or_numeric_input_active = self.session.text_or_numeric_edit_active()
+                    || self
                         .egui_context
                         .as_ref()
-                        .is_some_and(|context| context.egui_wants_keyboard_input())
+                        .is_some_and(|context| context.egui_wants_keyboard_input());
+                if !is_synthetic
+                    && event.state == ElementState::Pressed
+                    && !text_or_numeric_input_active
                     && let PhysicalKey::Code(code) = event.physical_key
                 {
                     let control = self.modifiers.control_key();
