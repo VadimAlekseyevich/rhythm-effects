@@ -708,6 +708,14 @@ impl EditorSession {
     }
 
     #[must_use]
+    pub const fn text_or_numeric_edit_active(&self) -> bool {
+        self.command_search_open
+            || self.inspector_numeric_edit.is_some()
+            || self.inspector_multi_numeric_edit.is_some()
+            || self.inspector_text_edit.is_some()
+    }
+
+    #[must_use]
     pub const fn authoring_division(&self) -> BeatDivision {
         self.authoring_division
     }
@@ -4236,6 +4244,38 @@ mod tests {
         assert!(session.request_image_relink(second));
         assert!(!session.image_relink_requested(first));
         assert!(session.image_relink_requested(second));
+    }
+
+    #[test]
+    fn active_text_or_numeric_controls_suppress_editor_shortcuts() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut session = EditorSession::default();
+
+        assert!(!session.text_or_numeric_edit_active());
+
+        let numeric_target = InspectorNumericTarget {
+            object_id,
+            property: AnimatableProperty::Rotation,
+            component: InspectorNumericComponent::Scalar,
+        };
+        session.begin_inspector_numeric_edit(numeric_target, 0.0, "0.0".to_owned());
+        assert!(session.text_or_numeric_edit_active());
+        assert!(session.cancel_inspector_numeric_edit(numeric_target));
+        assert!(!session.text_or_numeric_edit_active());
+
+        let text_target = super::InspectorTextTarget {
+            object_id,
+            field: super::InspectorTextField::FontFamily,
+        };
+        session.begin_inspector_text_edit(text_target, "Arial".to_owned());
+        assert!(session.text_or_numeric_edit_active());
+        assert!(session.cancel_inspector_text_edit(text_target));
+        assert!(!session.text_or_numeric_edit_active());
+
+        assert!(session.open_command_search());
+        assert!(session.text_or_numeric_edit_active());
+        assert!(session.close_command_search());
+        assert!(!session.text_or_numeric_edit_active());
     }
 
     #[test]
