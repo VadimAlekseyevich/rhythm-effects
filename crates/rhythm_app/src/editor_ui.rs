@@ -1023,6 +1023,9 @@ pub fn draw_editor_shell(
                 if ui.button("Commands").on_hover_text("Ctrl+K").clicked() {
                     session.toggle_command_search();
                 }
+                if ui.button("Import…").clicked() {
+                    session.request_import_dialog();
+                }
                 ui.separator();
                 ui.label("Transport");
                 if ui
