@@ -4262,9 +4262,11 @@ mod tests {
         );
 
         assert!(session.replace_object_selection(Some(object_id)));
-        assert!(session.choose_command_search_command(CommandSearchCommand::FocusProperty(
-            AnimatableProperty::Position
-        )));
+        assert!(
+            session.choose_command_search_command(CommandSearchCommand::FocusProperty(
+                AnimatableProperty::Position
+            ))
+        );
         assert_eq!(
             session.commit_pending_command_search_command(&mut editor),
             Ok(true)
