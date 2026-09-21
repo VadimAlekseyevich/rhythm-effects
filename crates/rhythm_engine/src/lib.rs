@@ -5,6 +5,7 @@ pub mod image_decode;
 pub mod renderer;
 pub mod runtime_assets;
 pub mod scene_eval;
+pub mod text;
 pub mod waveform;
 
 #[must_use]

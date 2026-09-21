@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 use rhythm_core::ids::AssetId;
 
-use crate::{image_decode::ImageDecodeGeneration, runtime_assets::ValidatedDecodedImage};
+use crate::{
+    image_decode::ImageDecodeGeneration, runtime_assets::ValidatedDecodedImage, text::TextResources,
+};
 
 pub const INITIAL_COMPOSITION_WIDTH: u32 = 1920;
 pub const INITIAL_COMPOSITION_HEIGHT: u32 = 1080;
@@ -262,6 +264,7 @@ pub struct Renderer {
     preview_bind_group: wgpu::BindGroup,
     preview_pipeline: wgpu::RenderPipeline,
     image_textures: ImageTextureCache,
+    text_resources: TextResources,
 }
 
 impl Renderer {
@@ -393,6 +396,7 @@ impl Renderer {
             preview_bind_group,
             preview_pipeline,
             image_textures: ImageTextureCache::default(),
+            text_resources: TextResources::new(),
         }
     }
 
@@ -409,6 +413,15 @@ impl Renderer {
     #[must_use]
     pub fn preview_display_view(&self) -> &wgpu::TextureView {
         &self.preview_display_view
+    }
+
+    #[must_use]
+    pub const fn text_resources(&self) -> &TextResources {
+        &self.text_resources
+    }
+
+    pub const fn text_resources_mut(&mut self) -> &mut TextResources {
+        &mut self.text_resources
     }
 
     #[must_use]

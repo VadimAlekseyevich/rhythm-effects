@@ -244,7 +244,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-209** — Implement missing-asset runtime state and Relink while keeping AssetId stable.
 - [x] **AI-210** — Block deletion of referenced AssetRecords.
 - [x] **AI-211** — Implement OS file drag/drop for Add Image from File as one compound edit.
-- [ ] **AI-212** — Integrate cosmic-text FontSystem as one long-lived text resource.
+- [x] **AI-212** — Integrate cosmic-text FontSystem as one long-lived text resource.
 - [ ] **AI-213** — Integrate glyphon using the existing wgpu Device/Queue.
 - [ ] **AI-214** — Bundle Inter as the deterministic composition fallback family.
 - [ ] **AI-215** — Implement system font family enumeration/cache.
