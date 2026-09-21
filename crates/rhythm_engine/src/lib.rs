@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audio;
+pub mod image_decode;
 pub mod renderer;
 pub mod scene_eval;
 pub mod waveform;
