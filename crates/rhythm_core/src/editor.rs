@@ -131,6 +131,9 @@ pub enum EditCommand {
     DeleteObject {
         object_id: ObjectId,
     },
+    DeleteObjects {
+        object_ids: Vec<ObjectId>,
+    },
     RenameObject {
         object_id: ObjectId,
         name: String,
@@ -236,6 +239,7 @@ impl EditCommand {
         match self {
             Self::AddObject { .. } => "AddObject",
             Self::DeleteObject { .. } => "DeleteObject",
+            Self::DeleteObjects { .. } => "DeleteObjects",
             Self::RenameObject { .. } => "RenameObject",
             Self::SetTextContent { .. } => "SetTextContent",
             Self::SetTextFontFamily { .. } => "SetTextFontFamily",
@@ -273,6 +277,9 @@ pub enum HistoryPayload {
     ObjectDeleted {
         index: usize,
         object: Box<Object>,
+    },
+    ObjectsDeleted {
+        records: Vec<(usize, Box<Object>)>,
     },
     ObjectRenamed {
         object_id: ObjectId,
@@ -1688,6 +1695,48 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::DeleteObjects { object_ids } => {
+                if object_ids.is_empty() {
+                    return Ok(None);
+                }
+
+                let mut ids = object_ids;
+                ids.sort_by_key(|object_id| object_id.get());
+                ids.dedup();
+
+                let mut indices = ids
+                    .into_iter()
+                    .map(|object_id| self.object_index(object_id).map(|index| (index, object_id)))
+                    .collect::<Result<Vec<_>, _>>()?;
+                indices.sort_by_key(|(index, _)| *index);
+
+                let mut records = Vec::with_capacity(indices.len());
+                for (index, object_id) in indices.into_iter().rev() {
+                    let object = self.project.composition.objects.remove(index);
+                    if object.id != object_id {
+                        return Err(EditError::HistoryInvariant(
+                            "object delete index no longer matches selection",
+                        ));
+                    }
+                    records.push((index, Box::new(object)));
+                }
+                records.sort_by_key(|(index, _)| *index);
+
+                if let Err(error) = self.project.validate() {
+                    for (index, object) in &records {
+                        self.project
+                            .composition
+                            .objects
+                            .insert(*index, object.as_ref().clone());
+                    }
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    &format!("Delete {} Objects", records.len()),
+                    HistoryPayload::ObjectsDeleted { records },
+                )))
+            }
             EditCommand::RenameObject { object_id, name } => {
                 let index = self.object_index(object_id)?;
                 let before = self.project.composition.objects[index].name.clone();
@@ -2699,6 +2748,26 @@ impl ProjectEditor {
                     .objects
                     .insert(*index, object.as_ref().clone());
             }
+            (HistoryPayload::ObjectsDeleted { records }, direction) => match direction {
+                HistoryDirection::Undo => {
+                    for (index, object) in records {
+                        self.project
+                            .composition
+                            .objects
+                            .insert(*index, object.as_ref().clone());
+                    }
+                }
+                HistoryDirection::Redo => {
+                    for (index, object) in records.iter().rev() {
+                        let removed = self.project.composition.objects.remove(*index);
+                        if removed.id != object.id {
+                            return Err(EditError::HistoryInvariant(
+                                "redo object delete payload mismatch",
+                            ));
+                        }
+                    }
+                }
+            },
             (
                 HistoryPayload::ObjectRenamed {
                     object_id,
@@ -3774,6 +3843,55 @@ mod tests {
             )
             .expect("property")
             .is_some()
+        );
+    }
+
+    #[test]
+    fn deleting_multiple_objects_is_one_undoable_history_entry() {
+        let mut project = editor_with_object().into_project();
+        project.composition.objects.push(object(2, "B"));
+        project.composition.objects.push(object(3, "C"));
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+
+        assert_eq!(
+            editor.execute(EditCommand::DeleteObjects {
+                object_ids: vec![
+                    ObjectId::new(1).expect("object id"),
+                    ObjectId::new(3).expect("object id"),
+                ],
+            }),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(editor.project().composition.objects.len(), 1);
+        assert_eq!(
+            editor.project().composition.objects[0].id,
+            ObjectId::new(2).expect("object id")
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            editor
+                .project()
+                .composition
+                .objects
+                .iter()
+                .map(|object| object.id.get())
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            editor
+                .project()
+                .composition
+                .objects
+                .iter()
+                .map(|object| object.id.get())
+                .collect::<Vec<_>>(),
+            vec![2]
         );
     }
 
