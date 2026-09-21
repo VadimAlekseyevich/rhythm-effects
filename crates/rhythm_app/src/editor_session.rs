@@ -469,6 +469,7 @@ pub struct EditorSession {
     effect_picker_object: Option<ObjectId>,
     effect_picker_query: String,
     pending_image_relink_asset: Option<AssetId>,
+    pending_import_dialog: bool,
     viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_multi_position_drag: Option<ViewportMultiPositionDrag>,
     viewport_scale_drag: Option<ViewportScaleDrag>,
@@ -512,6 +513,7 @@ impl Default for EditorSession {
             effect_picker_object: None,
             effect_picker_query: String::new(),
             pending_image_relink_asset: None,
+            pending_import_dialog: false,
             viewport_position_drag: None,
             viewport_multi_position_drag: None,
             viewport_scale_drag: None,
@@ -941,6 +943,20 @@ impl EditorSession {
     #[must_use]
     pub fn image_relink_requested(&self, asset_id: AssetId) -> bool {
         self.pending_image_relink_asset == Some(asset_id)
+    }
+
+    pub fn request_import_dialog(&mut self) -> bool {
+        if self.pending_import_dialog {
+            return false;
+        }
+        self.pending_import_dialog = true;
+        true
+    }
+
+    pub fn take_import_dialog_request(&mut self) -> bool {
+        let requested = self.pending_import_dialog;
+        self.pending_import_dialog = false;
+        requested
     }
 
     pub fn queue_object_visibility(&mut self, object_id: ObjectId, visible: bool) {
@@ -4278,6 +4294,16 @@ mod tests {
             session.commit_pending_text_inspector_actions(&mut editor),
             Ok(false)
         );
+    }
+
+    #[test]
+    fn import_dialog_request_is_consumed_once() {
+        let mut session = EditorSession::default();
+
+        assert!(session.request_import_dialog());
+        assert!(!session.request_import_dialog());
+        assert!(session.take_import_dialog_request());
+        assert!(!session.take_import_dialog_request());
     }
 
     #[test]
