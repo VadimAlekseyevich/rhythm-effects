@@ -8,10 +8,32 @@ use crate::image_decode::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedDecodedImage {
-    pub asset_id: AssetId,
-    pub generation: ImageDecodeGeneration,
-    pub path: PathBuf,
-    pub image: DecodedImage,
+    asset_id: AssetId,
+    generation: ImageDecodeGeneration,
+    path: PathBuf,
+    image: DecodedImage,
+}
+
+impl ValidatedDecodedImage {
+    #[must_use]
+    pub const fn asset_id(&self) -> AssetId {
+        self.asset_id
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> ImageDecodeGeneration {
+        self.generation
+    }
+
+    #[must_use]
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    #[must_use]
+    pub const fn image(&self) -> &DecodedImage {
+        &self.image
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
