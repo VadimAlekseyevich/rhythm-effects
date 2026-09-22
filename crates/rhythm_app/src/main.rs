@@ -541,11 +541,7 @@ impl ApplicationHandler for RhythmApp {
                                 window.request_redraw();
                             }
                             Ok(false) => {}
-                            Err(error) => warn!(
-                                ?error,
-                                path,
-                                "dropped image compound edit failed"
-                            ),
+                            Err(error) => warn!(?error, path, "dropped image compound edit failed"),
                         }
                     }
 
