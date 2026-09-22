@@ -500,6 +500,55 @@ impl ApplicationHandler for RhythmApp {
                         window.request_redraw();
                     }
 
+                    for dropped in self.session.take_image_file_drops() {
+                        if !file_dialogs::is_supported_image_path(&dropped.path) {
+                            warn!(
+                                path = %dropped.path.display(),
+                                "ignored unsupported file dropped on composition viewport"
+                            );
+                            continue;
+                        }
+                        let Some(path) = dropped.path.to_str() else {
+                            warn!(
+                                path = %dropped.path.display(),
+                                "dropped image path cannot be represented in the project schema"
+                            );
+                            continue;
+                        };
+                        let object_name = dropped
+                            .path
+                            .file_stem()
+                            .and_then(|stem| stem.to_str())
+                            .filter(|stem| !stem.is_empty())
+                            .unwrap_or("Image")
+                            .to_owned();
+                        let source = AssetSource::File {
+                            path: path.to_owned(),
+                            relative_to_project: false,
+                        };
+                        match self.project_editor.execute(EditCommand::AddImageFromFile {
+                            source,
+                            object_name,
+                            position: dropped.position,
+                        }) {
+                            Ok(true) => {
+                                info!(
+                                    path,
+                                    x = dropped.position.x(),
+                                    y = dropped.position.y(),
+                                    "dropped image imported and object created as one edit"
+                                );
+                                window.request_redraw();
+                            }
+                            Ok(false) => {}
+                            Err(error) => warn!(
+                                ?error,
+                                path,
+                                "dropped image compound edit failed"
+                            ),
+                        }
+                    }
+
                     match self
                         .session
                         .sync_viewport_position_drag(&mut self.project_editor)
