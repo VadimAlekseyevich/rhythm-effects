@@ -269,7 +269,7 @@ pub struct Renderer {
 
 impl Renderer {
     #[must_use]
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let composition_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Rhythm Effects composition"),
             size: wgpu::Extent3d {
@@ -396,7 +396,12 @@ impl Renderer {
             preview_bind_group,
             preview_pipeline,
             image_textures: ImageTextureCache::default(),
-            text_resources: TextResources::new(),
+            text_resources: TextResources::new(
+                device,
+                queue,
+                COMPOSITION_FORMAT,
+                [INITIAL_COMPOSITION_WIDTH, INITIAL_COMPOSITION_HEIGHT],
+            ),
         }
     }
 
