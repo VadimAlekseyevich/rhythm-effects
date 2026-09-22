@@ -42,6 +42,17 @@ pub fn pick_image_to_relink() -> Option<PathBuf> {
         .pick_file()
 }
 
+#[must_use]
+pub fn is_supported_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            IMAGE_EXTENSIONS
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+        })
+}
+
 fn project_file_name(project_name: &str) -> String {
     let trimmed = project_name.trim();
     let stem = if trimmed.is_empty() {
@@ -73,7 +84,7 @@ fn ensure_extension(mut path: PathBuf, extension: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_extension, project_file_name};
+    use super::{ensure_extension, is_supported_image_path, project_file_name};
     use std::path::PathBuf;
 
     #[test]
@@ -82,6 +93,16 @@ mod tests {
         assert_eq!(project_file_name("Demo.rhfx"), "Demo.rhfx");
         assert_eq!(project_file_name("Demo.RHFX"), "Demo.RHFX");
         assert_eq!(project_file_name("   "), "Untitled.rhfx");
+    }
+
+    #[test]
+    fn supported_image_path_accepts_mvp_formats_case_insensitively() {
+        for path in ["image.png", "photo.JPG", "photo.jpeg", "image.WebP"] {
+            assert!(is_supported_image_path(PathBuf::from(path).as_path()));
+        }
+        for path in ["image.gif", "image.svg", "image", "audio.wav"] {
+            assert!(!is_supported_image_path(PathBuf::from(path).as_path()));
+        }
     }
 
     #[test]
