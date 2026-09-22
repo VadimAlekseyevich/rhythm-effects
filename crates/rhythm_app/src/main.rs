@@ -98,7 +98,7 @@ impl ApplicationHandler for RhythmApp {
 
                 match GpuContext::initialize(Arc::clone(&window)) {
                     Ok(gpu) => {
-                        let renderer = Renderer::new(&gpu.device);
+                        let renderer = Renderer::new(&gpu.device, &gpu.queue);
                         renderer.clear_composition(&gpu.device, &gpu.queue);
                         renderer.refresh_preview_display(&gpu.device, &gpu.queue);
 
