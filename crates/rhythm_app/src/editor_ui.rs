@@ -1567,6 +1567,24 @@ pub fn draw_editor_shell(
                 )
             };
 
+            let dropped_paths = ui.input(|input| {
+                input
+                    .raw
+                    .dropped_files
+                    .iter()
+                    .map(|file| file.path().to_path_buf())
+                    .collect::<Vec<_>>()
+            });
+            if !dropped_paths.is_empty()
+                && response.hovered()
+                && let Some(pointer) = ui.input(|input| input.pointer.hover_pos())
+                && let Some(composition_point) = screen_to_composition(pointer)
+            {
+                for path in dropped_paths {
+                    session.queue_image_file_drop(path, composition_point);
+                }
+            }
+
             if response.clicked()
                 && !session.viewport_multi_position_drag_active()
                 && let Some(pointer) = response.interact_pointer_pos()
