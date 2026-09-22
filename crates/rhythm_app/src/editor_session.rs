@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf};
 
 use rhythm_core::{
     animation::{Animated, BezierEasing, Interpolation},
@@ -20,6 +20,12 @@ use rhythm_core::{
         snap_tick_position_to_grid,
     },
 };
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingImageFileDrop {
+    pub path: PathBuf,
+    pub position: Vec2,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreviewQuality {
@@ -470,6 +476,7 @@ pub struct EditorSession {
     effect_picker_query: String,
     pending_image_relink_asset: Option<AssetId>,
     pending_import_dialog: bool,
+    pending_image_file_drops: Vec<PendingImageFileDrop>,
     viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_multi_position_drag: Option<ViewportMultiPositionDrag>,
     viewport_scale_drag: Option<ViewportScaleDrag>,
@@ -514,6 +521,7 @@ impl Default for EditorSession {
             effect_picker_query: String::new(),
             pending_image_relink_asset: None,
             pending_import_dialog: false,
+            pending_image_file_drops: Vec::new(),
             viewport_position_drag: None,
             viewport_multi_position_drag: None,
             viewport_scale_drag: None,
@@ -976,6 +984,15 @@ impl EditorSession {
         let requested = self.pending_import_dialog;
         self.pending_import_dialog = false;
         requested
+    }
+
+    pub fn queue_image_file_drop(&mut self, path: PathBuf, position: Vec2) {
+        self.pending_image_file_drops
+            .push(PendingImageFileDrop { path, position });
+    }
+
+    pub fn take_image_file_drops(&mut self) -> Vec<PendingImageFileDrop> {
+        std::mem::take(&mut self.pending_image_file_drops)
     }
 
     pub fn queue_object_visibility(&mut self, object_id: ObjectId, visible: bool) {
@@ -3492,6 +3509,8 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{
         CommandSearchCommand, EditorSession, FocusedProperty, InspectorNumericCommit,
         InspectorNumericComponent, InspectorNumericTarget, KeyframeDragMember,
@@ -4338,6 +4357,22 @@ mod tests {
         assert_eq!(session.take_image_relink_request(), Some(second));
         assert!(!session.image_relink_requested(second));
         assert_eq!(session.take_image_relink_request(), None);
+    }
+
+    #[test]
+    fn image_file_drops_are_consumed_once_with_composition_position() {
+        let mut session = EditorSession::default();
+        let position = Vec2::new(120.0, 80.0).expect("drop position");
+        session.queue_image_file_drop(PathBuf::from("image.png"), position);
+
+        assert_eq!(
+            session.take_image_file_drops(),
+            vec![super::PendingImageFileDrop {
+                path: PathBuf::from("image.png"),
+                position,
+            }]
+        );
+        assert!(session.take_image_file_drops().is_empty());
     }
 
     #[test]
