@@ -12,6 +12,7 @@ cpal.workspace = true
 wgpu.workspace = true
 image.workspace = true
 cosmic-text.workspace = true
+glyphon.workspace = true
 rhythm_core = { path = "../rhythm_core" }
 
 [lints]
