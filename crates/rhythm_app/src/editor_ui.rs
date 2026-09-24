@@ -225,8 +225,8 @@ fn draw_text_inspector(
         object_id,
         field: InspectorTextField::FontFamily,
     };
-    let requested_font_missing = text_resources
-        .is_some_and(|resources| !resources.font_family_available(&text.font.family));
+    let requested_font_missing =
+        text_resources.is_some_and(|resources| !resources.font_family_available(&text.font.family));
     ui.horizontal(|ui| {
         ui.label("Font");
         if let Some(mut buffer) = session
