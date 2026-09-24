@@ -249,7 +249,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-214** — Bundle Inter as the deterministic composition fallback family.
 - [x] **AI-215** — Implement system font family enumeration/cache.
 - [x] **AI-216** — Implement Latin/Cyrillic text shaping.
-- [ ] **AI-217** — Implement explicit multiline text layout.
+- [x] **AI-217** — Implement explicit multiline text layout.
 - [ ] **AI-218** — Implement left/center/right text alignment.
 - [ ] **AI-219** — Implement deterministic text local bounds for anchor/hit testing.
 - [ ] **AI-220** — Cache text layout by content/font/size/alignment and avoid reshape for pure transform/color changes.

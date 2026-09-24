@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fmt};
 
-use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
+use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Wrap};
 use rhythm_core::project::{FontReference, FontStyle, FontWeight};
 
 pub const COMPOSITION_FALLBACK_FAMILY: &str = "Inter";
@@ -60,6 +60,7 @@ fn shape_with_font_system(
         .weight(cosmic_weight(font.weight))
         .style(cosmic_style(font.style));
     let mut buffer = Buffer::new(font_system, metrics);
+    buffer.set_wrap(Wrap::None);
     buffer.set_text(text, &attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(font_system, false);
 
@@ -97,6 +98,11 @@ impl ShapedText {
     #[must_use]
     pub fn glyph_count(&self) -> usize {
         self.buffer.layout_runs().map(|run| run.glyphs.len()).sum()
+    }
+
+    #[must_use]
+    pub fn line_count(&self) -> usize {
+        self.buffer.lines.len()
     }
 
     #[must_use]
@@ -273,6 +279,34 @@ mod tests {
             "Rhythm Привет 123",
             &inter_font(FontWeight::Bold, FontStyle::Italic),
         );
+    }
+
+    #[test]
+    fn explicit_newlines_create_multiline_layout() {
+        let (mut font_system, _) = create_composition_font_system_and_cache();
+        let shaped = shape_with_font_system(
+            &mut font_system,
+            "First line\nВторая строка\nThird line",
+            &inter_font(FontWeight::Normal, FontStyle::Normal),
+            48.0,
+        );
+
+        assert_eq!(shaped.line_count(), 3);
+        assert_eq!(shaped.missing_glyph_count(), 0);
+    }
+
+    #[test]
+    fn empty_explicit_line_is_preserved() {
+        let (mut font_system, _) = create_composition_font_system_and_cache();
+        let shaped = shape_with_font_system(
+            &mut font_system,
+            "Latin\n\nКириллица",
+            &inter_font(FontWeight::Normal, FontStyle::Normal),
+            48.0,
+        );
+
+        assert_eq!(shaped.line_count(), 3);
+        assert_eq!(shaped.missing_glyph_count(), 0);
     }
 
     #[test]
