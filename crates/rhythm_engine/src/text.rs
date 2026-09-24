@@ -355,31 +355,15 @@ mod tests {
         let text = "Wide alignment line\nshort";
 
         let (mut left_fonts, _) = create_composition_font_system_and_cache();
-        let left = shape_with_font_system(
-            &mut left_fonts,
-            text,
-            &font,
-            48.0,
-            TextAlignment::Left,
-        );
+        let left = shape_with_font_system(&mut left_fonts, text, &font, 48.0, TextAlignment::Left);
 
         let (mut center_fonts, _) = create_composition_font_system_and_cache();
-        let center = shape_with_font_system(
-            &mut center_fonts,
-            text,
-            &font,
-            48.0,
-            TextAlignment::Center,
-        );
+        let center =
+            shape_with_font_system(&mut center_fonts, text, &font, 48.0, TextAlignment::Center);
 
         let (mut right_fonts, _) = create_composition_font_system_and_cache();
-        let right = shape_with_font_system(
-            &mut right_fonts,
-            text,
-            &font,
-            48.0,
-            TextAlignment::Right,
-        );
+        let right =
+            shape_with_font_system(&mut right_fonts, text, &font, 48.0, TextAlignment::Right);
 
         let (left_wide_x, wide_width) = line_start_and_width(&left, 0);
         let (left_short_x, short_width) = line_start_and_width(&left, 1);
