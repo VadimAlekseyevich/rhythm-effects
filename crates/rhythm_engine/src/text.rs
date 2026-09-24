@@ -8,10 +8,6 @@ const INTER_VARIABLE: &[u8] = include_bytes!("../assets/fonts/inter/InterVariabl
 const INTER_VARIABLE_ITALIC: &[u8] =
     include_bytes!("../assets/fonts/inter/InterVariable-Italic.ttf");
 
-fn create_composition_font_system() -> FontSystem {
-    create_composition_font_system_and_cache().0
-}
-
 fn create_composition_font_system_and_cache() -> (FontSystem, Vec<String>) {
     let mut font_system = FontSystem::new();
     let system_font_families = enumerate_system_font_families(&font_system);
@@ -167,8 +163,8 @@ mod tests {
     };
 
     use super::{
-        COMPOSITION_FALLBACK_FAMILY, create_composition_font_system,
-        create_composition_font_system_and_cache, enumerate_system_font_families,
+        COMPOSITION_FALLBACK_FAMILY, create_composition_font_system_and_cache,
+        enumerate_system_font_families,
     };
 
     #[test]
@@ -189,7 +185,7 @@ mod tests {
 
     #[test]
     fn bundled_inter_replaces_system_inter_with_binary_faces() {
-        let font_system = create_composition_font_system();
+        let (font_system, _) = create_composition_font_system_and_cache();
         let faces: Vec<_> = font_system
             .db()
             .faces()
