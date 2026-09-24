@@ -516,6 +516,10 @@ impl ApplicationHandler for RhythmApp {
                     }
 
                     let raw_input = egui_state.take_egui_input(window);
+                    let text_resources = self
+                        .renderer
+                        .as_ref()
+                        .map(rhythm_engine::renderer::Renderer::text_resources);
                     let full_output = egui_context.run_ui(raw_input, |root_ui| {
                         if let Some(diagnostics) = self.diagnostics.as_ref() {
                             editor_ui::draw_editor_shell(
@@ -525,6 +529,7 @@ impl ApplicationHandler for RhythmApp {
                                 diagnostics,
                                 self.composition_texture_id,
                                 self.waveform.as_ref(),
+                                text_resources,
                             );
                         }
                     });

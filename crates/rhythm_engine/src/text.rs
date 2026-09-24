@@ -82,6 +82,14 @@ fn cosmic_alignment(alignment: TextAlignment) -> Align {
     }
 }
 
+fn font_family_available(font_system: &FontSystem, family: &str) -> bool {
+    font_system.db().faces().any(|face| {
+        face.families
+            .iter()
+            .any(|(candidate, _)| candidate == family)
+    })
+}
+
 fn shape_with_font_system(
     font_system: &mut FontSystem,
     text: &str,
@@ -89,9 +97,15 @@ fn shape_with_font_system(
     font_size: f32,
     alignment: TextAlignment,
 ) -> ShapedText {
+    let requested_font_missing = !font_family_available(font_system, &font.family);
+    let resolved_family = if requested_font_missing {
+        COMPOSITION_FALLBACK_FAMILY
+    } else {
+        font.family.as_str()
+    };
     let metrics = Metrics::new(font_size, font_size);
     let attrs = Attrs::new()
-        .family(Family::Name(&font.family))
+        .family(Family::Name(resolved_family))
         .weight(cosmic_weight(font.weight))
         .style(cosmic_style(font.style));
     let mut buffer = Buffer::new(font_system, metrics);
@@ -111,7 +125,10 @@ fn shape_with_font_system(
     buffer.set_size(Some(layout_width), None);
     buffer.shape_until_scroll(font_system, false);
 
-    ShapedText { buffer }
+    ShapedText {
+        buffer,
+        requested_font_missing,
+    }
 }
 
 fn shape_cached<'a>(
@@ -161,9 +178,15 @@ fn install_bundled_inter(font_system: &mut FontSystem) {
 #[derive(Debug)]
 pub struct ShapedText {
     buffer: Buffer,
+    requested_font_missing: bool,
 }
 
 impl ShapedText {
+    #[must_use]
+    pub const fn requested_font_missing(&self) -> bool {
+        self.requested_font_missing
+    }
+
     #[must_use]
     pub fn glyph_count(&self) -> usize {
         self.buffer.layout_runs().map(|run| run.glyphs.len()).sum()
@@ -284,6 +307,11 @@ impl TextResources {
     }
 
     #[must_use]
+    pub fn font_family_available(&self, family: &str) -> bool {
+        font_family_available(&self.font_system, family)
+    }
+
+    #[must_use]
     pub fn shape_text(
         &mut self,
         text: &str,
@@ -338,7 +366,7 @@ mod tests {
 
     use super::{
         COMPOSITION_FALLBACK_FAMILY, ShapedText, create_composition_font_system_and_cache,
-        enumerate_system_font_families, shape_cached, shape_with_font_system,
+        enumerate_system_font_families, font_family_available, shape_cached, shape_with_font_system,
     };
     use rhythm_core::{
         domain::Vec2,
@@ -361,6 +389,58 @@ mod tests {
 
         assert!(shaped.glyph_count() > 0);
         assert_eq!(shaped.missing_glyph_count(), 0);
+    }
+
+    #[test]
+    fn missing_requested_family_shapes_with_bundled_inter() {
+        let (mut font_system, _) = create_composition_font_system_and_cache();
+        let inter_face_ids: Vec<_> = font_system
+            .db()
+            .faces()
+            .filter(|face| {
+                face.families
+                    .iter()
+                    .any(|(family, _)| family == COMPOSITION_FALLBACK_FAMILY)
+            })
+            .map(|face| face.id)
+            .collect();
+        let missing_font = FontReference {
+            family: "Rhythm Effects Definitely Missing Font".to_owned(),
+            weight: FontWeight::SemiBold,
+            style: FontStyle::Italic,
+        };
+
+        assert!(!font_family_available(&font_system, &missing_font.family));
+
+        let shaped = shape_with_font_system(
+            &mut font_system,
+            "FallbackПривет",
+            &missing_font,
+            48.0,
+            TextAlignment::Left,
+        );
+
+        assert!(shaped.requested_font_missing());
+        assert_eq!(shaped.missing_glyph_count(), 0);
+        assert!(shaped.buffer.layout_runs().all(|run| {
+            run.glyphs
+                .iter()
+                .all(|glyph| inter_face_ids.contains(&glyph.font_id))
+        }));
+    }
+
+    #[test]
+    fn bundled_inter_is_not_reported_as_missing() {
+        let (mut font_system, _) = create_composition_font_system_and_cache();
+        let shaped = shape_with_font_system(
+            &mut font_system,
+            "Inter",
+            &inter_font(FontWeight::Normal, FontStyle::Normal),
+            48.0,
+            TextAlignment::Left,
+        );
+
+        assert!(!shaped.requested_font_missing());
     }
 
     #[test]

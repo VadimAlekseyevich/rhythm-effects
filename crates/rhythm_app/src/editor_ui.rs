@@ -180,6 +180,7 @@ fn draw_text_inspector(
     object_id: ObjectId,
     text: &TextObject,
     project: &Project,
+    text_resources: Option<&rhythm_engine::text::TextResources>,
 ) {
     ui.add_space(8.0);
     ui.separator();
@@ -224,6 +225,8 @@ fn draw_text_inspector(
         object_id,
         field: InspectorTextField::FontFamily,
     };
+    let requested_font_missing = text_resources
+        .is_some_and(|resources| !resources.font_family_available(&text.font.family));
     ui.horizontal(|ui| {
         ui.label("Font");
         if let Some(mut buffer) = session
@@ -244,6 +247,12 @@ fn draw_text_inspector(
             }
         } else if ui.button(&text.font.family).clicked() {
             session.begin_inspector_text_edit(family_target, text.font.family.clone());
+        }
+
+        if requested_font_missing {
+            ui.strong("Missing → Inter").on_hover_text(
+                "The requested font is unavailable. Composition text uses bundled Inter fallback.",
+            );
         }
     });
 
@@ -1014,6 +1023,7 @@ pub fn draw_editor_shell(
     diagnostics: &DiagnosticsView,
     composition_texture_id: Option<egui::TextureId>,
     waveform: Option<&rhythm_engine::waveform::WaveformData>,
+    text_resources: Option<&rhythm_engine::text::TextResources>,
 ) {
     egui::Panel::top("transport_rhythm")
         .exact_size(54.0)
@@ -1269,7 +1279,14 @@ pub fn draw_editor_shell(
                                 draw_image_inspector(ui, session, project, image.asset);
                             }
                             ObjectContent::Text(text) => {
-                                draw_text_inspector(ui, session, object.id, text, project);
+                                draw_text_inspector(
+                                    ui,
+                                    session,
+                                    object.id,
+                                    text,
+                                    project,
+                                    text_resources,
+                                );
                             }
                         }
                         draw_effect_stack(ui, session, object.id, &object.effects);
