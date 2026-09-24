@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn bundled_inter_is_queryable_for_supported_styles_and_weights() {
-        let font_system = create_composition_font_system();
+        let (font_system, _) = create_composition_font_system_and_cache();
         let families = [Family::Name(COMPOSITION_FALLBACK_FAMILY)];
 
         for style in [Style::Normal, Style::Italic] {
