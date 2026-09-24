@@ -366,7 +366,8 @@ mod tests {
 
     use super::{
         COMPOSITION_FALLBACK_FAMILY, ShapedText, create_composition_font_system_and_cache,
-        enumerate_system_font_families, font_family_available, shape_cached, shape_with_font_system,
+        enumerate_system_font_families, font_family_available, shape_cached,
+        shape_with_font_system,
     };
     use rhythm_core::{
         domain::Vec2,
