@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, fmt};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt,
+};
 
 use cosmic_text::{Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Wrap};
 use rhythm_core::{
@@ -12,6 +15,30 @@ pub const COMPOSITION_FALLBACK_FAMILY: &str = "Inter";
 const INTER_VARIABLE: &[u8] = include_bytes!("../assets/fonts/inter/InterVariable.ttf");
 const INTER_VARIABLE_ITALIC: &[u8] =
     include_bytes!("../assets/fonts/inter/InterVariable-Italic.ttf");
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TextLayoutKey {
+    text: String,
+    font: FontReference,
+    font_size_bits: u32,
+    alignment: TextAlignment,
+}
+
+impl TextLayoutKey {
+    fn new(
+        text: &str,
+        font: &FontReference,
+        font_size: f32,
+        alignment: TextAlignment,
+    ) -> Self {
+        Self {
+            text: text.to_owned(),
+            font: font.clone(),
+            font_size_bits: font_size.to_bits(),
+            alignment,
+        }
+    }
+}
 
 fn create_composition_font_system_and_cache() -> (FontSystem, Vec<String>) {
     let mut font_system = FontSystem::new();
@@ -92,6 +119,28 @@ fn shape_with_font_system(
     ShapedText { buffer }
 }
 
+fn shape_cached<'a>(
+    font_system: &mut FontSystem,
+    layout_cache: &'a mut HashMap<TextLayoutKey, ShapedText>,
+    text: &str,
+    font: &FontReference,
+    font_size: f32,
+    alignment: TextAlignment,
+) -> &'a ShapedText {
+    let key = TextLayoutKey::new(text, font, font_size, alignment);
+
+    match layout_cache.entry(key) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => entry.insert(shape_with_font_system(
+            font_system,
+            text,
+            font,
+            font_size,
+            alignment,
+        )),
+    }
+}
+
 fn install_bundled_inter(font_system: &mut FontSystem) {
     let system_inter_faces: Vec<_> = font_system
         .db()
@@ -170,6 +219,7 @@ pub struct GlyphonResources<'a> {
 pub struct TextResources {
     font_system: FontSystem,
     system_font_families: Vec<String>,
+    layout_cache: HashMap<TextLayoutKey, ShapedText>,
     _glyphon_cache: glyphon::Cache,
     atlas: glyphon::TextAtlas,
     viewport: glyphon::Viewport,
@@ -183,6 +233,7 @@ impl fmt::Debug for TextResources {
             .debug_struct("TextResources")
             .field("viewport_resolution", &self.viewport.resolution())
             .field("system_font_family_count", &self.system_font_families.len())
+            .field("text_layout_cache_count", &self.layout_cache.len())
             .finish_non_exhaustive()
     }
 }
@@ -213,6 +264,7 @@ impl TextResources {
         Self {
             font_system,
             system_font_families,
+            layout_cache: HashMap::new(),
             _glyphon_cache: glyphon_cache,
             atlas,
             viewport,
@@ -226,7 +278,8 @@ impl TextResources {
         &self.font_system
     }
 
-    pub const fn font_system_mut(&mut self) -> &mut FontSystem {
+    pub fn font_system_mut(&mut self) -> &mut FontSystem {
+        self.layout_cache.clear();
         &mut self.font_system
     }
 
@@ -242,8 +295,15 @@ impl TextResources {
         font: &FontReference,
         font_size: f32,
         alignment: TextAlignment,
-    ) -> ShapedText {
-        shape_with_font_system(&mut self.font_system, text, font, font_size, alignment)
+    ) -> &ShapedText {
+        shape_cached(
+            &mut self.font_system,
+            &mut self.layout_cache,
+            text,
+            font,
+            font_size,
+            alignment,
+        )
     }
 
     #[must_use]
@@ -274,6 +334,8 @@ impl TextResources {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use cosmic_text::{
         FontSystem,
         fontdb::{Family, Query, Source, Stretch, Style, Weight},
@@ -281,7 +343,7 @@ mod tests {
 
     use super::{
         COMPOSITION_FALLBACK_FAMILY, ShapedText, create_composition_font_system_and_cache,
-        enumerate_system_font_families, shape_with_font_system,
+        enumerate_system_font_families, shape_cached, shape_with_font_system,
     };
     use rhythm_core::{
         domain::Vec2,
@@ -450,6 +512,64 @@ mod tests {
         let outside = Vec2::new(position.x() + bounds.size.x() * 0.5 + 1.0, position.y())
             .expect("finite outside point");
         assert!(!hit_test_text_layout_bounds(outside, transform, bounds));
+    }
+
+    #[test]
+    fn layout_cache_reuses_identical_layout_key() {
+        let (mut font_system, _) = create_composition_font_system_and_cache();
+        let mut cache = HashMap::new();
+        let font = inter_font(FontWeight::Normal, FontStyle::Normal);
+
+        let first_ptr = shape_cached(
+            &mut font_system,
+            &mut cache,
+            "Cached Привет",
+            &font,
+            48.0,
+            TextAlignment::Center,
+        ) as *const ShapedText;
+        assert_eq!(cache.len(), 1);
+
+        let second_ptr = shape_cached(
+            &mut font_system,
+            &mut cache,
+            "Cached Привет",
+            &font,
+            48.0,
+            TextAlignment::Center,
+        ) as *const ShapedText;
+
+        assert_eq!(cache.len(), 1);
+        assert_eq!(first_ptr, second_ptr);
+    }
+
+    #[test]
+    fn layout_cache_key_tracks_all_layout_inputs_only() {
+        let (mut font_system, _) = create_composition_font_system_and_cache();
+        let mut cache = HashMap::new();
+        let normal = inter_font(FontWeight::Normal, FontStyle::Normal);
+        let bold = inter_font(FontWeight::Bold, FontStyle::Normal);
+
+        let cases = [
+            ("Text", &normal, 48.0, TextAlignment::Left),
+            ("Text changed", &normal, 48.0, TextAlignment::Left),
+            ("Text", &normal, 49.0, TextAlignment::Left),
+            ("Text", &normal, 48.0, TextAlignment::Right),
+            ("Text", &bold, 48.0, TextAlignment::Left),
+        ];
+
+        for (text, font, size, alignment) in cases {
+            let _ = shape_cached(
+                &mut font_system,
+                &mut cache,
+                text,
+                font,
+                size,
+                alignment,
+            );
+        }
+
+        assert_eq!(cache.len(), cases.len());
     }
 
     #[test]

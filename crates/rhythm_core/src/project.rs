@@ -359,7 +359,7 @@ pub struct ImageObject {
     pub asset: AssetId,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextAlignment {
     #[default]
     Left,
@@ -367,7 +367,7 @@ pub enum TextAlignment {
     Right,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FontWeight {
     Thin,
     ExtraLight,
@@ -381,14 +381,14 @@ pub enum FontWeight {
     Black,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FontStyle {
     #[default]
     Normal,
     Italic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FontReference {
     pub family: String,
     pub weight: FontWeight,
