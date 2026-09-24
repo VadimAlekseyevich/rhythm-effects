@@ -248,7 +248,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-213** — Integrate glyphon using the existing wgpu Device/Queue.
 - [x] **AI-214** — Bundle Inter as the deterministic composition fallback family.
 - [x] **AI-215** — Implement system font family enumeration/cache.
-- [ ] **AI-216** — Implement Latin/Cyrillic text shaping.
+- [x] **AI-216** — Implement Latin/Cyrillic text shaping.
 - [ ] **AI-217** — Implement explicit multiline text layout.
 - [ ] **AI-218** — Implement left/center/right text alignment.
 - [ ] **AI-219** — Implement deterministic text local bounds for anchor/hit testing.
