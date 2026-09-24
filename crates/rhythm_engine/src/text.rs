@@ -25,12 +25,7 @@ struct TextLayoutKey {
 }
 
 impl TextLayoutKey {
-    fn new(
-        text: &str,
-        font: &FontReference,
-        font_size: f32,
-        alignment: TextAlignment,
-    ) -> Self {
+    fn new(text: &str, font: &FontReference, font_size: f32, alignment: TextAlignment) -> Self {
         Self {
             text: text.to_owned(),
             font: font.clone(),
@@ -559,14 +554,7 @@ mod tests {
         ];
 
         for (text, font, size, alignment) in cases {
-            let _ = shape_cached(
-                &mut font_system,
-                &mut cache,
-                text,
-                font,
-                size,
-                alignment,
-            );
+            let _ = shape_cached(&mut font_system, &mut cache, text, font, size, alignment);
         }
 
         assert_eq!(cache.len(), cases.len());
