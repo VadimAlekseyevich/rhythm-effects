@@ -96,10 +96,7 @@ pub struct ShapedText {
 impl ShapedText {
     #[must_use]
     pub fn glyph_count(&self) -> usize {
-        self.buffer
-            .layout_runs()
-            .map(|run| run.glyphs.len())
-            .sum()
+        self.buffer.layout_runs().map(|run| run.glyphs.len()).sum()
     }
 
     #[must_use]
@@ -195,12 +192,7 @@ impl TextResources {
     }
 
     #[must_use]
-    pub fn shape_text(
-        &mut self,
-        text: &str,
-        font: &FontReference,
-        font_size: f32,
-    ) -> ShapedText {
+    pub fn shape_text(&mut self, text: &str, font: &FontReference, font_size: f32) -> ShapedText {
         shape_with_font_system(&mut self.font_system, text, font, font_size)
     }
 
