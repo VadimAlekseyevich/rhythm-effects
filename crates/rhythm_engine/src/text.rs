@@ -4,8 +4,7 @@ use cosmic_text::FontSystem;
 
 pub const COMPOSITION_FALLBACK_FAMILY: &str = "Inter";
 
-const INTER_VARIABLE: &[u8] =
-    include_bytes!("../assets/fonts/inter/InterVariable.ttf");
+const INTER_VARIABLE: &[u8] = include_bytes!("../assets/fonts/inter/InterVariable.ttf");
 const INTER_VARIABLE_ITALIC: &[u8] =
     include_bytes!("../assets/fonts/inter/InterVariable-Italic.ttf");
 
@@ -156,7 +155,11 @@ mod tests {
             .collect();
 
         assert_eq!(faces.len(), 2);
-        assert!(faces.iter().all(|face| matches!(face.source, Source::Binary(_))));
+        assert!(
+            faces
+                .iter()
+                .all(|face| matches!(&face.source, Source::Binary(_)))
+        );
         assert!(faces.iter().any(|face| face.style == Style::Normal));
         assert!(faces.iter().any(|face| face.style == Style::Italic));
     }
@@ -184,7 +187,10 @@ mod tests {
                     stretch: Stretch::Normal,
                     style,
                 });
-                assert!(face.is_some(), "Inter must resolve for {style:?} {weight:?}");
+                assert!(
+                    face.is_some(),
+                    "Inter must resolve for {style:?} {weight:?}"
+                );
             }
         }
     }
