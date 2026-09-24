@@ -263,7 +263,7 @@ mod tests {
     };
 
     use super::{
-        COMPOSITION_FALLBACK_FAMILY, create_composition_font_system_and_cache,
+        COMPOSITION_FALLBACK_FAMILY, ShapedText, create_composition_font_system_and_cache,
         enumerate_system_font_families, shape_with_font_system,
     };
     use rhythm_core::project::{FontReference, FontStyle, FontWeight, TextAlignment};
