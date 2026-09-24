@@ -413,8 +413,7 @@ mod tests {
             TextAlignment::Right,
         ] {
             let (mut font_system, _) = create_composition_font_system_and_cache();
-            let shaped =
-                shape_with_font_system(&mut font_system, text, &font, 48.0, alignment);
+            let shaped = shape_with_font_system(&mut font_system, text, &font, 48.0, alignment);
             let bounds = shaped.local_bounds();
 
             assert_eq!(bounds.min, Vec2::new(0.0, 0.0).expect("finite origin"));
@@ -448,11 +447,8 @@ mod tests {
 
         assert!(hit_test_text_layout_bounds(position, transform, bounds));
 
-        let outside = Vec2::new(
-            position.x() + bounds.size.x() * 0.5 + 1.0,
-            position.y(),
-        )
-        .expect("finite outside point");
+        let outside = Vec2::new(position.x() + bounds.size.x() * 0.5 + 1.0, position.y())
+            .expect("finite outside point");
         assert!(!hit_test_text_layout_bounds(outside, transform, bounds));
     }
 
