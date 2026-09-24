@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, fmt};
 
-use cosmic_text::FontSystem;
+use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping};
+use rhythm_core::project::{FontReference, FontStyle, FontWeight};
 
 pub const COMPOSITION_FALLBACK_FAMILY: &str = "Inter";
 
@@ -26,6 +27,45 @@ fn enumerate_system_font_families(font_system: &FontSystem) -> Vec<String> {
         .collect()
 }
 
+fn cosmic_weight(weight: FontWeight) -> cosmic_text::fontdb::Weight {
+    match weight {
+        FontWeight::Thin => cosmic_text::fontdb::Weight::THIN,
+        FontWeight::ExtraLight => cosmic_text::fontdb::Weight::EXTRA_LIGHT,
+        FontWeight::Light => cosmic_text::fontdb::Weight::LIGHT,
+        FontWeight::Normal => cosmic_text::fontdb::Weight::NORMAL,
+        FontWeight::Medium => cosmic_text::fontdb::Weight::MEDIUM,
+        FontWeight::SemiBold => cosmic_text::fontdb::Weight::SEMIBOLD,
+        FontWeight::Bold => cosmic_text::fontdb::Weight::BOLD,
+        FontWeight::ExtraBold => cosmic_text::fontdb::Weight::EXTRA_BOLD,
+        FontWeight::Black => cosmic_text::fontdb::Weight::BLACK,
+    }
+}
+
+fn cosmic_style(style: FontStyle) -> cosmic_text::fontdb::Style {
+    match style {
+        FontStyle::Normal => cosmic_text::fontdb::Style::Normal,
+        FontStyle::Italic => cosmic_text::fontdb::Style::Italic,
+    }
+}
+
+fn shape_with_font_system(
+    font_system: &mut FontSystem,
+    text: &str,
+    font: &FontReference,
+    font_size: f32,
+) -> ShapedText {
+    let metrics = Metrics::new(font_size, font_size);
+    let attrs = Attrs::new()
+        .family(Family::Name(&font.family))
+        .weight(cosmic_weight(font.weight))
+        .style(cosmic_style(font.style));
+    let mut buffer = Buffer::new(font_system, metrics);
+    buffer.set_text(text, &attrs, Shaping::Advanced, None);
+    buffer.shape_until_scroll(font_system, false);
+
+    ShapedText { buffer }
+}
+
 fn install_bundled_inter(font_system: &mut FontSystem) {
     let system_inter_faces: Vec<_> = font_system
         .db()
@@ -45,6 +85,31 @@ fn install_bundled_inter(font_system: &mut FontSystem) {
 
     database.load_font_data(INTER_VARIABLE.to_vec());
     database.load_font_data(INTER_VARIABLE_ITALIC.to_vec());
+}
+
+/// A shaped composition text buffer backed by cosmic-text.
+#[derive(Debug)]
+pub struct ShapedText {
+    buffer: Buffer,
+}
+
+impl ShapedText {
+    #[must_use]
+    pub fn glyph_count(&self) -> usize {
+        self.buffer
+            .layout_runs()
+            .map(|run| run.glyphs.len())
+            .sum()
+    }
+
+    #[must_use]
+    pub fn missing_glyph_count(&self) -> usize {
+        self.buffer
+            .layout_runs()
+            .flat_map(|run| run.glyphs.iter())
+            .filter(|glyph| glyph.glyph_id == 0)
+            .count()
+    }
 }
 
 /// Borrowed glyphon state for one prepare/render operation.
@@ -130,6 +195,16 @@ impl TextResources {
     }
 
     #[must_use]
+    pub fn shape_text(
+        &mut self,
+        text: &str,
+        font: &FontReference,
+        font_size: f32,
+    ) -> ShapedText {
+        shape_with_font_system(&mut self.font_system, text, font, font_size)
+    }
+
+    #[must_use]
     pub fn viewport_resolution(&self) -> glyphon::Resolution {
         self.viewport.resolution()
     }
@@ -164,8 +239,49 @@ mod tests {
 
     use super::{
         COMPOSITION_FALLBACK_FAMILY, create_composition_font_system_and_cache,
-        enumerate_system_font_families,
+        enumerate_system_font_families, shape_with_font_system,
     };
+    use rhythm_core::project::{FontReference, FontStyle, FontWeight};
+
+    fn inter_font(weight: FontWeight, style: FontStyle) -> FontReference {
+        FontReference {
+            family: COMPOSITION_FALLBACK_FAMILY.to_owned(),
+            weight,
+            style,
+        }
+    }
+
+    fn assert_shapes_without_missing_glyphs(text: &str, font: &FontReference) {
+        let (mut font_system, _) = create_composition_font_system_and_cache();
+        let shaped = shape_with_font_system(&mut font_system, text, font, 48.0);
+
+        assert!(shaped.glyph_count() > 0);
+        assert_eq!(shaped.missing_glyph_count(), 0);
+    }
+
+    #[test]
+    fn shapes_latin_with_bundled_inter() {
+        assert_shapes_without_missing_glyphs(
+            "Rhythm Effects",
+            &inter_font(FontWeight::Normal, FontStyle::Normal),
+        );
+    }
+
+    #[test]
+    fn shapes_cyrillic_with_bundled_inter() {
+        assert_shapes_without_missing_glyphs(
+            "Привет ритм",
+            &inter_font(FontWeight::SemiBold, FontStyle::Normal),
+        );
+    }
+
+    #[test]
+    fn shapes_mixed_latin_and_cyrillic_with_bundled_inter() {
+        assert_shapes_without_missing_glyphs(
+            "Rhythm Привет 123",
+            &inter_font(FontWeight::Bold, FontStyle::Italic),
+        );
+    }
 
     #[test]
     fn system_font_family_cache_is_sorted_and_unique() {
