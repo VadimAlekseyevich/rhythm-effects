@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, fmt};
 
-use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Wrap};
-use rhythm_core::project::{FontReference, FontStyle, FontWeight};
+use cosmic_text::{Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Wrap};
+use rhythm_core::project::{FontReference, FontStyle, FontWeight, TextAlignment};
 
 pub const COMPOSITION_FALLBACK_FAMILY: &str = "Inter";
 
@@ -48,11 +48,20 @@ fn cosmic_style(style: FontStyle) -> cosmic_text::fontdb::Style {
     }
 }
 
+fn cosmic_alignment(alignment: TextAlignment) -> Align {
+    match alignment {
+        TextAlignment::Left => Align::Left,
+        TextAlignment::Center => Align::Center,
+        TextAlignment::Right => Align::Right,
+    }
+}
+
 fn shape_with_font_system(
     font_system: &mut FontSystem,
     text: &str,
     font: &FontReference,
     font_size: f32,
+    alignment: TextAlignment,
 ) -> ShapedText {
     let metrics = Metrics::new(font_size, font_size);
     let attrs = Attrs::new()
@@ -61,7 +70,19 @@ fn shape_with_font_system(
         .style(cosmic_style(font.style));
     let mut buffer = Buffer::new(font_system, metrics);
     buffer.set_wrap(Wrap::None);
-    buffer.set_text(text, &attrs, Shaping::Advanced, None);
+    buffer.set_text(
+        text,
+        &attrs,
+        Shaping::Advanced,
+        Some(cosmic_alignment(alignment)),
+    );
+    buffer.shape_until_scroll(font_system, false);
+
+    let layout_width = buffer
+        .layout_runs()
+        .map(|run| run.line_w)
+        .fold(0.0_f32, f32::max);
+    buffer.set_size(Some(layout_width), None);
     buffer.shape_until_scroll(font_system, false);
 
     ShapedText { buffer }
@@ -198,8 +219,14 @@ impl TextResources {
     }
 
     #[must_use]
-    pub fn shape_text(&mut self, text: &str, font: &FontReference, font_size: f32) -> ShapedText {
-        shape_with_font_system(&mut self.font_system, text, font, font_size)
+    pub fn shape_text(
+        &mut self,
+        text: &str,
+        font: &FontReference,
+        font_size: f32,
+        alignment: TextAlignment,
+    ) -> ShapedText {
+        shape_with_font_system(&mut self.font_system, text, font, font_size, alignment)
     }
 
     #[must_use]
@@ -239,7 +266,7 @@ mod tests {
         COMPOSITION_FALLBACK_FAMILY, create_composition_font_system_and_cache,
         enumerate_system_font_families, shape_with_font_system,
     };
-    use rhythm_core::project::{FontReference, FontStyle, FontWeight};
+    use rhythm_core::project::{FontReference, FontStyle, FontWeight, TextAlignment};
 
     fn inter_font(weight: FontWeight, style: FontStyle) -> FontReference {
         FontReference {
@@ -251,7 +278,8 @@ mod tests {
 
     fn assert_shapes_without_missing_glyphs(text: &str, font: &FontReference) {
         let (mut font_system, _) = create_composition_font_system_and_cache();
-        let shaped = shape_with_font_system(&mut font_system, text, font, 48.0);
+        let shaped =
+            shape_with_font_system(&mut font_system, text, font, 48.0, TextAlignment::Left);
 
         assert!(shaped.glyph_count() > 0);
         assert_eq!(shaped.missing_glyph_count(), 0);
@@ -289,6 +317,7 @@ mod tests {
             "First line\nВторая строка\nThird line",
             &inter_font(FontWeight::Normal, FontStyle::Normal),
             48.0,
+            TextAlignment::Left,
         );
 
         assert_eq!(shaped.line_count(), 3);
@@ -303,10 +332,68 @@ mod tests {
             "Latin\n\nКириллица",
             &inter_font(FontWeight::Normal, FontStyle::Normal),
             48.0,
+            TextAlignment::Left,
         );
 
         assert_eq!(shaped.line_count(), 3);
         assert_eq!(shaped.missing_glyph_count(), 0);
+    }
+
+    fn line_start_and_width(shaped: &ShapedText, line_index: usize) -> (f32, f32) {
+        let run = shaped
+            .buffer
+            .layout_runs()
+            .nth(line_index)
+            .expect("expected shaped line");
+        let start = run.glyphs.first().map_or(0.0, |glyph| glyph.x);
+        (start, run.line_w)
+    }
+
+    #[test]
+    fn left_center_and_right_align_shorter_lines_to_widest_line() {
+        let font = inter_font(FontWeight::Normal, FontStyle::Normal);
+        let text = "Wide alignment line\nshort";
+
+        let (mut left_fonts, _) = create_composition_font_system_and_cache();
+        let left = shape_with_font_system(
+            &mut left_fonts,
+            text,
+            &font,
+            48.0,
+            TextAlignment::Left,
+        );
+
+        let (mut center_fonts, _) = create_composition_font_system_and_cache();
+        let center = shape_with_font_system(
+            &mut center_fonts,
+            text,
+            &font,
+            48.0,
+            TextAlignment::Center,
+        );
+
+        let (mut right_fonts, _) = create_composition_font_system_and_cache();
+        let right = shape_with_font_system(
+            &mut right_fonts,
+            text,
+            &font,
+            48.0,
+            TextAlignment::Right,
+        );
+
+        let (left_wide_x, wide_width) = line_start_and_width(&left, 0);
+        let (left_short_x, short_width) = line_start_and_width(&left, 1);
+        let (center_wide_x, _) = line_start_and_width(&center, 0);
+        let (center_short_x, _) = line_start_and_width(&center, 1);
+        let (right_wide_x, _) = line_start_and_width(&right, 0);
+        let (right_short_x, _) = line_start_and_width(&right, 1);
+
+        let remaining = wide_width - short_width;
+        assert!(remaining > 0.0);
+        assert!((left_wide_x - center_wide_x).abs() < 0.01);
+        assert!((left_wide_x - right_wide_x).abs() < 0.01);
+        assert!((center_short_x - left_short_x - remaining / 2.0).abs() < 0.01);
+        assert!((right_short_x - left_short_x - remaining).abs() < 0.01);
     }
 
     #[test]
