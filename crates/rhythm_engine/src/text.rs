@@ -1,7 +1,11 @@
 use std::{collections::BTreeSet, fmt};
 
 use cosmic_text::{Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Wrap};
-use rhythm_core::project::{FontReference, FontStyle, FontWeight, TextAlignment};
+use rhythm_core::{
+    domain::Vec2,
+    geometry::LocalBounds2d,
+    project::{FontReference, FontStyle, FontWeight, TextAlignment},
+};
 
 pub const COMPOSITION_FALLBACK_FAMILY: &str = "Inter";
 
@@ -124,6 +128,19 @@ impl ShapedText {
     #[must_use]
     pub fn line_count(&self) -> usize {
         self.buffer.lines.len()
+    }
+
+    #[must_use]
+    pub fn local_bounds(&self) -> LocalBounds2d {
+        let width = self.buffer.size().0.unwrap_or(0.0);
+        let height = self
+            .buffer
+            .layout_runs()
+            .map(|run| run.line_top + run.line_height)
+            .fold(0.0_f32, f32::max);
+        let size = Vec2::new(width, height).expect("shaped text layout bounds must be finite");
+
+        LocalBounds2d::from_size(size)
     }
 
     #[must_use]
@@ -266,7 +283,11 @@ mod tests {
         COMPOSITION_FALLBACK_FAMILY, ShapedText, create_composition_font_system_and_cache,
         enumerate_system_font_families, shape_with_font_system,
     };
-    use rhythm_core::project::{FontReference, FontStyle, FontWeight, TextAlignment};
+    use rhythm_core::{
+        domain::Vec2,
+        geometry::{ObjectTransform2d, hit_test_text_layout_bounds},
+        project::{FontReference, FontStyle, FontWeight, TextAlignment},
+    };
 
     fn inter_font(weight: FontWeight, style: FontStyle) -> FontReference {
         FontReference {
@@ -378,6 +399,61 @@ mod tests {
         assert!((left_wide_x - right_wide_x).abs() < 0.01);
         assert!((center_short_x - left_short_x - remaining / 2.0).abs() < 0.01);
         assert!((right_short_x - left_short_x - remaining).abs() < 0.01);
+    }
+
+    #[test]
+    fn local_bounds_cover_widest_line_and_full_multiline_height() {
+        let font = inter_font(FontWeight::Normal, FontStyle::Normal);
+        let text = "Wide alignment line\n\nshort";
+        let mut widths = Vec::new();
+
+        for alignment in [
+            TextAlignment::Left,
+            TextAlignment::Center,
+            TextAlignment::Right,
+        ] {
+            let (mut font_system, _) = create_composition_font_system_and_cache();
+            let shaped =
+                shape_with_font_system(&mut font_system, text, &font, 48.0, alignment);
+            let bounds = shaped.local_bounds();
+
+            assert_eq!(bounds.min, Vec2::new(0.0, 0.0).expect("finite origin"));
+            assert!((bounds.size.y() - 144.0).abs() < 0.01);
+            assert!(bounds.size.x() > 0.0);
+            widths.push(bounds.size.x());
+        }
+
+        assert!((widths[0] - widths[1]).abs() < 0.01);
+        assert!((widths[0] - widths[2]).abs() < 0.01);
+    }
+
+    #[test]
+    fn local_bounds_feed_text_anchor_hit_testing() {
+        let (mut font_system, _) = create_composition_font_system_and_cache();
+        let shaped = shape_with_font_system(
+            &mut font_system,
+            "Anchor\nПривязка",
+            &inter_font(FontWeight::Normal, FontStyle::Normal),
+            48.0,
+            TextAlignment::Center,
+        );
+        let bounds = shaped.local_bounds();
+        let position = Vec2::new(200.0, 100.0).expect("finite position");
+        let transform = ObjectTransform2d::new(
+            position,
+            Vec2::new(1.0, 1.0).expect("finite scale"),
+            0.0,
+            Vec2::new(0.5, 0.5).expect("finite anchor"),
+        );
+
+        assert!(hit_test_text_layout_bounds(position, transform, bounds));
+
+        let outside = Vec2::new(
+            position.x() + bounds.size.x() * 0.5 + 1.0,
+            position.y(),
+        )
+        .expect("finite outside point");
+        assert!(!hit_test_text_layout_bounds(outside, transform, bounds));
     }
 
     #[test]

@@ -251,7 +251,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-216** — Implement Latin/Cyrillic text shaping.
 - [x] **AI-217** — Implement explicit multiline text layout.
 - [x] **AI-218** — Implement left/center/right text alignment.
-- [ ] **AI-219** — Implement deterministic text local bounds for anchor/hit testing.
+- [x] **AI-219** — Implement deterministic text local bounds for anchor/hit testing.
 - [ ] **AI-220** — Cache text layout by content/font/size/alignment and avoid reshape for pure transform/color changes.
 - [ ] **AI-221** — Show a visible missing-requested-font state while rendering Inter fallback.
 - [ ] **AI-222** — Implement Ease In, Ease Out and Ease In-Out preset canonical Bezier values.
