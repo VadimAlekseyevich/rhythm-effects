@@ -1,8 +1,9 @@
 use crate::project::Project;
+use serde::{Deserialize, Serialize};
 
 pub const PROJECT_SCHEMA_VERSION_V1: u32 = 1;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFileV1 {
     pub schema_version: u32,
     pub created_with_version: String,
