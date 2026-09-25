@@ -641,6 +641,12 @@ enum ActiveTransaction {
         initial_value: PropertyValue,
         inserted_next_entity_id_before: Option<u64>,
     },
+    PropertyKeyframeInterpolation {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe_id: KeyframeId,
+        before: Interpolation,
+    },
 }
 
 #[derive(Debug)]
@@ -858,6 +864,54 @@ impl ProjectEditor {
             keyframe_ids,
             interpolation,
         })
+    }
+
+    pub fn begin_property_keyframe_interpolation_transaction(
+        &mut self,
+        keyframe_id: KeyframeId,
+    ) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let located = locate_property_keyframe(&self.project, keyframe_id)
+            .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+        self.transaction = Some(ActiveTransaction::PropertyKeyframeInterpolation {
+            object_id: located.object_id,
+            property: located.property,
+            keyframe_id,
+            before: located.keyframe.interpolation,
+        });
+        Ok(())
+    }
+
+    pub fn update_property_keyframe_interpolation_transaction(
+        &mut self,
+        interpolation: Interpolation,
+    ) -> Result<(), EditError> {
+        let (object_id, property, keyframe_id) = match self.transaction {
+            Some(ActiveTransaction::PropertyKeyframeInterpolation {
+                object_id,
+                property,
+                keyframe_id,
+                ..
+            }) => (object_id, property, keyframe_id),
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active property keyframe interpolation transaction",
+                ));
+            }
+        };
+
+        set_property_keyframe_interpolation(
+            &mut self.project,
+            object_id,
+            property,
+            keyframe_id,
+            interpolation,
+        )?
+        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+        Ok(())
     }
 
     pub fn execute(&mut self, command: EditCommand) -> Result<bool, EditError> {
@@ -1569,6 +1623,34 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::PropertyKeyframeInterpolation {
+                object_id,
+                property,
+                keyframe_id,
+                before,
+            } => {
+                let after =
+                    property_keyframe_by_id(&self.project, object_id, property, keyframe_id)?
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?
+                        .interpolation;
+                if before == after {
+                    return Ok(false);
+                }
+
+                self.history.push(PendingHistoryEntry::new(
+                    "Change Keyframe Easing",
+                    HistoryPayload::PropertyKeyframeInterpolationsChanged {
+                        records: vec![PropertyKeyframeInterpolationRecord {
+                            object_id,
+                            property,
+                            keyframe_id,
+                            before,
+                            after,
+                        }],
+                    },
+                ));
+                Ok(true)
+            }
         }
     }
 
@@ -1679,6 +1761,21 @@ impl ProjectEditor {
                         self.project.next_entity_id = previous_next_entity_id;
                     }
                 }
+            }
+            ActiveTransaction::PropertyKeyframeInterpolation {
+                object_id,
+                property,
+                keyframe_id,
+                before,
+            } => {
+                set_property_keyframe_interpolation(
+                    &mut self.project,
+                    object_id,
+                    property,
+                    keyframe_id,
+                    before,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
             }
         }
 
@@ -3883,7 +3980,7 @@ impl HistoryDirection {
 mod tests {
     use super::{EditCommand, HISTORY_CAPACITY, HistoryEntry, HistoryPayload, ProjectEditor};
     use crate::{
-        animation::{Animated, Interpolation, Keyframe},
+        animation::{Animated, BezierEasing, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
         ids::{AssetId, EffectId, KeyframeId, ObjectId},
         project::{
@@ -3891,7 +3988,9 @@ mod tests {
             FontReference, FontStyle, FontWeight, ImageObject, Object, ObjectContent, Project,
             ProjectSettings, RectangleObject, TextAlignment, TextObject, TransformAnimation,
         },
-        property::{AnimatableProperty, PropertyValue, property_base_value},
+        property::{
+            AnimatableProperty, PropertyValue, property_base_value, property_keyframe_by_id,
+        },
         time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
     };
 
@@ -5241,6 +5340,130 @@ mod tests {
                 .position
                 .base_value(),
             Vec2::new(-5.0, 40.0).expect("second restored")
+        );
+    }
+
+    #[test]
+    fn keyframe_interpolation_transaction_previews_and_commits_once() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let keyframe_id = KeyframeId::new(2).expect("keyframe id");
+        let mut project = editor_with_object().into_project();
+        project.composition.objects[0].transform.opacity = Animated::with_keyframes(
+            1.0,
+            vec![
+                Keyframe::new(
+                    keyframe_id,
+                    MusicalTick::new(0),
+                    0.0,
+                    Interpolation::CubicBezier(BezierEasing::EASE_IN),
+                ),
+                Keyframe::new(
+                    KeyframeId::new(3).expect("second keyframe"),
+                    MusicalTick::new(240),
+                    1.0,
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("valid opacity animation");
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+
+        editor
+            .begin_property_keyframe_interpolation_transaction(keyframe_id)
+            .expect("begin transaction");
+        for easing in [
+            BezierEasing::new(0.25, 0.25, 0.75, 0.75).expect("easing"),
+            BezierEasing::new(0.1, 0.4, 0.9, 0.6).expect("easing"),
+        ] {
+            editor
+                .update_property_keyframe_interpolation_transaction(
+                    Interpolation::CubicBezier(easing),
+                )
+                .expect("preview");
+        }
+
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(
+            property_keyframe_by_id(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                keyframe_id,
+            )
+            .expect("property")
+            .expect("keyframe")
+            .interpolation,
+            Interpolation::CubicBezier(
+                BezierEasing::new(0.1, 0.4, 0.9, 0.6).expect("final easing")
+            )
+        );
+
+        assert_eq!(editor.commit_transaction(), Ok(true));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            property_keyframe_by_id(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                keyframe_id,
+            )
+            .expect("property")
+            .expect("keyframe")
+            .interpolation,
+            Interpolation::CubicBezier(BezierEasing::EASE_IN)
+        );
+    }
+
+    #[test]
+    fn keyframe_interpolation_transaction_cancel_restores_original_without_history() {
+        let object_id = ObjectId::new(1).expect("object id");
+        let keyframe_id = KeyframeId::new(2).expect("keyframe id");
+        let mut project = editor_with_object().into_project();
+        project.composition.objects[0].transform.opacity = Animated::with_keyframes(
+            1.0,
+            vec![
+                Keyframe::new(
+                    keyframe_id,
+                    MusicalTick::new(0),
+                    0.0,
+                    Interpolation::CubicBezier(BezierEasing::EASE_OUT),
+                ),
+                Keyframe::new(
+                    KeyframeId::new(3).expect("second keyframe"),
+                    MusicalTick::new(240),
+                    1.0,
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("valid opacity animation");
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+
+        editor
+            .begin_property_keyframe_interpolation_transaction(keyframe_id)
+            .expect("begin transaction");
+        editor
+            .update_property_keyframe_interpolation_transaction(
+                Interpolation::CubicBezier(BezierEasing::EASE_IN_OUT),
+            )
+            .expect("preview");
+        assert_eq!(editor.cancel_transaction(), Ok(true));
+
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(
+            property_keyframe_by_id(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                keyframe_id,
+            )
+            .expect("property")
+            .expect("keyframe")
+            .interpolation,
+            Interpolation::CubicBezier(BezierEasing::EASE_OUT)
         );
     }
 
