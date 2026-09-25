@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     domain::{LinearRgba, Vec2},
     ids::KeyframeId,
@@ -10,7 +12,7 @@ pub enum BezierEasingError {
     ControlPointOutOfRange,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BezierEasing {
     x1: f32,
     y1: f32,
@@ -78,7 +80,7 @@ impl BezierEasing {
     };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum Interpolation {
     Hold,
     #[default]
@@ -86,7 +88,7 @@ pub enum Interpolation {
     CubicBezier(BezierEasing),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Keyframe<T> {
     pub id: KeyframeId,
     pub tick: MusicalTick,
@@ -123,7 +125,7 @@ pub struct AnimationSegment<'a, T> {
     pub progress: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Animated<T> {
     base_value: T,
     keyframes: Vec<Keyframe<T>>,
