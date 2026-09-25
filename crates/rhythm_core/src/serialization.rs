@@ -1,5 +1,6 @@
 use crate::project::Project;
 use serde::{Deserialize, Serialize};
+use std::{error::Error, fmt, str::Utf8Error};
 
 pub const PROJECT_SCHEMA_VERSION_V1: u32 = 1;
 
@@ -26,6 +27,35 @@ impl ProjectFileV1 {
     pub fn for_current_app(project: Project) -> Self {
         Self::new(project, env!("CARGO_PKG_VERSION"))
     }
+}
+
+#[derive(Debug)]
+pub enum ProjectFileParseError {
+    InvalidUtf8(Utf8Error),
+    InvalidJson(serde_json::Error),
+}
+
+impl fmt::Display for ProjectFileParseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidUtf8(error) => write!(formatter, "project file is not valid UTF-8: {error}"),
+            Self::InvalidJson(error) => write!(formatter, "project file is not valid schema JSON: {error}"),
+        }
+    }
+}
+
+impl Error for ProjectFileParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::InvalidUtf8(error) => Some(error),
+            Self::InvalidJson(error) => Some(error),
+        }
+    }
+}
+
+pub fn parse_project_file_v1(bytes: &[u8]) -> Result<ProjectFileV1, ProjectFileParseError> {
+    let json = std::str::from_utf8(bytes).map_err(ProjectFileParseError::InvalidUtf8)?;
+    serde_json::from_str(json).map_err(ProjectFileParseError::InvalidJson)
 }
 
 #[cfg(test)]
@@ -248,6 +278,49 @@ mod tests {
     where
         T: Serialize + for<'de> Deserialize<'de>,
     {
+    }
+
+    #[test]
+    fn parse_project_file_v1_accepts_utf8_json_as_a_candidate_document() {
+        let file = ProjectFileV1::new(project(), "0.1.0-test");
+        let json = serde_json::to_vec(&file).expect("serialize fixture");
+
+        let parsed = super::parse_project_file_v1(&json).expect("parse candidate");
+
+        assert_eq!(parsed, file);
+    }
+
+    #[test]
+    fn parse_project_file_v1_reports_invalid_utf8_before_json_parsing() {
+        let error = super::parse_project_file_v1(&[0xff, 0xfe, 0xfd]).expect_err("invalid UTF-8");
+
+        assert!(matches!(
+            error,
+            super::ProjectFileParseError::InvalidUtf8(_)
+        ));
+    }
+
+    #[test]
+    fn parse_project_file_v1_reports_invalid_or_truncated_json() {
+        let error = super::parse_project_file_v1(br#"{"schema_version":1,"created_with_version":"0.1""#)
+            .expect_err("truncated JSON");
+
+        assert!(matches!(
+            error,
+            super::ProjectFileParseError::InvalidJson(_)
+        ));
+    }
+
+    #[test]
+    fn parse_project_file_v1_does_not_apply_later_schema_policy() {
+        let mut value = serde_json::to_value(ProjectFileV1::new(project(), "future"))
+            .expect("serialize fixture");
+        value["schema_version"] = serde_json::json!(99);
+        let json = serde_json::to_vec(&value).expect("serialize future schema fixture");
+
+        let parsed = super::parse_project_file_v1(&json).expect("parser returns candidate");
+
+        assert_eq!(parsed.schema_version, 99);
     }
 
     #[test]
