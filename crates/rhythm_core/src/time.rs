@@ -31,7 +31,19 @@ impl BeatDivision {
 
 macro_rules! signed_time_type {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            Default,
+            Serialize,
+            Deserialize,
+        )]
         pub struct $name(i64);
 
         impl $name {
@@ -50,7 +62,19 @@ macro_rules! signed_time_type {
 
 macro_rules! unsigned_time_type {
     ($name:ident, $inner:ty) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            Default,
+            Serialize,
+            Deserialize,
+        )]
         pub struct $name($inner);
 
         impl $name {
