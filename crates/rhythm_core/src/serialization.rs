@@ -130,9 +130,7 @@ mod tests {
             Effect {
                 id: EffectId::new(7).expect("effect id"),
                 enabled: true,
-                kind: EffectKind::Blur(BlurEffect {
-                    radius_px: radius,
-                }),
+                kind: EffectKind::Blur(BlurEffect { radius_px: radius }),
             },
             Effect {
                 id: EffectId::new(8).expect("effect id"),
@@ -281,7 +279,10 @@ mod tests {
             serde_json::from_str(&json).expect("deserialize ProjectFileV1");
 
         assert_eq!(decoded, file);
-        decoded.project.validate().expect("round-trip project valid");
+        decoded
+            .project
+            .validate()
+            .expect("round-trip project valid");
     }
 
     #[test]
@@ -294,8 +295,8 @@ mod tests {
         assert!(value["project"]["settings"]["duration"].is_u64());
         assert!(value["project"]["composition"]["objects"][0]["id"].is_u64());
         assert!(
-            value["project"]["composition"]["objects"][0]["content"]["Rectangle"]
-                ["corner_radius"]["keyframes"]
+            value["project"]["composition"]["objects"][0]["content"]["Rectangle"]["corner_radius"]
+                ["keyframes"]
                 .is_array()
         );
     }
