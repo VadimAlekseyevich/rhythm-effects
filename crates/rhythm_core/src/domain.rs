@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DomainValueError {
     NonFinite,
     AlphaOutOfRange,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LinearRgba {
     r: f32,
     g: f32,
@@ -55,7 +57,7 @@ impl LinearRgba {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Vec2 {
     x: f32,
     y: f32,
