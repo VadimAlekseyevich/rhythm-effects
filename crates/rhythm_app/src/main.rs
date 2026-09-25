@@ -363,13 +363,15 @@ impl ApplicationHandler for RhythmApp {
                             }
                         }
                     } else if !control && !shift && !alt && !super_key && code == KeyCode::Escape {
+                        let cancelled_curve_drag = self.session.cancel_curve_handle_drag();
                         let cancelled_keyframe_drag = self.session.cancel_keyframe_drag();
                         let cancelled_position_drag = self.session.cancel_viewport_position_drag();
                         let cancelled_multi_position_drag =
                             self.session.cancel_viewport_multi_position_drag();
                         let cancelled_scale_drag = self.session.cancel_viewport_scale_drag();
                         let cancelled_rotation_drag = self.session.cancel_viewport_rotation_drag();
-                        cancelled_keyframe_drag
+                        cancelled_curve_drag
+                            || cancelled_keyframe_drag
                             || cancelled_position_drag
                             || cancelled_multi_position_drag
                             || cancelled_scale_drag
@@ -670,6 +672,14 @@ impl ApplicationHandler for RhythmApp {
                         Ok(true) => window.request_redraw(),
                         Ok(false) => {}
                         Err(error) => warn!(?error, "inspector keyframe action failed"),
+                    }
+                    match self
+                        .session
+                        .sync_curve_handle_drag(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "curve handle drag failed"),
                     }
                     match self
                         .session
