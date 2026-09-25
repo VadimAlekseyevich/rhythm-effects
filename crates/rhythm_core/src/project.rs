@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use std::collections::{HashMap, HashSet};
 
 use crate::{
@@ -32,12 +34,12 @@ pub enum ProjectValidationError {
     ValueOutOfRange(&'static str),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectMetadata {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub metadata: ProjectMetadata,
     pub settings: ProjectSettings,
@@ -317,12 +319,12 @@ fn validate_range(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Composition {
     pub objects: Vec<Object>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Object {
     pub id: ObjectId,
     pub name: String,
@@ -333,7 +335,7 @@ pub struct Object {
     pub effects: Vec<Effect>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ObjectContent {
     Rectangle(RectangleObject),
     Ellipse(EllipseObject),
@@ -341,25 +343,25 @@ pub enum ObjectContent {
     Text(TextObject),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RectangleObject {
     pub size: Animated<Vec2>,
     pub fill: Animated<LinearRgba>,
     pub corner_radius: Animated<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EllipseObject {
     pub size: Animated<Vec2>,
     pub fill: Animated<LinearRgba>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ImageObject {
     pub asset: AssetId,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum TextAlignment {
     #[default]
     Left,
@@ -367,7 +369,7 @@ pub enum TextAlignment {
     Right,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum FontWeight {
     Thin,
     ExtraLight,
@@ -381,21 +383,21 @@ pub enum FontWeight {
     Black,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum FontStyle {
     #[default]
     Normal,
     Italic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FontReference {
     pub family: String,
     pub weight: FontWeight,
     pub style: FontStyle,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextObject {
     pub text: String,
     pub font: FontReference,
@@ -404,14 +406,14 @@ pub struct TextObject {
     pub alignment: TextAlignment,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Effect {
     pub id: EffectId,
     pub enabled: bool,
     pub kind: EffectKind,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum EffectKind {
     Blur(BlurEffect),
     Glow(GlowEffect),
@@ -420,12 +422,12 @@ pub enum EffectKind {
     RgbSplit(RgbSplitEffect),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlurEffect {
     pub radius_px: Animated<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GlowEffect {
     pub radius_px: Animated<f32>,
     pub intensity: Animated<f32>,
@@ -433,13 +435,13 @@ pub struct GlowEffect {
     pub color: Animated<LinearRgba>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TintEffect {
     pub color: Animated<LinearRgba>,
     pub amount: Animated<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NoiseEffect {
     pub amount: Animated<f32>,
     pub size_px: Animated<f32>,
@@ -447,19 +449,19 @@ pub struct NoiseEffect {
     pub seed: u32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RgbSplitEffect {
     pub amount_px: Animated<f32>,
     pub angle_degrees: Animated<f32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AssetKind {
     Audio,
     Image,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AssetSource {
     File {
         path: String,
@@ -467,14 +469,14 @@ pub enum AssetSource {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AssetRecord {
     pub id: AssetId,
     pub kind: AssetKind,
     pub source: AssetSource,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioTrack {
     pub asset_id: AssetId,
     pub gain: f32,
@@ -490,7 +492,7 @@ impl AudioTrack {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSettings {
     pub composition_width: u32,
     pub composition_height: u32,
@@ -511,7 +513,7 @@ impl Default for ProjectSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransformAnimation {
     pub position: Animated<Vec2>,
     pub scale: Animated<Vec2>,
