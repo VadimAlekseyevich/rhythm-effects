@@ -38,8 +38,12 @@ pub enum ProjectFileParseError {
 impl fmt::Display for ProjectFileParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidUtf8(error) => write!(formatter, "project file is not valid UTF-8: {error}"),
-            Self::InvalidJson(error) => write!(formatter, "project file is not valid schema JSON: {error}"),
+            Self::InvalidUtf8(error) => {
+                write!(formatter, "project file is not valid UTF-8: {error}")
+            }
+            Self::InvalidJson(error) => {
+                write!(formatter, "project file is not valid schema JSON: {error}")
+            }
         }
     }
 }
@@ -302,8 +306,9 @@ mod tests {
 
     #[test]
     fn parse_project_file_v1_reports_invalid_or_truncated_json() {
-        let error = super::parse_project_file_v1(br#"{"schema_version":1,"created_with_version":"0.1""#)
-            .expect_err("truncated JSON");
+        let error =
+            super::parse_project_file_v1(br#"{"schema_version":1,"created_with_version":"0.1""#)
+                .expect_err("truncated JSON");
 
         assert!(matches!(
             error,
