@@ -5446,9 +5446,9 @@ mod tests {
             .begin_property_keyframe_interpolation_transaction(keyframe_id)
             .expect("begin transaction");
         editor
-            .update_property_keyframe_interpolation_transaction(
-                Interpolation::CubicBezier(BezierEasing::EASE_IN_OUT),
-            )
+            .update_property_keyframe_interpolation_transaction(Interpolation::CubicBezier(
+                BezierEasing::EASE_IN_OUT,
+            ))
             .expect("preview");
         assert_eq!(editor.cancel_transaction(), Ok(true));
 
