@@ -7,6 +7,7 @@ pub mod editor;
 pub mod geometry;
 
 pub mod ids;
+pub mod persistence;
 pub mod project;
 pub mod property;
 pub mod time;
