@@ -458,6 +458,8 @@ struct CurveHandleDrag {
     keyframe_id: KeyframeId,
     handle: CurveEditorHandle,
     easing: BezierEasing,
+    phase: ViewportTransformDragPhase,
+    transaction_started: bool,
 }
 
 #[derive(Debug)]
@@ -3139,6 +3141,8 @@ impl EditorSession {
             keyframe_id,
             handle,
             easing,
+            phase: ViewportTransformDragPhase::Active,
+            transaction_started: false,
         });
         true
     }
@@ -3151,6 +3155,9 @@ impl EditorSession {
         let Some(drag) = self.curve_handle_drag.as_mut() else {
             return false;
         };
+        if drag.phase != ViewportTransformDragPhase::Active {
+            return false;
+        }
         let x = x.clamp(0.0, 1.0);
         let y = y.clamp(0.0, 1.0);
         let easing = match drag.handle {
@@ -3176,16 +3183,73 @@ impl EditorSession {
     }
 
     pub fn finish_curve_handle_drag(&mut self, keyframe_id: KeyframeId) -> bool {
-        let Some(drag) = self.curve_handle_drag.take() else {
+        let Some(drag) = self.curve_handle_drag.as_mut() else {
             return false;
         };
-        if drag.keyframe_id != keyframe_id {
-            self.curve_handle_drag = Some(drag);
+        if drag.keyframe_id != keyframe_id
+            || drag.phase != ViewportTransformDragPhase::Active
+        {
             return false;
         }
 
-        self.pending_keyframe_interpolation = Some(Interpolation::CubicBezier(drag.easing));
+        drag.phase = ViewportTransformDragPhase::CommitRequested;
         true
+    }
+
+    pub fn cancel_curve_handle_drag(&mut self) -> bool {
+        let Some(drag) = self.curve_handle_drag.as_mut() else {
+            return false;
+        };
+        if drag.phase != ViewportTransformDragPhase::Active {
+            return false;
+        }
+
+        drag.phase = ViewportTransformDragPhase::CancelRequested;
+        true
+    }
+
+    pub fn sync_curve_handle_drag(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(snapshot) = self.curve_handle_drag else {
+            return Ok(false);
+        };
+
+        if snapshot.phase == ViewportTransformDragPhase::CancelRequested
+            && !snapshot.transaction_started
+        {
+            self.curve_handle_drag = None;
+            return Ok(true);
+        }
+
+        if !snapshot.transaction_started {
+            editor.begin_property_keyframe_interpolation_transaction(snapshot.keyframe_id)?;
+            if let Some(drag) = self.curve_handle_drag.as_mut() {
+                drag.transaction_started = true;
+            }
+        }
+
+        let Some(drag) = self.curve_handle_drag else {
+            return Ok(false);
+        };
+        if drag.phase == ViewportTransformDragPhase::CancelRequested {
+            let changed = editor.cancel_transaction()?;
+            self.curve_handle_drag = None;
+            return Ok(changed);
+        }
+
+        editor.update_property_keyframe_interpolation_transaction(
+            Interpolation::CubicBezier(drag.easing),
+        )?;
+
+        if drag.phase == ViewportTransformDragPhase::CommitRequested {
+            let changed = editor.commit_transaction()?;
+            self.curve_handle_drag = None;
+            return Ok(changed);
+        }
+
+        Ok(true)
     }
 
     pub fn queue_selected_keyframe_interpolation(
@@ -5502,6 +5566,13 @@ mod tests {
             )
             .expect("insert")
             .expect("second");
+        editor
+            .set_property_keyframe_interpolations(
+                vec![first],
+                Interpolation::CubicBezier(BezierEasing::EASE_IN_OUT),
+            )
+            .expect("initial easing");
+        let history_before = editor.history_len();
 
         let mut session = EditorSession::default();
         session.select_only_keyframe(first);
@@ -5510,12 +5581,15 @@ mod tests {
             CurveEditorHandle::First,
             BezierEasing::EASE_IN_OUT,
         ));
+        assert!(session.update_curve_handle_drag(0.2, 0.8));
+        assert_eq!(session.sync_curve_handle_drag(&mut editor), Ok(true));
         assert!(session.update_curve_handle_drag(-0.25, 1.25));
+        assert_eq!(session.sync_curve_handle_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), history_before);
+
         assert!(session.finish_curve_handle_drag(first));
-        assert_eq!(
-            session.commit_pending_keyframe_interpolation(&mut editor),
-            Ok(true)
-        );
+        assert_eq!(session.sync_curve_handle_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), history_before + 1);
 
         assert_eq!(
             locate_property_keyframe(editor.project(), first)
@@ -5526,6 +5600,83 @@ mod tests {
                 BezierEasing::new(0.0, 1.0, 0.58, 1.0).expect("clamped easing")
             )
         );
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::CubicBezier(BezierEasing::EASE_IN_OUT)
+        );
+    }
+
+    #[test]
+    fn curve_handle_drag_escape_restores_original_without_history() {
+        use super::CurveEditorHandle;
+        use rhythm_core::{
+            animation::{BezierEasing, Interpolation},
+            property::{AnimatableProperty, PropertyValue, locate_property_keyframe},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.1),
+            )
+            .expect("insert")
+            .expect("first");
+        editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("second");
+        editor
+            .set_property_keyframe_interpolations(
+                vec![first],
+                Interpolation::CubicBezier(BezierEasing::EASE_OUT),
+            )
+            .expect("initial easing");
+        let history_before = editor.history_len();
+
+        let mut session = EditorSession::default();
+        session.select_only_keyframe(first);
+        assert!(session.begin_curve_handle_drag(
+            first,
+            CurveEditorHandle::Second,
+            BezierEasing::EASE_OUT,
+        ));
+        assert!(session.update_curve_handle_drag(0.8, 0.2));
+        assert_eq!(session.sync_curve_handle_drag(&mut editor), Ok(true));
+        assert_eq!(
+            locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::CubicBezier(
+                BezierEasing::new(0.0, 0.0, 0.8, 0.2).expect("preview easing")
+            )
+        );
+
+        assert!(session.cancel_curve_handle_drag());
+        assert_eq!(session.sync_curve_handle_drag(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), history_before);
+        assert_eq!(
+            locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::CubicBezier(BezierEasing::EASE_OUT)
+        );
+        assert!(session.curve_handle_drag_easing(first).is_none());
     }
 
     #[test]
