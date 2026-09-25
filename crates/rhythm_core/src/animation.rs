@@ -52,6 +52,30 @@ impl BezierEasing {
     pub const fn y2(self) -> f32 {
         self.y2
     }
+
+    /// Canonical MVP Ease In timing curve.
+    pub const EASE_IN: Self = Self {
+        x1: 0.42,
+        y1: 0.0,
+        x2: 1.0,
+        y2: 1.0,
+    };
+
+    /// Canonical MVP Ease Out timing curve.
+    pub const EASE_OUT: Self = Self {
+        x1: 0.0,
+        y1: 0.0,
+        x2: 0.58,
+        y2: 1.0,
+    };
+
+    /// Canonical MVP Ease In-Out timing curve.
+    pub const EASE_IN_OUT: Self = Self {
+        x1: 0.42,
+        y1: 0.0,
+        x2: 0.58,
+        y2: 1.0,
+    };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -406,6 +430,22 @@ mod tests {
         let second = super::evaluate_bezier_easing(ease, 0.5);
         assert_eq!(first, second);
         assert!((first - 0.802_403_4).abs() < 0.000_01);
+    }
+
+    #[test]
+    fn canonical_bezier_presets_have_stable_control_points() {
+        let cases = [
+            (BezierEasing::EASE_IN, [0.42, 0.0, 1.0, 1.0]),
+            (BezierEasing::EASE_OUT, [0.0, 0.0, 0.58, 1.0]),
+            (BezierEasing::EASE_IN_OUT, [0.42, 0.0, 0.58, 1.0]),
+        ];
+
+        for (easing, expected) in cases {
+            assert_eq!(
+                [easing.x1(), easing.y1(), easing.x2(), easing.y2()],
+                expected
+            );
+        }
     }
 
     #[test]
