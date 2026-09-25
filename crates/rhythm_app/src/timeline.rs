@@ -1,4 +1,6 @@
-use crate::editor_session::{EditorSession, KeyframeDragMember, KeyframeInterpolationPreset};
+use crate::editor_session::{
+    CurveEditorHandle, EditorSession, KeyframeDragMember, KeyframeInterpolationPreset,
+};
 use rhythm_core::{
     animation::{Animated, Interpolation, evaluate_bezier_easing},
     ids::{EffectId, KeyframeId, ObjectId},
@@ -678,6 +680,25 @@ fn curve_editor_point(rect: egui::Rect, x: f32, y: f32) -> egui::Pos2 {
     )
 }
 
+fn curve_editor_normalized_pointer(rect: egui::Rect, pointer: egui::Pos2) -> [f32; 2] {
+    let x = if rect.width() > 0.0 {
+        (pointer.x - rect.left()) / rect.width()
+    } else {
+        0.0
+    };
+    let y = if rect.height() > 0.0 {
+        (rect.bottom() - pointer.y) / rect.height()
+    } else {
+        0.0
+    };
+
+    [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)]
+}
+
+fn curve_handle_hit_rect(center: egui::Pos2) -> egui::Rect {
+    egui::Rect::from_center_size(center, egui::vec2(18.0, 18.0))
+}
+
 fn interpolation_label(interpolation: Interpolation) -> &'static str {
     match interpolation {
         Interpolation::Hold => "Hold",
@@ -688,7 +709,7 @@ fn interpolation_label(interpolation: Interpolation) -> &'static str {
 
 fn draw_curve_editor(
     ui: &mut egui::Ui,
-    session: &EditorSession,
+    session: &mut EditorSession,
     project: &Project,
     rows: &[TimelineRow<'_>],
 ) {
@@ -816,29 +837,100 @@ fn draw_curve_editor(
             );
         }
         Interpolation::CubicBezier(easing) => {
+            let mut display_easing = session
+                .curve_handle_drag_easing(segment.from.id)
+                .unwrap_or(easing);
+            let first_handle =
+                curve_editor_point(graph_rect, display_easing.x1(), display_easing.y1());
+            let second_handle =
+                curve_editor_point(graph_rect, display_easing.x2(), display_easing.y2());
+
+            let first_response = ui
+                .interact(
+                    curve_handle_hit_rect(first_handle),
+                    egui::Id::new(("curve_handle", segment.from.id.get(), 0_u8)),
+                    egui::Sense::click_and_drag(),
+                )
+                .on_hover_cursor(egui::CursorIcon::Grab);
+            let second_response = ui
+                .interact(
+                    curve_handle_hit_rect(second_handle),
+                    egui::Id::new(("curve_handle", segment.from.id.get(), 1_u8)),
+                    egui::Sense::click_and_drag(),
+                )
+                .on_hover_cursor(egui::CursorIcon::Grab);
+
+            if first_response.drag_started() {
+                session.begin_curve_handle_drag(
+                    segment.from.id,
+                    CurveEditorHandle::First,
+                    display_easing,
+                );
+            } else if second_response.drag_started() {
+                session.begin_curve_handle_drag(
+                    segment.from.id,
+                    CurveEditorHandle::Second,
+                    display_easing,
+                );
+            }
+
+            let active_response = if first_response.dragged() {
+                Some(&first_response)
+            } else if second_response.dragged() {
+                Some(&second_response)
+            } else {
+                None
+            };
+            if let Some(response) = active_response
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                let [x, y] = curve_editor_normalized_pointer(graph_rect, pointer);
+                session.update_curve_handle_drag(x, y);
+                display_easing = session
+                    .curve_handle_drag_easing(segment.from.id)
+                    .unwrap_or(display_easing);
+            }
+
+            if first_response.drag_stopped() || second_response.drag_stopped() {
+                session.finish_curve_handle_drag(segment.from.id);
+            }
+
             let mut points = Vec::with_capacity(CURVE_SAMPLE_COUNT + 1);
             for sample in 0..=CURVE_SAMPLE_COUNT {
                 let x = sample as f32 / CURVE_SAMPLE_COUNT as f32;
-                let y = evaluate_bezier_easing(easing, f64::from(x)) as f32;
+                let y = evaluate_bezier_easing(display_easing, f64::from(x)) as f32;
                 points.push(curve_editor_point(graph_rect, x, y));
             }
             painter.add(egui::Shape::line(points, curve_stroke));
 
-            let first_handle = curve_editor_point(graph_rect, easing.x1(), easing.y1());
-            let second_handle = curve_editor_point(graph_rect, easing.x2(), easing.y2());
+            let first_handle =
+                curve_editor_point(graph_rect, display_easing.x1(), display_easing.y1());
+            let second_handle =
+                curve_editor_point(graph_rect, display_easing.x2(), display_easing.y2());
             let guide_stroke = egui::Stroke::new(1.0, foreground.gamma_multiply(0.45));
             painter.line_segment([start, first_handle], guide_stroke);
             painter.line_segment([end, second_handle], guide_stroke);
-            painter.circle_filled(first_handle, 5.0, visuals.selection.bg_fill);
+
+            let first_radius = if first_response.hovered() || first_response.dragged() {
+                6.0
+            } else {
+                5.0
+            };
+            let second_radius = if second_response.hovered() || second_response.dragged() {
+                6.0
+            } else {
+                5.0
+            };
+            painter.circle_filled(first_handle, first_radius, visuals.selection.bg_fill);
             painter.circle_stroke(
                 first_handle,
-                5.0,
+                first_radius,
                 egui::Stroke::new(1.0, visuals.selection.stroke.color),
             );
-            painter.circle_filled(second_handle, 5.0, visuals.selection.bg_fill);
+            painter.circle_filled(second_handle, second_radius, visuals.selection.bg_fill);
             painter.circle_stroke(
                 second_handle,
-                5.0,
+                second_radius,
                 egui::Stroke::new(1.0, visuals.selection.stroke.color),
             );
 
@@ -847,10 +939,10 @@ fn draw_curve_editor(
                 egui::Align2::LEFT_TOP,
                 format!(
                     "P1 ({:.2}, {:.2})   P2 ({:.2}, {:.2})",
-                    easing.x1(),
-                    easing.y1(),
-                    easing.x2(),
-                    easing.y2()
+                    display_easing.x1(),
+                    display_easing.y1(),
+                    display_easing.x2(),
+                    display_easing.y2()
                 ),
                 egui::FontId::monospace(11.0),
                 visuals.weak_text_color(),
@@ -1778,6 +1870,33 @@ mod tests {
         session.select_only_keyframe(first);
         session.toggle_keyframe_selection(second);
         assert!(selected_curve_editor_segment(&session, &project).is_none());
+    }
+
+    #[test]
+    fn curve_editor_pointer_coordinates_clamp_to_unit_square() {
+        let rect = egui::Rect::from_min_max(egui::pos2(10.0, 20.0), egui::pos2(110.0, 220.0));
+
+        assert_eq!(
+            super::curve_editor_normalized_pointer(rect, egui::pos2(-40.0, 260.0)),
+            [0.0, 0.0]
+        );
+        assert_eq!(
+            super::curve_editor_normalized_pointer(rect, egui::pos2(160.0, -30.0)),
+            [1.0, 1.0]
+        );
+        assert_eq!(
+            super::curve_editor_normalized_pointer(rect, egui::pos2(35.0, 70.0)),
+            [0.25, 0.75]
+        );
+    }
+
+    #[test]
+    fn curve_handle_hit_area_is_larger_than_visible_point() {
+        let rect = super::curve_handle_hit_rect(egui::pos2(40.0, 50.0));
+
+        assert_eq!(rect.width(), 18.0);
+        assert_eq!(rect.height(), 18.0);
+        assert_eq!(rect.center(), egui::pos2(40.0, 50.0));
     }
 
     #[test]
