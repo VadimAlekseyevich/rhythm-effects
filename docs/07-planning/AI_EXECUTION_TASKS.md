@@ -261,7 +261,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 ## M8 — Save/load/recovery
 
-- [ ] **AI-226** — Implement ProjectFileV1 root wrapper with schema_version=1 and created_with_version.
+- [x] **AI-226** — Implement ProjectFileV1 root wrapper with schema_version=1 and created_with_version.
 - [ ] **AI-227** — Implement serde JSON serialization for all schema V1 semantic types.
 - [ ] **AI-228** — Implement .rhfx UTF-8 JSON parsing into a candidate project.
 - [ ] **AI-229** — Implement load-time semantic validation before active-project replacement.
