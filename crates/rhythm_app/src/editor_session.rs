@@ -5476,6 +5476,61 @@ mod tests {
     }
 
     #[test]
+    fn curve_handle_drag_release_commits_clamped_easing_to_selected_key() {
+        use super::CurveEditorHandle;
+        use rhythm_core::{
+            animation::{BezierEasing, Interpolation},
+            property::{AnimatableProperty, PropertyValue, locate_property_keyframe},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.1),
+            )
+            .expect("insert")
+            .expect("first");
+        editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("second");
+
+        let mut session = EditorSession::default();
+        session.select_only_keyframe(first);
+        assert!(session.begin_curve_handle_drag(
+            first,
+            CurveEditorHandle::First,
+            BezierEasing::EASE_IN_OUT,
+        ));
+        assert!(session.update_curve_handle_drag(-0.25, 1.25));
+        assert!(session.finish_curve_handle_drag(first));
+        assert_eq!(
+            session.commit_pending_keyframe_interpolation(&mut editor),
+            Ok(true)
+        );
+
+        assert_eq!(
+            locate_property_keyframe(editor.project(), first)
+                .expect("first")
+                .keyframe
+                .interpolation,
+            Interpolation::CubicBezier(
+                BezierEasing::new(0.0, 1.0, 0.58, 1.0).expect("clamped easing")
+            )
+        );
+    }
+
+    #[test]
     fn curve_handle_drag_updates_only_active_control_point() {
         use super::CurveEditorHandle;
         use rhythm_core::animation::BezierEasing;
