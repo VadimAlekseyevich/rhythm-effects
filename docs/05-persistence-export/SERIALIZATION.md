@@ -25,6 +25,8 @@ ProjectFileV1 {
 }
 ~~~
 
+The V1 root envelope is represented in `rhythm_core::persistence`. Construction fixes `schema_version` to `1`; JSON serde support for the envelope and its semantic payload is layered on separately.
+
 Unknown future schema versions fail safely without modifying the current/open file.
 
 ## 3. Persisted state
