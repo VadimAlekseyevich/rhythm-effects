@@ -1,4 +1,4 @@
-use crate::project::Project;
+use crate::project::{Project, ProjectValidationError};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, str::Utf8Error};
 
@@ -60,6 +60,13 @@ impl Error for ProjectFileParseError {
 pub fn parse_project_file_v1(bytes: &[u8]) -> Result<ProjectFileV1, ProjectFileParseError> {
     let json = std::str::from_utf8(bytes).map_err(ProjectFileParseError::InvalidUtf8)?;
     serde_json::from_str(json).map_err(ProjectFileParseError::InvalidJson)
+}
+
+pub fn validate_project_file_v1_candidate(
+    candidate: ProjectFileV1,
+) -> Result<ProjectFileV1, ProjectValidationError> {
+    candidate.project.validate()?;
+    Ok(candidate)
 }
 
 #[cfg(test)]
@@ -326,6 +333,43 @@ mod tests {
         let parsed = super::parse_project_file_v1(&json).expect("parser returns candidate");
 
         assert_eq!(parsed.schema_version, 99);
+    }
+
+    #[test]
+    fn validate_project_file_v1_candidate_returns_valid_candidate_unchanged() {
+        let file = ProjectFileV1::new(schema_project(), "0.1.0-test");
+
+        let validated =
+            super::validate_project_file_v1_candidate(file.clone()).expect("valid candidate");
+
+        assert_eq!(validated, file);
+    }
+
+    #[test]
+    fn parsed_candidate_can_fail_semantic_validation_after_json_succeeds() {
+        let mut file = ProjectFileV1::new(project(), "0.1.0-test");
+        file.project.settings.composition_width = 1;
+        let json = serde_json::to_vec(&file).expect("serialize invalid semantic fixture");
+
+        let parsed = super::parse_project_file_v1(&json).expect("JSON candidate parses");
+        let error = super::validate_project_file_v1_candidate(parsed)
+            .expect_err("invalid composition dimensions");
+
+        assert_eq!(
+            error,
+            crate::project::ProjectValidationError::InvalidCompositionDimensions
+        );
+    }
+
+    #[test]
+    fn semantic_validation_rejects_invalid_next_entity_id() {
+        let mut file = ProjectFileV1::new(schema_project(), "0.1.0-test");
+        file.project.next_entity_id = 14;
+
+        let error = super::validate_project_file_v1_candidate(file)
+            .expect_err("next entity id must stay above allocated ids");
+
+        assert_eq!(error, crate::project::ProjectValidationError::InvalidNextEntityId);
     }
 
     #[test]
