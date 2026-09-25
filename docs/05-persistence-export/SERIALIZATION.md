@@ -148,7 +148,9 @@ read bytes
 
 The initial parser is deliberately side-effect free: malformed UTF-8 and malformed/truncated JSON return parse errors before any active editor state is touched. Schema-version policy remains a separate subsequent stage.
 
-After parsing/version handling, the candidate must pass `Project::validate()` through the load validation gate before it can proceed toward active-project replacement. A semantic failure returns the existing `ProjectValidationError` and leaves the candidate isolated from editor state.
+After parsing, candidates whose `schema_version` is newer than the current supported schema are rejected before migration or semantic validation. The error records both the file's version and the maximum supported version so the caller can explain that a newer application/schema is required.
+
+After version handling, the candidate must pass `Project::validate()` through the load validation gate before it can proceed toward active-project replacement. A semantic failure returns the existing `ProjectValidationError` and leaves the candidate isolated from editor state.
 
 A broken candidate can never half-mutate currently open work.
 
