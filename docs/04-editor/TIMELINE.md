@@ -230,7 +230,7 @@ The MVP preset curves use canonical cubic-Bezier control points:
 - Ease Out: `(0.0, 0.0, 0.58, 1.0)`;
 - Ease In-Out: `(0.42, 0.0, 0.58, 1.0)`.
 
-Selecting exactly one non-terminal keyframe reveals the contextual Curve Editor above the key rows. It visualizes only that outgoing segment: Hold as a step, Linear as the exact diagonal, and CubicBezier using the engine timing evaluator plus its two control points. Cubic handles are draggable with both normalized coordinates clamped to `0..1`; moving the pointer outside the graph pins the active handle to the corresponding graph edge.
+Selecting exactly one non-terminal keyframe reveals the contextual Curve Editor above the key rows. It visualizes only that outgoing segment: Hold as a step, Linear as the exact diagonal, and CubicBezier using the engine timing evaluator plus its two control points. Cubic handles are draggable with both normalized coordinates clamped to `0..1`; moving the pointer outside the graph pins the active handle to the corresponding graph edge. A handle drag is one ProjectEditor transaction: transient updates drive scene preview, release creates one undoable easing edit, and Escape restores the drag-start interpolation without adding history.
 
 Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
