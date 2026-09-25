@@ -256,7 +256,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-221** — Show a visible missing-requested-font state while rendering Inter fallback.
 - [x] **AI-222** — Implement Ease In, Ease Out and Ease In-Out preset canonical Bezier values.
 - [x] **AI-223** — Implement one-segment custom timing Curve Editor in the timeline area.
-- [ ] **AI-224** — Constrain custom curve x/y handles to 0..1.
+- [x] **AI-224** — Constrain custom curve x/y handles to 0..1.
 - [ ] **AI-225** — Make one handle drag one undoable transaction with Esc cancel.
 
 ## M8 — Save/load/recovery
