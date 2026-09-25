@@ -447,6 +447,19 @@ struct InspectorMultiNumericCommit {
     value: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurveEditorHandle {
+    First,
+    Second,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CurveHandleDrag {
+    keyframe_id: KeyframeId,
+    handle: CurveEditorHandle,
+    easing: BezierEasing,
+}
+
 #[derive(Debug)]
 pub struct EditorSession {
     pub preview_quality: PreviewQuality,
@@ -485,6 +498,7 @@ pub struct EditorSession {
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
     pending_keyframe_interpolation: Option<Interpolation>,
+    curve_handle_drag: Option<CurveHandleDrag>,
     keyframe_clipboard: Option<KeyframeCopyPacket>,
     timeline_box_selection: Option<TimelineBoxSelection>,
     viewport_box_selection: Option<ViewportBoxSelection>,
@@ -529,6 +543,7 @@ impl Default for EditorSession {
             keyframe_drag: None,
             pending_keyframe_move: None,
             pending_keyframe_interpolation: None,
+            curve_handle_drag: None,
             keyframe_clipboard: None,
             timeline_box_selection: None,
             viewport_box_selection: None,
@@ -3110,6 +3125,71 @@ impl EditorSession {
         Ok(changed)
     }
 
+    pub fn begin_curve_handle_drag(
+        &mut self,
+        keyframe_id: KeyframeId,
+        handle: CurveEditorHandle,
+        easing: BezierEasing,
+    ) -> bool {
+        if self.curve_handle_drag.is_some() {
+            return false;
+        }
+
+        self.curve_handle_drag = Some(CurveHandleDrag {
+            keyframe_id,
+            handle,
+            easing,
+        });
+        true
+    }
+
+    pub fn update_curve_handle_drag(&mut self, x: f32, y: f32) -> bool {
+        if !x.is_finite() || !y.is_finite() {
+            return false;
+        }
+
+        let Some(drag) = self.curve_handle_drag.as_mut() else {
+            return false;
+        };
+        let x = x.clamp(0.0, 1.0);
+        let y = y.clamp(0.0, 1.0);
+        let easing = match drag.handle {
+            CurveEditorHandle::First => {
+                BezierEasing::new(x, y, drag.easing.x2(), drag.easing.y2())
+            }
+            CurveEditorHandle::Second => {
+                BezierEasing::new(drag.easing.x1(), drag.easing.y1(), x, y)
+            }
+        }
+        .expect("clamped curve handles remain valid");
+
+        if easing == drag.easing {
+            return false;
+        }
+        drag.easing = easing;
+        true
+    }
+
+    #[must_use]
+    pub fn curve_handle_drag_easing(&self, keyframe_id: KeyframeId) -> Option<BezierEasing> {
+        self.curve_handle_drag
+            .filter(|drag| drag.keyframe_id == keyframe_id)
+            .map(|drag| drag.easing)
+    }
+
+    pub fn finish_curve_handle_drag(&mut self, keyframe_id: KeyframeId) -> bool {
+        let Some(drag) = self.curve_handle_drag.take() else {
+            return false;
+        };
+        if drag.keyframe_id != keyframe_id {
+            self.curve_handle_drag = Some(drag);
+            return false;
+        }
+
+        self.pending_keyframe_interpolation = Some(Interpolation::CubicBezier(drag.easing));
+        true
+    }
+
     pub fn queue_selected_keyframe_interpolation(
         &mut self,
         preset: KeyframeInterpolationPreset,
@@ -5370,6 +5450,52 @@ mod tests {
             Interpolation::Linear
         );
         assert_eq!(session.selected_keyframe_count(), 3);
+    }
+
+    #[test]
+    fn curve_handle_drag_clamps_both_axes_to_unit_square() {
+        use super::CurveEditorHandle;
+        use rhythm_core::animation::BezierEasing;
+
+        let keyframe_id = KeyframeId::new(77).expect("key id");
+        let mut session = EditorSession::default();
+        assert!(session.begin_curve_handle_drag(
+            keyframe_id,
+            CurveEditorHandle::First,
+            BezierEasing::EASE_IN_OUT,
+        ));
+        assert!(session.update_curve_handle_drag(-0.5, 1.5));
+
+        let easing = session
+            .curve_handle_drag_easing(keyframe_id)
+            .expect("drag preview");
+        assert_eq!(easing.x1(), 0.0);
+        assert_eq!(easing.y1(), 1.0);
+        assert_eq!(easing.x2(), BezierEasing::EASE_IN_OUT.x2());
+        assert_eq!(easing.y2(), BezierEasing::EASE_IN_OUT.y2());
+    }
+
+    #[test]
+    fn curve_handle_drag_updates_only_active_control_point() {
+        use super::CurveEditorHandle;
+        use rhythm_core::animation::BezierEasing;
+
+        let keyframe_id = KeyframeId::new(78).expect("key id");
+        let mut session = EditorSession::default();
+        assert!(session.begin_curve_handle_drag(
+            keyframe_id,
+            CurveEditorHandle::Second,
+            BezierEasing::EASE_IN,
+        ));
+        assert!(session.update_curve_handle_drag(0.25, 0.75));
+
+        let easing = session
+            .curve_handle_drag_easing(keyframe_id)
+            .expect("drag preview");
+        assert_eq!(easing.x1(), BezierEasing::EASE_IN.x1());
+        assert_eq!(easing.y1(), BezierEasing::EASE_IN.y1());
+        assert_eq!(easing.x2(), 0.25);
+        assert_eq!(easing.y2(), 0.75);
     }
 
     #[test]
