@@ -138,15 +138,9 @@ impl KeyframeInterpolationPreset {
         match self {
             Self::Hold => Interpolation::Hold,
             Self::Linear => Interpolation::Linear,
-            Self::EaseIn => Interpolation::CubicBezier(
-                BezierEasing::new(0.42, 0.0, 1.0, 1.0).expect("valid ease-in preset"),
-            ),
-            Self::EaseOut => Interpolation::CubicBezier(
-                BezierEasing::new(0.0, 0.0, 0.58, 1.0).expect("valid ease-out preset"),
-            ),
-            Self::EaseInOut => Interpolation::CubicBezier(
-                BezierEasing::new(0.42, 0.0, 0.58, 1.0).expect("valid ease-in-out preset"),
-            ),
+            Self::EaseIn => Interpolation::CubicBezier(BezierEasing::EASE_IN),
+            Self::EaseOut => Interpolation::CubicBezier(BezierEasing::EASE_OUT),
+            Self::EaseInOut => Interpolation::CubicBezier(BezierEasing::EASE_IN_OUT),
         }
     }
 }
