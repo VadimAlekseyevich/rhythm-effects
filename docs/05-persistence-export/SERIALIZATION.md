@@ -137,13 +137,16 @@ A failed Save As leaves previous project path/state unchanged.
 
 ~~~text
 read bytes
--> parse wrapper/version
+-> verify UTF-8 and parse a ProjectFileV1 candidate
+-> inspect wrapper/version
 -> migrate
 -> semantic validation
 -> resolve nonfatal missing assets
 -> construct candidate Project
 -> only then replace active Project
 ~~~
+
+The initial parser is deliberately side-effect free: malformed UTF-8 and malformed/truncated JSON return parse errors before any active editor state is touched. Schema-version policy and semantic validation are separate subsequent stages.
 
 A broken candidate can never half-mutate currently open work.
 
