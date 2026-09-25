@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 pub const PPQ: i64 = 960;
 
 pub const MVP_BEAT_DIVISIONS: [u16; 10] = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BeatDivision {
     parts_per_beat: u16,
 }
@@ -29,7 +31,7 @@ impl BeatDivision {
 
 macro_rules! signed_time_type {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
         pub struct $name(i64);
 
         impl $name {
@@ -48,7 +50,7 @@ macro_rules! signed_time_type {
 
 macro_rules! unsigned_time_type {
     ($name:ident, $inner:ty) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
         pub struct $name($inner);
 
         impl $name {
@@ -89,7 +91,7 @@ pub enum TimeConversionError {
     Overflow,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TempoSegment {
     start_tick: MusicalTick,
     bpm: BpmMicros,
@@ -113,7 +115,7 @@ impl TempoSegment {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TempoMap {
     grid_offset: GridOffsetNs,
     segments: Vec<TempoSegment>,
@@ -278,7 +280,7 @@ pub enum TimeSignatureError {
     ZeroDenominator,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TimeSignature {
     numerator: u8,
     denominator: u8,
@@ -325,7 +327,7 @@ pub enum FrameRateError {
     ZeroDenominator,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FrameRate {
     numerator: u32,
     denominator: u32,
@@ -380,7 +382,7 @@ const fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
     a
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BpmMicros(u64);
 
 impl BpmMicros {
