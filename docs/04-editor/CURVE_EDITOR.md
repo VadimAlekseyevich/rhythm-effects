@@ -50,13 +50,15 @@ This avoids ambiguous multi-curve handle manipulation without introducing a hidd
 
 ## 5. Handles
 
-Two control points are draggable.
+Two cubic-Bezier control points are draggable.
+
+Pointer coordinates are normalized against the graph and clamped independently to `[0,1]` on both x and y, so a handle cannot leave the accepted MVP unit square even when the pointer moves outside the graph.
 
 Hit areas are larger than visible points.
 
-Dragging is one history transaction.
+While dragging, the Curve Editor previews the constrained timing curve and handle values. The released value is then queued as the keyframe interpolation change.
 
-Escape restores original curve.
+Dragging becomes one history transaction with Escape restore in the next dedicated interaction task.
 
 ## 6. Live preview
 
