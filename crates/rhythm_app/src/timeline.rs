@@ -773,11 +773,17 @@ fn draw_curve_editor(
         let y = graph_rect.bottom() - fraction * graph_rect.height();
         let grid_stroke = egui::Stroke::new(1.0, foreground.gamma_multiply(0.12));
         painter.line_segment(
-            [egui::pos2(x, graph_rect.top()), egui::pos2(x, graph_rect.bottom())],
+            [
+                egui::pos2(x, graph_rect.top()),
+                egui::pos2(x, graph_rect.bottom()),
+            ],
             grid_stroke,
         );
         painter.line_segment(
-            [egui::pos2(graph_rect.left(), y), egui::pos2(graph_rect.right(), y)],
+            [
+                egui::pos2(graph_rect.left(), y),
+                egui::pos2(graph_rect.right(), y),
+            ],
             grid_stroke,
         );
     }
@@ -1741,18 +1747,8 @@ mod tests {
                             0.0,
                             Interpolation::CubicBezier(BezierEasing::EASE_IN),
                         ),
-                        Keyframe::new(
-                            second,
-                            MusicalTick::new(240),
-                            0.5,
-                            Interpolation::Linear,
-                        ),
-                        Keyframe::new(
-                            terminal,
-                            MusicalTick::new(480),
-                            1.0,
-                            Interpolation::Linear,
-                        ),
+                        Keyframe::new(second, MusicalTick::new(240), 0.5, Interpolation::Linear),
+                        Keyframe::new(terminal, MusicalTick::new(480), 1.0, Interpolation::Linear),
                     ],
                 )
                 .expect("unique opacity keys"),
@@ -1788,8 +1784,14 @@ mod tests {
     fn curve_editor_normalized_points_map_to_graph_corners() {
         let rect = egui::Rect::from_min_max(egui::pos2(10.0, 20.0), egui::pos2(110.0, 220.0));
 
-        assert_eq!(super::curve_editor_point(rect, 0.0, 0.0), egui::pos2(10.0, 220.0));
-        assert_eq!(super::curve_editor_point(rect, 1.0, 1.0), egui::pos2(110.0, 20.0));
+        assert_eq!(
+            super::curve_editor_point(rect, 0.0, 0.0),
+            egui::pos2(10.0, 220.0)
+        );
+        assert_eq!(
+            super::curve_editor_point(rect, 1.0, 1.0),
+            egui::pos2(110.0, 20.0)
+        );
         assert_eq!(
             super::curve_editor_point(rect, 0.25, 0.75),
             egui::pos2(35.0, 70.0)
