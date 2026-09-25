@@ -3186,9 +3186,7 @@ impl EditorSession {
         let Some(drag) = self.curve_handle_drag.as_mut() else {
             return false;
         };
-        if drag.keyframe_id != keyframe_id
-            || drag.phase != ViewportTransformDragPhase::Active
-        {
+        if drag.keyframe_id != keyframe_id || drag.phase != ViewportTransformDragPhase::Active {
             return false;
         }
 
@@ -3239,9 +3237,9 @@ impl EditorSession {
             return Ok(changed);
         }
 
-        editor.update_property_keyframe_interpolation_transaction(
-            Interpolation::CubicBezier(drag.easing),
-        )?;
+        editor.update_property_keyframe_interpolation_transaction(Interpolation::CubicBezier(
+            drag.easing,
+        ))?;
 
         if drag.phase == ViewportTransformDragPhase::CommitRequested {
             let changed = editor.commit_transaction()?;
