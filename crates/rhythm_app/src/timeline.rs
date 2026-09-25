@@ -1,9 +1,12 @@
 use crate::editor_session::{EditorSession, KeyframeDragMember, KeyframeInterpolationPreset};
 use rhythm_core::{
-    animation::Animated,
+    animation::{Animated, Interpolation, evaluate_bezier_easing},
     ids::{EffectId, KeyframeId, ObjectId},
     project::{EffectKind, ObjectContent, Project},
-    property::{AnimatableProperty, EffectAnimatableProperty, property_keyframe_by_id},
+    property::{
+        AnimatableProperty, EffectAnimatableProperty, PropertyKeyframe, locate_property_keyframe,
+        property_keyframe_by_id, property_keyframes,
+    },
     time::{
         BeatDivision, MusicalTick, PPQ, ProjectTimeNs, TempoMap, floor_tick_position_to_grid,
         snap_tick_position_to_grid,
@@ -13,6 +16,8 @@ use rhythm_engine::waveform::{WaveformData, WaveformSlice};
 
 const RULER_ROW_HEIGHT: f32 = 28.0;
 const WAVEFORM_ROW_HEIGHT: f32 = 64.0;
+const CURVE_EDITOR_HEIGHT: f32 = 204.0;
+const CURVE_SAMPLE_COUNT: usize = 64;
 const MIN_RULER_LABEL_SPACING_PX: f32 = 72.0;
 const MAX_GRID_LINES_PER_FRAME: usize = 100_000;
 
@@ -634,6 +639,223 @@ struct MusicalGridLine {
     kind: MusicalGridLineKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct CurveEditorSegment {
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    from: PropertyKeyframe,
+    to: PropertyKeyframe,
+}
+
+fn selected_curve_editor_segment(
+    session: &EditorSession,
+    project: &Project,
+) -> Option<CurveEditorSegment> {
+    let selected = session.selected_keyframe_ids();
+    if selected.len() != 1 {
+        return None;
+    }
+
+    let located = locate_property_keyframe(project, selected[0])?;
+    let keyframes = property_keyframes(project, located.object_id, located.property).ok()?;
+    let from_index = keyframes
+        .iter()
+        .position(|keyframe| keyframe.id == located.keyframe.id)?;
+    let to = *keyframes.get(from_index + 1)?;
+
+    Some(CurveEditorSegment {
+        object_id: located.object_id,
+        property: located.property,
+        from: located.keyframe,
+        to,
+    })
+}
+
+fn curve_editor_point(rect: egui::Rect, x: f32, y: f32) -> egui::Pos2 {
+    egui::pos2(
+        rect.left() + x * rect.width(),
+        rect.bottom() - y * rect.height(),
+    )
+}
+
+fn interpolation_label(interpolation: Interpolation) -> &'static str {
+    match interpolation {
+        Interpolation::Hold => "Hold",
+        Interpolation::Linear => "Linear",
+        Interpolation::CubicBezier(_) => "Cubic Bezier",
+    }
+}
+
+fn draw_curve_editor(
+    ui: &mut egui::Ui,
+    session: &EditorSession,
+    project: &Project,
+    rows: &[TimelineRow<'_>],
+) {
+    let Some(segment) = selected_curve_editor_segment(session, project) else {
+        return;
+    };
+
+    ui.add_space(6.0);
+    let (panel_rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), CURVE_EDITOR_HEIGHT),
+        egui::Sense::hover(),
+    );
+    let painter = ui.painter();
+    let visuals = ui.visuals();
+    let foreground = visuals.widgets.noninteractive.fg_stroke.color;
+    let background = visuals.widgets.noninteractive.bg_fill;
+
+    painter.rect_filled(panel_rect, 4.0, background);
+    painter.rect_stroke(
+        panel_rect,
+        4.0,
+        egui::Stroke::new(1.0, foreground.gamma_multiply(0.22)),
+        egui::StrokeKind::Inside,
+    );
+
+    let object_name = project
+        .composition
+        .objects
+        .iter()
+        .find(|object| object.id == segment.object_id)
+        .map_or("Object", |object| object.name.as_str());
+    let property_label = rows
+        .iter()
+        .find_map(|row| match row {
+            TimelineRow::Property {
+                object_id,
+                property,
+                ..
+            } if *object_id == segment.object_id
+                && property.animatable_property() == segment.property =>
+            {
+                Some(property.label())
+            }
+            _ => None,
+        })
+        .unwrap_or("Property");
+
+    painter.text(
+        egui::pos2(panel_rect.left() + 10.0, panel_rect.top() + 8.0),
+        egui::Align2::LEFT_TOP,
+        format!("Curve Editor · {object_name} · {property_label}"),
+        egui::FontId::proportional(12.0),
+        foreground,
+    );
+    painter.text(
+        egui::pos2(panel_rect.right() - 10.0, panel_rect.top() + 8.0),
+        egui::Align2::RIGHT_TOP,
+        format!(
+            "{} → {} · {}",
+            segment.from.tick.get(),
+            segment.to.tick.get(),
+            interpolation_label(segment.from.interpolation)
+        ),
+        egui::FontId::monospace(11.0),
+        visuals.weak_text_color(),
+    );
+
+    let graph_rect = egui::Rect::from_min_max(
+        egui::pos2(panel_rect.left() + 36.0, panel_rect.top() + 36.0),
+        egui::pos2(panel_rect.right() - 18.0, panel_rect.bottom() - 24.0),
+    );
+    painter.rect_stroke(
+        graph_rect,
+        0.0,
+        egui::Stroke::new(1.0, foreground.gamma_multiply(0.3)),
+        egui::StrokeKind::Inside,
+    );
+
+    for step in 1..4 {
+        let fraction = step as f32 / 4.0;
+        let x = graph_rect.left() + fraction * graph_rect.width();
+        let y = graph_rect.bottom() - fraction * graph_rect.height();
+        let grid_stroke = egui::Stroke::new(1.0, foreground.gamma_multiply(0.12));
+        painter.line_segment(
+            [egui::pos2(x, graph_rect.top()), egui::pos2(x, graph_rect.bottom())],
+            grid_stroke,
+        );
+        painter.line_segment(
+            [egui::pos2(graph_rect.left(), y), egui::pos2(graph_rect.right(), y)],
+            grid_stroke,
+        );
+    }
+
+    let start = curve_editor_point(graph_rect, 0.0, 0.0);
+    let end = curve_editor_point(graph_rect, 1.0, 1.0);
+    let curve_stroke = egui::Stroke::new(2.0, visuals.selection.stroke.color);
+
+    match segment.from.interpolation {
+        Interpolation::Hold => {
+            let corner = curve_editor_point(graph_rect, 1.0, 0.0);
+            painter.line_segment([start, corner], curve_stroke);
+            painter.line_segment([corner, end], curve_stroke);
+            painter.text(
+                graph_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Hold has no editable Bezier handles",
+                egui::FontId::proportional(12.0),
+                visuals.weak_text_color(),
+            );
+        }
+        Interpolation::Linear => {
+            painter.line_segment([start, end], curve_stroke);
+            painter.text(
+                egui::pos2(graph_rect.left() + 8.0, graph_rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                "Linear timing",
+                egui::FontId::proportional(11.0),
+                visuals.weak_text_color(),
+            );
+        }
+        Interpolation::CubicBezier(easing) => {
+            let mut points = Vec::with_capacity(CURVE_SAMPLE_COUNT + 1);
+            for sample in 0..=CURVE_SAMPLE_COUNT {
+                let x = sample as f32 / CURVE_SAMPLE_COUNT as f32;
+                let y = evaluate_bezier_easing(easing, f64::from(x)) as f32;
+                points.push(curve_editor_point(graph_rect, x, y));
+            }
+            painter.add(egui::Shape::line(points, curve_stroke));
+
+            let first_handle = curve_editor_point(graph_rect, easing.x1(), easing.y1());
+            let second_handle = curve_editor_point(graph_rect, easing.x2(), easing.y2());
+            let guide_stroke = egui::Stroke::new(1.0, foreground.gamma_multiply(0.45));
+            painter.line_segment([start, first_handle], guide_stroke);
+            painter.line_segment([end, second_handle], guide_stroke);
+            painter.circle_filled(first_handle, 5.0, visuals.selection.bg_fill);
+            painter.circle_stroke(
+                first_handle,
+                5.0,
+                egui::Stroke::new(1.0, visuals.selection.stroke.color),
+            );
+            painter.circle_filled(second_handle, 5.0, visuals.selection.bg_fill);
+            painter.circle_stroke(
+                second_handle,
+                5.0,
+                egui::Stroke::new(1.0, visuals.selection.stroke.color),
+            );
+
+            painter.text(
+                egui::pos2(graph_rect.left() + 8.0, graph_rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                format!(
+                    "P1 ({:.2}, {:.2})   P2 ({:.2}, {:.2})",
+                    easing.x1(),
+                    easing.y1(),
+                    easing.x2(),
+                    easing.y2()
+                ),
+                egui::FontId::monospace(11.0),
+                visuals.weak_text_color(),
+            );
+        }
+    }
+
+    painter.circle_filled(start, 3.0, foreground);
+    painter.circle_filled(end, 3.0, foreground);
+}
+
 pub fn draw_timeline(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
@@ -732,6 +954,7 @@ pub fn draw_timeline(
         draw_empty_state_label(ui, ruler_rect, "Set BPM to enable rhythm grid");
     }
     draw_playhead(ui, grid_rect, ruler_transform, session.playhead());
+    draw_curve_editor(ui, session, project, &rows);
     draw_timeline_rows(ui, session, &rows, project, tempo_map, ruler_transform);
 }
 
@@ -1469,12 +1692,109 @@ mod tests {
     use super::{
         MusicalGridLineKind, TimelineRow, TimelineRowLayout, TimelineTransform,
         build_waveform_mesh, collect_musical_grid_lines, query_visible_keyframes,
-        timeline_empty_states,
+        selected_curve_editor_segment, timeline_empty_states,
     };
     use rhythm_core::time::{
         BeatDivision, BpmMicros, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
     };
     use rhythm_engine::waveform::{WavePeak, WaveformSlice};
+
+    #[test]
+    fn curve_editor_uses_one_selected_outgoing_segment() {
+        use crate::editor_session::EditorSession;
+        use rhythm_core::{
+            animation::{Animated, BezierEasing, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            ids::{KeyframeId, ObjectId},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, MusicalTick, TempoMap},
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let first = KeyframeId::new(11).expect("first key id");
+        let second = KeyframeId::new(12).expect("second key id");
+        let terminal = KeyframeId::new(13).expect("terminal key id");
+        let mut project = Project::new(
+            "Curve",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id: object_id,
+            name: "Rect".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(Vec2::new(0.0, 0.0).expect("position")),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::with_keyframes(
+                    1.0,
+                    vec![
+                        Keyframe::new(
+                            first,
+                            MusicalTick::new(0),
+                            0.0,
+                            Interpolation::CubicBezier(BezierEasing::EASE_IN),
+                        ),
+                        Keyframe::new(
+                            second,
+                            MusicalTick::new(240),
+                            0.5,
+                            Interpolation::Linear,
+                        ),
+                        Keyframe::new(
+                            terminal,
+                            MusicalTick::new(480),
+                            1.0,
+                            Interpolation::Linear,
+                        ),
+                    ],
+                )
+                .expect("unique opacity keys"),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(100.0, 50.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+
+        let mut session = EditorSession::default();
+        session.select_only_keyframe(first);
+        let segment = selected_curve_editor_segment(&session, &project).expect("outgoing segment");
+        assert_eq!(segment.object_id, object_id);
+        assert_eq!(segment.from.id, first);
+        assert_eq!(segment.to.id, second);
+        assert_eq!(
+            segment.from.interpolation,
+            Interpolation::CubicBezier(BezierEasing::EASE_IN)
+        );
+
+        session.select_only_keyframe(terminal);
+        assert!(selected_curve_editor_segment(&session, &project).is_none());
+
+        session.select_only_keyframe(first);
+        session.toggle_keyframe_selection(second);
+        assert!(selected_curve_editor_segment(&session, &project).is_none());
+    }
+
+    #[test]
+    fn curve_editor_normalized_points_map_to_graph_corners() {
+        let rect = egui::Rect::from_min_max(egui::pos2(10.0, 20.0), egui::pos2(110.0, 220.0));
+
+        assert_eq!(super::curve_editor_point(rect, 0.0, 0.0), egui::pos2(10.0, 220.0));
+        assert_eq!(super::curve_editor_point(rect, 1.0, 1.0), egui::pos2(110.0, 20.0));
+        assert_eq!(
+            super::curve_editor_point(rect, 0.25, 0.75),
+            egui::pos2(35.0, 70.0)
+        );
+    }
 
     #[test]
     fn box_selection_collects_key_centers_inside_rect() {
