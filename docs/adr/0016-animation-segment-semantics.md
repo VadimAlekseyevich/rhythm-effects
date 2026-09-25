@@ -22,7 +22,7 @@ For adjacent keyframes A and B:
 - Color interpolates component-wise in the canonical linear-light representation;
 - discrete properties use Hold semantics.
 
-Preset easing resolves to canonical Bezier parameters.
+Preset easing resolves to canonical Bezier parameters: Ease In `(0.42, 0.0, 1.0, 1.0)`, Ease Out `(0.0, 0.0, 0.58, 1.0)`, and Ease In-Out `(0.42, 0.0, 0.58, 1.0)`.
 
 ## Consequences
 
