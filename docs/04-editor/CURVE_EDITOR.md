@@ -44,12 +44,9 @@ Suggested working height: about 180–220 logical px.
 
 Custom curve editor targets one active outgoing segment at a time.
 
-If multiple keyframes are selected:
+The contextual panel is shown when exactly one selected keyframe owns an outgoing segment. Selecting a terminal keyframe or keeping a multi-key selection leaves the custom panel hidden; preset easing remains available for multi-selection.
 
-- preset easing can apply to all compatible outgoing segments;
-- custom handle editing requires one primary segment.
-
-This avoids ambiguous multi-curve handle manipulation.
+This avoids ambiguous multi-curve handle manipulation without introducing a hidden primary-key state.
 
 ## 5. Handles
 
