@@ -348,7 +348,7 @@ pub fn interpolate_hold<T: Clone>(from: &T, to: &T, progress: f64) -> T {
 
 #[cfg(test)]
 mod tests {
-    use super::{Animated, AnimationInvariantError, Interpolation, Keyframe};
+    use super::{Animated, AnimationInvariantError, BezierEasing, Interpolation, Keyframe};
     use crate::{ids::KeyframeId, time::MusicalTick};
 
     fn keyframe(id: u64, tick: i64, value: f32) -> Keyframe<f32> {
