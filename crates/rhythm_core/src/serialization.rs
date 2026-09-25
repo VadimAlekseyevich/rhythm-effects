@@ -62,6 +62,37 @@ pub fn parse_project_file_v1(bytes: &[u8]) -> Result<ProjectFileV1, ProjectFileP
     serde_json::from_str(json).map_err(ProjectFileParseError::InvalidJson)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsupportedNewerSchemaVersion {
+    pub found: u32,
+    pub supported: u32,
+}
+
+impl fmt::Display for UnsupportedNewerSchemaVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "project schema version {} is newer than supported version {}",
+            self.found, self.supported
+        )
+    }
+}
+
+impl Error for UnsupportedNewerSchemaVersion {}
+
+pub fn reject_newer_project_schema(
+    candidate: ProjectFileV1,
+) -> Result<ProjectFileV1, UnsupportedNewerSchemaVersion> {
+    if candidate.schema_version > PROJECT_SCHEMA_VERSION_V1 {
+        return Err(UnsupportedNewerSchemaVersion {
+            found: candidate.schema_version,
+            supported: PROJECT_SCHEMA_VERSION_V1,
+        });
+    }
+
+    Ok(candidate)
+}
+
 pub fn validate_project_file_v1_candidate(
     candidate: ProjectFileV1,
 ) -> Result<ProjectFileV1, ProjectValidationError> {
@@ -333,6 +364,49 @@ mod tests {
         let parsed = super::parse_project_file_v1(&json).expect("parser returns candidate");
 
         assert_eq!(parsed.schema_version, 99);
+    }
+
+    #[test]
+    fn reject_newer_project_schema_accepts_current_v1_candidate() {
+        let file = ProjectFileV1::new(project(), "0.1.0-test");
+
+        let accepted = super::reject_newer_project_schema(file.clone()).expect("schema V1");
+
+        assert_eq!(accepted, file);
+    }
+
+    #[test]
+    fn reject_newer_project_schema_reports_found_and_supported_versions() {
+        let mut file = ProjectFileV1::new(project(), "future");
+        file.schema_version = PROJECT_SCHEMA_VERSION_V1 + 1;
+
+        let error =
+            super::reject_newer_project_schema(file).expect_err("newer schema must be rejected");
+
+        assert_eq!(
+            error,
+            super::UnsupportedNewerSchemaVersion {
+                found: PROJECT_SCHEMA_VERSION_V1 + 1,
+                supported: PROJECT_SCHEMA_VERSION_V1,
+            }
+        );
+        assert!(error.to_string().contains("newer than supported"));
+    }
+
+    #[test]
+    fn parsed_future_schema_is_rejected_before_semantic_validation() {
+        let mut value = serde_json::to_value(ProjectFileV1::new(project(), "future"))
+            .expect("serialize fixture");
+        value["schema_version"] = serde_json::json!(99);
+        value["project"]["settings"]["composition_width"] = serde_json::json!(1);
+        let json = serde_json::to_vec(&value).expect("serialize future schema fixture");
+
+        let parsed = super::parse_project_file_v1(&json).expect("parser returns candidate");
+        let error =
+            super::reject_newer_project_schema(parsed).expect_err("future schema rejected first");
+
+        assert_eq!(error.found, 99);
+        assert_eq!(error.supported, PROJECT_SCHEMA_VERSION_V1);
     }
 
     #[test]
