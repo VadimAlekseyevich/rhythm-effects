@@ -224,6 +224,12 @@ Fast preset access through context/command/curve UI.
 
 Hold, Linear, Ease In, Ease Out, and Ease In-Out context actions apply to every selected keyframe that owns an outgoing segment. A selected terminal keyframe is left unchanged because it has no outgoing segment.
 
+The MVP preset curves use canonical cubic-Bezier control points:
+
+- Ease In: `(0.42, 0.0, 1.0, 1.0)`;
+- Ease Out: `(0.0, 0.0, 0.58, 1.0)`;
+- Ease In-Out: `(0.42, 0.0, 0.58, 1.0)`.
+
 Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
 ## 21. Playback follow
