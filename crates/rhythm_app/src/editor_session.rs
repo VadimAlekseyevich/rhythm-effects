@@ -3154,9 +3154,7 @@ impl EditorSession {
         let x = x.clamp(0.0, 1.0);
         let y = y.clamp(0.0, 1.0);
         let easing = match drag.handle {
-            CurveEditorHandle::First => {
-                BezierEasing::new(x, y, drag.easing.x2(), drag.easing.y2())
-            }
+            CurveEditorHandle::First => BezierEasing::new(x, y, drag.easing.x2(), drag.easing.y2()),
             CurveEditorHandle::Second => {
                 BezierEasing::new(drag.easing.x1(), drag.easing.y1(), x, y)
             }
