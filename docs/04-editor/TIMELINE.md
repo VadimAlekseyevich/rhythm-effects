@@ -230,6 +230,8 @@ The MVP preset curves use canonical cubic-Bezier control points:
 - Ease Out: `(0.0, 0.0, 0.58, 1.0)`;
 - Ease In-Out: `(0.42, 0.0, 0.58, 1.0)`.
 
+Selecting exactly one non-terminal keyframe reveals the contextual Curve Editor above the key rows. It visualizes only that outgoing segment: Hold as a step, Linear as the exact diagonal, and CubicBezier using the engine timing evaluator plus its two control points.
+
 Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
 ## 21. Playback follow
