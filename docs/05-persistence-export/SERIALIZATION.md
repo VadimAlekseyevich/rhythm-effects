@@ -25,6 +25,8 @@ ProjectFileV1 {
 }
 ~~~
 
+The schema wrapper lives in `rhythm_core::serialization`. Its schema version is fixed independently from the application/package version; serde support for the wrapper and all nested semantic types is introduced by the following serialization task.
+
 Unknown future schema versions fail safely without modifying the current/open file.
 
 ## 3. Persisted state
