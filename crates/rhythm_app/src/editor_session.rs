@@ -5373,6 +5373,22 @@ mod tests {
     }
 
     #[test]
+    fn easing_presets_resolve_to_core_canonical_curves() {
+        assert_eq!(
+            KeyframeInterpolationPreset::EaseIn.interpolation(),
+            Interpolation::CubicBezier(BezierEasing::EASE_IN)
+        );
+        assert_eq!(
+            KeyframeInterpolationPreset::EaseOut.interpolation(),
+            Interpolation::CubicBezier(BezierEasing::EASE_OUT)
+        );
+        assert_eq!(
+            KeyframeInterpolationPreset::EaseInOut.interpolation(),
+            Interpolation::CubicBezier(BezierEasing::EASE_IN_OUT)
+        );
+    }
+
+    #[test]
     fn duplicate_repeats_pattern_after_current_grid_gap_and_selects_duplicates() {
         use rhythm_core::{
             property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
