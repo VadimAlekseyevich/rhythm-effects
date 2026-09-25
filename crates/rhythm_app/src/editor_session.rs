@@ -5374,6 +5374,8 @@ mod tests {
 
     #[test]
     fn easing_presets_resolve_to_core_canonical_curves() {
+        use rhythm_core::animation::{BezierEasing, Interpolation};
+
         assert_eq!(
             KeyframeInterpolationPreset::EaseIn.interpolation(),
             Interpolation::CubicBezier(BezierEasing::EASE_IN)
