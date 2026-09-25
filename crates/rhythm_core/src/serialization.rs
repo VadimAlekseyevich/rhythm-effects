@@ -369,7 +369,10 @@ mod tests {
         let error = super::validate_project_file_v1_candidate(file)
             .expect_err("next entity id must stay above allocated ids");
 
-        assert_eq!(error, crate::project::ProjectValidationError::InvalidNextEntityId);
+        assert_eq!(
+            error,
+            crate::project::ProjectValidationError::InvalidNextEntityId
+        );
     }
 
     #[test]
