@@ -56,9 +56,9 @@ Pointer coordinates are normalized against the graph and clamped independently t
 
 Hit areas are larger than visible points.
 
-While dragging, the Curve Editor previews the constrained timing curve and handle values. The released value is then queued as the keyframe interpolation change.
+While dragging, the constrained easing is applied through a ProjectEditor transaction, so both the Curve Editor and the current scene preview reflect the transient curve immediately.
 
-Dragging becomes one history transaction with Escape restore in the next dedicated interaction task.
+One handle drag creates at most one history entry on pointer release. Escape cancels the active transaction, restores the exact interpolation captured at drag start, and creates no history entry.
 
 ## 6. Live preview
 
