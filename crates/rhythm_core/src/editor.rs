@@ -5377,9 +5377,9 @@ mod tests {
             BezierEasing::new(0.1, 0.4, 0.9, 0.6).expect("easing"),
         ] {
             editor
-                .update_property_keyframe_interpolation_transaction(
-                    Interpolation::CubicBezier(easing),
-                )
+                .update_property_keyframe_interpolation_transaction(Interpolation::CubicBezier(
+                    easing,
+                ))
                 .expect("preview");
         }
 
