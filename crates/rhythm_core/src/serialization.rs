@@ -93,6 +93,62 @@ pub fn reject_newer_project_schema(
     Ok(candidate)
 }
 
+/// A compatibility failure while bringing a parsed project to the current schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectFileMigrationError {
+    UnsupportedOlderSchemaVersion {
+        found: u32,
+        oldest_supported: u32,
+    },
+    UnsupportedNewerSchemaVersion(UnsupportedNewerSchemaVersion),
+}
+
+impl fmt::Display for ProjectFileMigrationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedOlderSchemaVersion {
+                found,
+                oldest_supported,
+            } => write!(
+                formatter,
+                "project schema version {found} is older than supported version {oldest_supported}"
+            ),
+            Self::UnsupportedNewerSchemaVersion(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl Error for ProjectFileMigrationError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::UnsupportedOlderSchemaVersion { .. } => None,
+            Self::UnsupportedNewerSchemaVersion(error) => Some(error),
+        }
+    }
+}
+
+/// Brings a detached schema candidate to the current persisted schema.
+///
+/// V1 is the first shipped schema, so its migration is currently the identity.
+/// When V2 is introduced, add a distinct ProjectFileV2 and an explicit V1 -> V2
+/// conversion at this dispatcher, then chain one adjacent version at a time.
+/// Never relabel the version number or deserialize old files as newer structs.
+/// Semantic validation is the subsequent, separate load stage.
+pub fn migrate_project_file_to_current(
+    candidate: ProjectFileV1,
+) -> Result<ProjectFileV1, ProjectFileMigrationError> {
+    let candidate = reject_newer_project_schema(candidate)
+        .map_err(ProjectFileMigrationError::UnsupportedNewerSchemaVersion)?;
+
+    match candidate.schema_version {
+        PROJECT_SCHEMA_VERSION_V1 => Ok(candidate),
+        found => Err(ProjectFileMigrationError::UnsupportedOlderSchemaVersion {
+            found,
+            oldest_supported: PROJECT_SCHEMA_VERSION_V1,
+        }),
+    }
+}
+
 pub fn validate_project_file_v1_candidate(
     candidate: ProjectFileV1,
 ) -> Result<ProjectFileV1, ProjectValidationError> {
