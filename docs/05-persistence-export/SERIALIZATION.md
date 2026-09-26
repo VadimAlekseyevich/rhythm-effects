@@ -135,6 +135,8 @@ A failed Save As leaves previous project path/state unchanged.
 
 ## 10. Load transaction
 
+`rhythm_core::serialization::parse_project_file_v1` decodes `.rhfx` bytes as UTF-8 and deserializes JSON into a detached `ProjectFileV1` candidate. It reports invalid UTF-8 separately from malformed or structurally incompatible JSON. Parsing does not validate creative semantics, decide version compatibility, migrate a file, or replace the active project; those are subsequent load steps.
+
 ~~~text
 read bytes
 -> parse wrapper/version
