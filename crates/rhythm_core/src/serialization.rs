@@ -96,10 +96,7 @@ pub fn reject_newer_project_schema(
 /// A compatibility failure while bringing a parsed project to the current schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectFileMigrationError {
-    UnsupportedOlderSchemaVersion {
-        found: u32,
-        oldest_supported: u32,
-    },
+    UnsupportedOlderSchemaVersion { found: u32, oldest_supported: u32 },
     UnsupportedNewerSchemaVersion(UnsupportedNewerSchemaVersion),
 }
 
@@ -113,7 +110,7 @@ impl fmt::Display for ProjectFileMigrationError {
                 formatter,
                 "project schema version {found} is older than supported version {oldest_supported}"
             ),
-            Self::UnsupportedNewerSchemaVersion(error) => error.fmt(formatter),
+            Self::UnsupportedNewerSchemaVersion(error) => fmt::Display::fmt(error, formatter),
         }
     }
 }
@@ -469,8 +466,7 @@ mod tests {
     fn current_v1_migration_preserves_the_complete_candidate() {
         let file = ProjectFileV1::new(schema_project(), "created-in-0.1.0");
 
-        let migrated =
-            super::migrate_project_file_to_current(file.clone()).expect("V1 is current");
+        let migrated = super::migrate_project_file_to_current(file.clone()).expect("V1 is current");
 
         assert_eq!(migrated, file);
         assert_eq!(migrated.schema_version, PROJECT_SCHEMA_VERSION_V1);
