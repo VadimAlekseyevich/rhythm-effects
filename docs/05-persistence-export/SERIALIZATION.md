@@ -164,6 +164,8 @@ V1 -> V2 -> V3 -> current
 
 Every historical schema that shipped publicly keeps a fixture.
 
+`migrate_project_file_to_current` is the versioned, detached migration entry point in `rhythm_core::serialization`. Only V1 exists today, so V1 -> current is a lossless identity step. The entry point refuses unknown newer schemas and refuses unshipped older schemas (including version 0); it never rewrites `schema_version` merely to make a document appear current. A future V2 must have its own persisted type and an explicit V1 -> V2 conversion, chained one adjacent version at a time. Project semantic validation follows migration as a separate gate.
+
 Do not deserialize old versions directly into whatever current structs happen to be.
 
 ## 12. Compatibility
