@@ -28,9 +28,45 @@ impl ProjectFileV1 {
     }
 }
 
+/// A structural parse error. Semantic validation and schema compatibility are separate load steps.
+#[derive(Debug)]
+pub enum ProjectFileParseError {
+    InvalidUtf8(std::str::Utf8Error),
+    InvalidJson(serde_json::Error),
+}
+
+impl std::fmt::Display for ProjectFileParseError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidUtf8(error) => write!(formatter, "project file is not UTF-8: {error}"),
+            Self::InvalidJson(error) => write!(formatter, "invalid project JSON: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for ProjectFileParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidUtf8(error) => Some(error),
+            Self::InvalidJson(error) => Some(error),
+        }
+    }
+}
+
+/// Parses .rhfx bytes into a detached V1 candidate without modifying an active editor.
+///
+/// This checks UTF-8 and the JSON/schema shape only. Version compatibility, semantic
+/// validation, migrations, and active-project replacement belong to later load steps.
+pub fn parse_project_file_v1(bytes: &[u8]) -> Result<ProjectFileV1, ProjectFileParseError> {
+    let text = std::str::from_utf8(bytes).map_err(ProjectFileParseError::InvalidUtf8)?;
+    serde_json::from_str(text).map_err(ProjectFileParseError::InvalidJson)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PROJECT_SCHEMA_VERSION_V1, ProjectFileV1};
+    use super::{
+        PROJECT_SCHEMA_VERSION_V1, ProjectFileParseError, ProjectFileV1, parse_project_file_v1,
+    };
     use crate::{
         animation::{Animated, BezierEasing, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
@@ -283,6 +319,52 @@ mod tests {
             .project
             .validate()
             .expect("round-trip project valid");
+    }
+
+    #[test]
+    fn rhfx_parser_produces_detached_candidate_from_utf8_json() {
+        let mut project = schema_project();
+        project.metadata.name = "Ритм ♪".to_owned();
+        let source = ProjectFileV1::new(project, "0.1.0-test");
+        let bytes = serde_json::to_vec(&source).expect("encode project");
+
+        let candidate = parse_project_file_v1(&bytes).expect("parse candidate");
+
+        assert_eq!(candidate, source);
+        assert_eq!(candidate.project.metadata.name, "Ритм ♪");
+        candidate.project.validate().expect("valid candidate");
+    }
+
+    #[test]
+    fn rhfx_parser_reports_invalid_utf8_separately_from_json() {
+        let result = parse_project_file_v1(&[b'{', 0xff, b'}']);
+
+        assert!(matches!(result, Err(ProjectFileParseError::InvalidUtf8(_))));
+    }
+
+    #[test]
+    fn rhfx_parser_rejects_truncated_and_wrong_shape_json() {
+        for bytes in [
+            b"{\"schema_version\":1,\"project\":{".as_slice(),
+            b"{}".as_slice(),
+            b"{\"schema_version\":1} trailing".as_slice(),
+        ] {
+            let result = parse_project_file_v1(bytes);
+            assert!(matches!(result, Err(ProjectFileParseError::InvalidJson(_))));
+        }
+    }
+
+    #[test]
+    fn rhfx_parser_does_not_prematurely_apply_semantic_validation() {
+        let mut project = schema_project();
+        project.settings.composition_width = 0;
+        let bytes =
+            serde_json::to_vec(&ProjectFileV1::new(project, "0.1.0-test")).expect("encode");
+
+        let candidate = parse_project_file_v1(&bytes).expect("structurally valid candidate");
+
+        assert_eq!(candidate.project.settings.composition_width, 0);
+        assert!(candidate.project.validate().is_err());
     }
 
     #[test]
