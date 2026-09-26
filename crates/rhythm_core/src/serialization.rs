@@ -466,6 +466,83 @@ mod tests {
     }
 
     #[test]
+    fn current_v1_migration_preserves_the_complete_candidate() {
+        let file = ProjectFileV1::new(schema_project(), "created-in-0.1.0");
+
+        let migrated =
+            super::migrate_project_file_to_current(file.clone()).expect("V1 is current");
+
+        assert_eq!(migrated, file);
+        assert_eq!(migrated.schema_version, PROJECT_SCHEMA_VERSION_V1);
+        assert_eq!(migrated.created_with_version, "created-in-0.1.0");
+    }
+
+    #[test]
+    fn migration_rejects_unshipped_older_schema_instead_of_relabeling_it() {
+        let mut file = ProjectFileV1::new(project(), "pre-v1");
+        file.schema_version = 0;
+
+        let error =
+            super::migrate_project_file_to_current(file).expect_err("no V0 migration exists");
+
+        assert_eq!(
+            error,
+            super::ProjectFileMigrationError::UnsupportedOlderSchemaVersion {
+                found: 0,
+                oldest_supported: PROJECT_SCHEMA_VERSION_V1,
+            }
+        );
+        assert!(error.to_string().contains("older than supported"));
+    }
+
+    #[test]
+    fn migration_rejects_future_schema_before_any_conversion() {
+        let mut file = ProjectFileV1::new(project(), "future");
+        file.schema_version = PROJECT_SCHEMA_VERSION_V1 + 1;
+
+        let error =
+            super::migrate_project_file_to_current(file).expect_err("future schema unsupported");
+
+        assert_eq!(
+            error,
+            super::ProjectFileMigrationError::UnsupportedNewerSchemaVersion(
+                super::UnsupportedNewerSchemaVersion {
+                    found: PROJECT_SCHEMA_VERSION_V1 + 1,
+                    supported: PROJECT_SCHEMA_VERSION_V1,
+                }
+            )
+        );
+        assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn migration_does_not_skip_the_subsequent_semantic_validation_gate() {
+        let mut file = ProjectFileV1::new(project(), "0.1.0");
+        file.project.settings.composition_width = 1;
+
+        let migrated =
+            super::migrate_project_file_to_current(file.clone()).expect("V1 schema migrates");
+
+        assert_eq!(migrated, file);
+        assert_eq!(
+            super::validate_project_file_v1_candidate(migrated).expect_err("invalid dimensions"),
+            crate::project::ProjectValidationError::InvalidCompositionDimensions
+        );
+    }
+
+    #[test]
+    fn utf8_parse_then_migrate_then_semantic_validation_preserves_v1() {
+        let file = ProjectFileV1::new(schema_project(), "0.1.0");
+        let bytes = serde_json::to_vec(&file).expect("serialize test file");
+
+        let parsed = super::parse_project_file_v1(&bytes).expect("parse V1");
+        let migrated = super::migrate_project_file_to_current(parsed).expect("migrate V1");
+        let validated = super::validate_project_file_v1_candidate(migrated).expect("validate V1");
+
+        assert_eq!(validated, file);
+    }
+
+    #[test]
     fn validate_project_file_v1_candidate_returns_valid_candidate_unchanged() {
         let file = ProjectFileV1::new(schema_project(), "0.1.0-test");
 
