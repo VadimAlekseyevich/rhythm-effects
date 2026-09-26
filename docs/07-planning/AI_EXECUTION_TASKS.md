@@ -263,7 +263,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 - [x] **AI-226** — Implement ProjectFileV1 root wrapper with schema_version=1 and created_with_version.
 - [x] **AI-227** — Implement serde JSON serialization for all schema V1 semantic types.
-- [ ] **AI-228** — Implement .rhfx UTF-8 JSON parsing into a candidate project.
+- [x] **AI-228** — Implement .rhfx UTF-8 JSON parsing into a candidate project.
 - [ ] **AI-229** — Implement load-time semantic validation before active-project replacement.
 - [ ] **AI-230** — Implement rejection of unknown newer schema versions.
 - [ ] **AI-231** — Implement sequential migration framework even though only V1 initially exists.
