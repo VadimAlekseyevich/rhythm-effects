@@ -358,8 +358,7 @@ mod tests {
     fn rhfx_parser_does_not_prematurely_apply_semantic_validation() {
         let mut project = schema_project();
         project.settings.composition_width = 0;
-        let bytes =
-            serde_json::to_vec(&ProjectFileV1::new(project, "0.1.0-test")).expect("encode");
+        let bytes = serde_json::to_vec(&ProjectFileV1::new(project, "0.1.0-test")).expect("encode");
 
         let candidate = parse_project_file_v1(&bytes).expect("structurally valid candidate");
 
