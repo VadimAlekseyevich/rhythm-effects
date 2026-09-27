@@ -156,6 +156,8 @@ After version handling, the candidate must pass `Project::validate()` through th
 
 A broken candidate can never half-mutate currently open work.
 
+`open_project_file_transactional` prepares a complete replacement `ProjectEditor` using parse → schema migration → semantic validation → editor initialization, then swaps it into place only on success. All failures preserve the previous Project and undo/redo/saved-revision state. The app's Open shortcut reads no more than 256 MiB plus one byte before passing input to the parser, and resets ephemeral editor-session state and updates the canonical path only after a successful swap. Until explicit Save is available, opening over dirty work is blocked instead of silently discarding edits.
+
 ## 11. Migration
 
 Migration is sequential:
