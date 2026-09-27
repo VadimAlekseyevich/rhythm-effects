@@ -717,6 +717,189 @@ mod tests {
     }
 
     #[test]
+    fn composition_dimension_and_duration_limits_include_the_upper_boundary() {
+        let mut project = Project::new(
+            "Boundary",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.settings.composition_width = super::MIN_COMPOSITION_DIMENSION;
+        project.settings.composition_height = super::MAX_COMPOSITION_DIMENSION;
+        project.settings.duration = DurationNs::new(MAX_PROJECT_DURATION_NS);
+        assert_eq!(project.validate(), Ok(()));
+
+        project.settings.composition_width = super::MAX_COMPOSITION_DIMENSION + 1;
+        assert_eq!(
+            project.validate(),
+            Err(ProjectValidationError::InvalidCompositionDimensions)
+        );
+        project.settings.composition_width = super::MIN_COMPOSITION_DIMENSION;
+        project.settings.duration = DurationNs::new(MAX_PROJECT_DURATION_NS + 1);
+        assert_eq!(
+            project.validate(),
+            Err(ProjectValidationError::DurationTooLong)
+        );
+    }
+
+    #[test]
+    fn individual_utf8_text_fields_use_byte_length_not_character_count() {
+        let mut project = Project::new(
+            "Boundary",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let at_limit = "é".repeat(super::MAX_USER_TEXT_BYTES / 2);
+        assert_eq!(at_limit.len(), super::MAX_USER_TEXT_BYTES);
+        project.metadata.name = at_limit.clone();
+        assert_eq!(project.validate(), Ok(()));
+
+        project.metadata.name.push('é');
+        assert_eq!(
+            project.validate(),
+            Err(ProjectValidationError::TextTooLong("metadata.name"))
+        );
+
+        project.metadata.name = "Okay".to_owned();
+        let mut object = rectangle_object(1);
+        object.name = at_limit.clone();
+        project.composition.objects.push(object);
+        project.next_entity_id = 2;
+        assert_eq!(project.validate(), Ok(()));
+
+        project.composition.objects[0].name.push('é');
+        assert_eq!(
+            project.validate(),
+            Err(ProjectValidationError::TextTooLong("object.name"))
+        );
+        project.composition.objects[0].name = "Rectangle".to_owned();
+
+        project.assets.push(AssetRecord {
+            id: AssetId::new(2).expect("asset id"),
+            kind: AssetKind::Audio,
+            source: AssetSource::File {
+                path: format!("{at_limit}é"),
+                relative_to_project: true,
+            },
+        });
+        assert_eq!(
+            project.validate(),
+            Err(ProjectValidationError::TextTooLong("asset.source.path"))
+        );
+    }
+
+    #[test]
+    fn text_content_and_font_family_have_independent_utf8_limits() {
+        let at_limit = "é".repeat(super::MAX_USER_TEXT_BYTES / 2);
+        let mut project = Project::new(
+            "Boundary",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut object = rectangle_object(1);
+        object.content = ObjectContent::Text(super::TextObject {
+            text: at_limit.clone(),
+            font: super::FontReference {
+                family: at_limit.clone(),
+                weight: super::FontWeight::Normal,
+                style: super::FontStyle::Normal,
+            },
+            font_size: 12.0,
+            color: Animated::new_static(LinearRgba::black_opaque()),
+            alignment: super::TextAlignment::Left,
+        });
+        project.composition.objects.push(object);
+        project.next_entity_id = 2;
+        assert_eq!(project.validate(), Ok(()));
+
+        let ObjectContent::Text(text) = &mut project.composition.objects[0].content else {
+            panic!("expected text");
+        };
+        text.text.push('é');
+        assert_eq!(
+            project.validate(),
+            Err(ProjectValidationError::TextTooLong("text.text"))
+        );
+
+        let ObjectContent::Text(text) = &mut project.composition.objects[0].content else {
+            panic!("expected text");
+        };
+        text.text = "Okay".to_owned();
+        text.font.family.push('é');
+        assert_eq!(
+            project.validate(),
+            Err(ProjectValidationError::TextTooLong("text.font.family"))
+        );
+    }
+
+    #[test]
+    fn keyframe_budget_accepts_exact_limit_and_rejects_overflow_without_allocation() {
+        let mut budget = super::KeyframeBudget::default();
+        budget
+            .add_count(super::MAX_PROJECT_KEYFRAMES - 1)
+            .expect("below limit");
+        budget.add_count(1).expect("exact limit");
+        assert_eq!(budget.total, super::MAX_PROJECT_KEYFRAMES);
+        budget.add_count(0).expect("empty animated field");
+        assert_eq!(
+            budget.add_count(1),
+            Err(ProjectValidationError::TooManyKeyframes)
+        );
+        assert_eq!(
+            budget.add_count(usize::MAX),
+            Err(ProjectValidationError::TooManyKeyframes)
+        );
+    }
+
+    #[test]
+    fn resource_budget_counts_keyframes_across_transform_content_and_effects() {
+        use crate::{
+            animation::{Interpolation, Keyframe},
+            ids::KeyframeId,
+            time::MusicalTick,
+        };
+
+        let keyed = |id, base: f32| {
+            Animated::with_keyframes(
+                base,
+                vec![Keyframe::new(
+                    KeyframeId::new(id).expect("keyframe id"),
+                    MusicalTick::new(0),
+                    base,
+                    Interpolation::Linear,
+                )],
+            )
+            .expect("unique tick")
+        };
+
+        let mut project = Project::new(
+            "Aggregate",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut object = rectangle_object(1);
+        object.transform.opacity = keyed(2, 0.5);
+        let ObjectContent::Rectangle(rectangle) = &mut object.content else {
+            panic!("expected rectangle");
+        };
+        rectangle.corner_radius = keyed(3, 8.0);
+        object.effects.push(Effect {
+            id: EffectId::new(4).expect("effect id"),
+            enabled: true,
+            kind: EffectKind::Glow(super::GlowEffect {
+                radius_px: keyed(5, 16.0),
+                intensity: keyed(6, 1.0),
+                threshold: keyed(7, 0.5),
+                color: Animated::new_static(LinearRgba::black_opaque()),
+            }),
+        });
+        project.composition.objects.push(object);
+        project.next_entity_id = 8;
+
+        assert_eq!(super::validate_project_resource_limits(&project), Ok(5));
+        assert_eq!(project.validate(), Ok(()));
+    }
+
+    #[test]
     fn validation_rejects_duplicate_shared_ids_and_stale_allocator() {
         let mut project = Project::new(
             "Untitled",
