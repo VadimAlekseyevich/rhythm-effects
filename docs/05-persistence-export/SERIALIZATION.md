@@ -122,8 +122,15 @@ filesystem, then writes to a uniquely named sibling temporary file using
 `create_new` (never truncating the canonical document). Its returned
 `StagedProjectSave` owns the unpublished file; dropping it closes and removes
 the temp file. The serializer does not alter editor history or saved revision.
-Flushing/closing, safe publication and marking the saved revision are separate
-following steps (AI-237–AI-239); staging alone is not a completed Save.
+The AI-237 `StagedProjectSave::flush_and_close` transition flushes the write
+buffer, calls `File::sync_all` for the temporary file, and explicitly closes
+the handle before returning `ClosedProjectSave`. On a flush/sync failure the
+stage is dropped and the unpublished temp is cleaned up, without modifying
+the canonical `.rhfx`. The closed stage remains unpublished and also cleans
+up on drop. Tests verify that the closed temp is renameable on Windows and
+that failed finalization leaves the previous file untouched. Publication and
+marking the saved revision remain separate following steps (AI-238–AI-239);
+staging and closure alone are not a completed Save.
 
 If replacement fails:
 
