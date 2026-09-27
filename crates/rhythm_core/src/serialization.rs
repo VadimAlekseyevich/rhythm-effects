@@ -167,7 +167,9 @@ mod tests {
             RectangleObject, RgbSplitEffect, TextAlignment, TextObject, TintEffect,
             TransformAnimation,
         },
-        time::{BpmMicros, DurationNs, FrameRate, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
+        time::{
+            BpmMicros, DurationNs, FrameRate, GridOffsetNs, MusicalTick, TempoMap, TimeSignature,
+        },
     };
     use serde::{Deserialize, Serialize};
 
@@ -659,14 +661,31 @@ mod tests {
             assert_eq!(restored, original);
             assert_eq!(restored.created_with_version, "0.1.0-creator");
             assert_eq!(restored.project.next_entity_id, 9_007_199_254_740_993);
-            assert_eq!(restored.project.settings.frame_rate, FrameRate::new(30_000, 1_001).expect("rate"));
-            assert_eq!(restored.project.settings.duration, DurationNs::new(12_345_678_901));
             assert_eq!(
-                restored.project.composition.objects.iter().map(|object| object.id.get()).collect::<Vec<_>>(),
+                restored.project.settings.frame_rate,
+                FrameRate::new(30_000, 1_001).expect("rate")
+            );
+            assert_eq!(
+                restored.project.settings.duration,
+                DurationNs::new(12_345_678_901)
+            );
+            assert_eq!(
+                restored
+                    .project
+                    .composition
+                    .objects
+                    .iter()
+                    .map(|object| object.id.get())
+                    .collect::<Vec<_>>(),
                 vec![3, 4, 5, 6]
             );
             assert_eq!(
-                restored.project.assets.iter().map(|asset| asset.id.get()).collect::<Vec<_>>(),
+                restored
+                    .project
+                    .assets
+                    .iter()
+                    .map(|asset| asset.id.get())
+                    .collect::<Vec<_>>(),
                 vec![1, 2]
             );
             assert_eq!(
@@ -686,21 +705,41 @@ mod tests {
 
             let rectangle = &restored.project.composition.objects[0];
             assert_eq!(
-                rectangle.effects.iter().map(|effect| effect.id.get()).collect::<Vec<_>>(),
+                rectangle
+                    .effects
+                    .iter()
+                    .map(|effect| effect.id.get())
+                    .collect::<Vec<_>>(),
                 vec![7, 8, 9, 10, 11]
             );
             assert_eq!(
-                rectangle.transform.position.keyframes().iter().map(|key| (key.id.get(), key.tick.get())).collect::<Vec<_>>(),
+                rectangle
+                    .transform
+                    .position
+                    .keyframes()
+                    .iter()
+                    .map(|key| (key.id.get(), key.tick.get()))
+                    .collect::<Vec<_>>(),
                 vec![(15, -960), (16, 960)]
             );
             let EffectKind::Blur(blur) = &rectangle.effects[0].kind else {
                 panic!("first effect must remain Blur");
             };
             assert_eq!(
-                blur.radius_px.keyframes().iter().map(|key| (key.id.get(), key.tick.get(), key.interpolation)).collect::<Vec<_>>(),
+                blur.radius_px
+                    .keyframes()
+                    .iter()
+                    .map(|key| (key.id.get(), key.tick.get(), key.interpolation))
+                    .collect::<Vec<_>>(),
                 vec![
                     (12, 0, Interpolation::Hold),
-                    (13, 960, Interpolation::CubicBezier(BezierEasing::new(0.25, 0.1, 0.75, 0.9).expect("curve"))),
+                    (
+                        13,
+                        960,
+                        Interpolation::CubicBezier(
+                            BezierEasing::new(0.25, 0.1, 0.75, 0.9).expect("curve")
+                        )
+                    ),
                     (14, 1_920, Interpolation::Linear),
                 ]
             );
@@ -720,7 +759,8 @@ mod tests {
 }}"#
         );
 
-        let parsed = super::parse_project_file_v1(reordered.as_bytes()).expect("parse reordered JSON");
+        let parsed =
+            super::parse_project_file_v1(reordered.as_bytes()).expect("parse reordered JSON");
         let migrated = super::migrate_project_file_to_current(parsed).expect("V1 migration");
         let restored = super::validate_project_file_v1_candidate(migrated).expect("valid document");
 
