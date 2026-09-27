@@ -3,7 +3,7 @@ use crate::{
     project::{MAX_USER_TEXT_BYTES, Project, ProjectValidationError},
 };
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt, str::Utf8Error};
+use std::{error::Error, fmt, io::{self, Write}, str::Utf8Error};
 
 pub const PROJECT_SCHEMA_VERSION_V1: u32 = 1;
 pub const MAX_PROJECT_FILE_BYTES: usize = 256 * 1024 * 1024;
@@ -178,6 +178,84 @@ pub fn validate_project_file_v1_candidate(
     }
     candidate.project.validate()?;
     Ok(candidate)
+}
+
+/// Errors during explicit Save encoding, before any destination or temp file is touched.
+#[derive(Debug)]
+pub enum ProjectFileEncodeError {
+    Validation(ProjectValidationError),
+    Json(serde_json::Error),
+    FileTooLarge { max: usize },
+}
+
+impl fmt::Display for ProjectFileEncodeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Validation(error) => write!(formatter, "invalid project semantics: {error:?}"),
+            Self::Json(error) => write!(formatter, "cannot serialize project JSON: {error}"),
+            Self::FileTooLarge { max } => {
+                write!(formatter, "serialized project exceeds {max}-byte limit")
+            }
+        }
+    }
+}
+
+impl Error for ProjectFileEncodeError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Validation(_) | Self::FileTooLarge { .. } => None,
+            Self::Json(error) => Some(error),
+        }
+    }
+}
+
+/// Bounds JSON serialization without building an oversized temporary Vec first.
+struct LimitedProjectJson {
+    bytes: Vec<u8>,
+    max: usize,
+    limit_exceeded: bool,
+}
+
+impl LimitedProjectJson {
+    fn new(max: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            max,
+            limit_exceeded: false,
+        }
+    }
+}
+
+impl Write for LimitedProjectJson {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.max.saturating_sub(self.bytes.len()) {
+            self.limit_exceeded = true;
+            return Err(io::Error::other("serialized project exceeds size limit"));
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Validate a creative snapshot and encode the current V1 wrapper as bounded UTF-8 JSON.
+/// No editor revision is marked saved, and no filesystem path is modified here.
+pub fn serialize_project_file_v1(project: &Project) -> Result<Vec<u8>, ProjectFileEncodeError> {
+    let candidate = ProjectFileV1::for_current_app(project.clone());
+    let candidate = validate_project_file_v1_candidate(candidate)
+        .map_err(ProjectFileEncodeError::Validation)?;
+    let mut output = LimitedProjectJson::new(MAX_PROJECT_FILE_BYTES);
+    let result = serde_json::to_writer(&mut output, &candidate);
+    if output.limit_exceeded {
+        return Err(ProjectFileEncodeError::FileTooLarge {
+            max: MAX_PROJECT_FILE_BYTES,
+        });
+    }
+    result.map_err(ProjectFileEncodeError::Json)?;
+    Ok(output.bytes)
 }
 
 /// Failures in the detached Open pipeline; none may mutate an active editor.
