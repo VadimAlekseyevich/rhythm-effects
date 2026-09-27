@@ -713,7 +713,11 @@ mod tests {
         let project_json = serde_json::to_string(&original.project).expect("project JSON");
         // Deliberately reverse the wrapper field order and change indentation.
         let reordered = format!(
-            "{{\\n  \\"project\\": {project_json},\\n  \\"created_with_version\\": \\"0.1.0-creator\\",\\n  \\"schema_version\\": 1\\n}}"
+            r#"{{
+  "project": {project_json},
+  "created_with_version": "0.1.0-creator",
+  "schema_version": 1
+}}"#
         );
 
         let parsed = super::parse_project_file_v1(reordered.as_bytes()).expect("parse reordered JSON");
