@@ -271,7 +271,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-233** — Add semantic JSON round-trip equality tests.
 - [x] **AI-234** — Implement the documented project-file safety limits.
 - [x] **AI-235** — Implement transactional Open so failure leaves current Project untouched.
-- [ ] **AI-236** — Implement explicit Save serialization to a sibling temporary file.
+- [x] **AI-236** — Implement explicit Save serialization to a sibling temporary file.
 - [ ] **AI-237** — Flush/close the temporary file before publication.
 - [ ] **AI-238** — Implement Windows-safe replacement/publication preserving the previous known-good file on failure.
 - [ ] **AI-239** — Only update saved_revision after successful publication.
