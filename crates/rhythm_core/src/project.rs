@@ -13,12 +13,16 @@ pub const MIN_COMPOSITION_DIMENSION: u32 = 16;
 pub const MAX_COMPOSITION_DIMENSION: u32 = 8192;
 pub const MAX_PROJECT_DURATION_NS: u64 = 24 * 60 * 60 * 1_000_000_000;
 pub const MAX_PROJECT_OBJECTS: usize = 100_000;
+pub const MAX_USER_TEXT_BYTES: usize = 1024 * 1024;
+pub const MAX_PROJECT_KEYFRAMES: usize = 2_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectValidationError {
     InvalidCompositionDimensions,
     DurationTooLong,
     TooManyObjects,
+    TextTooLong(&'static str),
+    TooManyKeyframes,
     DuplicateEntityId(u64),
     InvalidNextEntityId,
     MissingAssetReference {
@@ -71,6 +75,8 @@ impl Project {
             return Err(ProjectValidationError::TooManyObjects);
         }
 
+        validate_project_resource_limits(self)?;
+
         let mut seen_ids = HashSet::new();
         let mut max_entity_id = 0_u64;
         let mut asset_kinds = HashMap::new();
@@ -116,6 +122,103 @@ impl Project {
             return Err(ProjectValidationError::InvalidNextEntityId);
         }
 
+        Ok(())
+    }
+}
+
+/// Traverses every V1 creative field before the more expensive ID/reference checks.
+/// Count keyframes across the *whole* project, not separately per object or effect.
+fn validate_project_resource_limits(project: &Project) -> Result<usize, ProjectValidationError> {
+    validate_user_text(&project.metadata.name, "metadata.name")?;
+
+    for asset in &project.assets {
+        match &asset.source {
+            AssetSource::File { path, .. } => validate_user_text(path, "asset.source.path")?,
+        }
+    }
+
+    let mut keyframes = KeyframeBudget::default();
+
+    for object in &project.composition.objects {
+        validate_user_text(&object.name, "object.name")?;
+        let transform = &object.transform;
+        keyframes.register(&transform.position)?;
+        keyframes.register(&transform.scale)?;
+        keyframes.register(&transform.rotation_degrees)?;
+        keyframes.register(&transform.anchor)?;
+        keyframes.register(&transform.opacity)?;
+
+        match &object.content {
+            ObjectContent::Rectangle(rectangle) => {
+                keyframes.register(&rectangle.size)?;
+                keyframes.register(&rectangle.fill)?;
+                keyframes.register(&rectangle.corner_radius)?;
+            }
+            ObjectContent::Ellipse(ellipse) => {
+                keyframes.register(&ellipse.size)?;
+                keyframes.register(&ellipse.fill)?;
+            }
+            ObjectContent::Image(_) => {}
+            ObjectContent::Text(text) => {
+                validate_user_text(&text.text, "text.text")?;
+                validate_user_text(&text.font.family, "text.font.family")?;
+                keyframes.register(&text.color)?;
+            }
+        }
+
+        for effect in &object.effects {
+            match &effect.kind {
+                EffectKind::Blur(blur) => keyframes.register(&blur.radius_px)?,
+                EffectKind::Glow(glow) => {
+                    keyframes.register(&glow.radius_px)?;
+                    keyframes.register(&glow.intensity)?;
+                    keyframes.register(&glow.threshold)?;
+                    keyframes.register(&glow.color)?;
+                }
+                EffectKind::Tint(tint) => {
+                    keyframes.register(&tint.color)?;
+                    keyframes.register(&tint.amount)?;
+                }
+                EffectKind::Noise(noise) => {
+                    keyframes.register(&noise.amount)?;
+                    keyframes.register(&noise.size_px)?;
+                    keyframes.register(&noise.evolution)?;
+                }
+                EffectKind::RgbSplit(split) => {
+                    keyframes.register(&split.amount_px)?;
+                    keyframes.register(&split.angle_degrees)?;
+                }
+            }
+        }
+    }
+
+    Ok(keyframes.total)
+}
+
+fn validate_user_text(value: &str, field: &'static str) -> Result<(), ProjectValidationError> {
+    if value.len() > MAX_USER_TEXT_BYTES {
+        Err(ProjectValidationError::TextTooLong(field))
+    } else {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct KeyframeBudget {
+    total: usize,
+}
+
+impl KeyframeBudget {
+    fn register<T>(&mut self, animated: &Animated<T>) -> Result<(), ProjectValidationError> {
+        self.add_count(animated.keyframes().len())
+    }
+
+    fn add_count(&mut self, count: usize) -> Result<(), ProjectValidationError> {
+        if count > MAX_PROJECT_KEYFRAMES.saturating_sub(self.total) {
+            return Err(ProjectValidationError::TooManyKeyframes);
+        }
+
+        self.total += count;
         Ok(())
     }
 }
