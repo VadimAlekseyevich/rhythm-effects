@@ -1067,6 +1067,47 @@ mod tests {
     }
 
     #[test]
+    fn explicit_save_encoding_reloads_the_same_semantic_snapshot() {
+        let original = schema_project();
+        let bytes = super::serialize_project_file_v1(&original).expect("encode validated project");
+        assert!(bytes.len() <= super::MAX_PROJECT_FILE_BYTES);
+
+        let parsed = super::parse_project_file_v1(&bytes).expect("valid UTF-8 schema JSON");
+        let migrated = super::migrate_project_file_to_current(parsed).expect("current schema");
+        let validated =
+            super::validate_project_file_v1_candidate(migrated).expect("valid semantics");
+        assert_eq!(validated.project, original);
+        assert_eq!(validated.schema_version, super::PROJECT_SCHEMA_VERSION_V1);
+        assert_eq!(validated.created_with_version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn encoding_rejects_invalid_snapshot_before_emitting_any_json() {
+        let mut invalid = project();
+        invalid.settings.composition_width = 0;
+        assert!(matches!(
+            super::serialize_project_file_v1(&invalid),
+            Err(super::ProjectFileEncodeError::Validation(
+                crate::project::ProjectValidationError::InvalidCompositionDimensions
+            ))
+        ));
+    }
+
+    #[test]
+    fn bounded_json_writer_accepts_exact_limit_without_allocating_excess() {
+        use std::io::Write;
+        let mut output = super::LimitedProjectJson::new(5);
+        output.write_all(b"123").expect("first chunk");
+        output.write_all(b"45").expect("exact limit");
+        assert_eq!(output.bytes, b"12345");
+        assert!(!output.limit_exceeded);
+        assert!(output.write_all(b"6").is_err());
+        assert!(output.limit_exceeded);
+        assert_eq!(output.bytes, b"12345");
+        assert!(output.write_all(b"overflow").is_err());
+    }
+
+    #[test]
     fn json_uses_semantic_integer_units_and_root_version_fields() {
         let file = ProjectFileV1::new(schema_project(), "0.1.0-test");
         let value = serde_json::to_value(file).expect("serialize value");
