@@ -195,6 +195,8 @@ MVP validation limits are intentionally generous:
 - total object count: maximum 100,000;
 - total serialized keyframes: maximum 2,000,000.
 
+The `parse_project_file_v1` entry point checks the 256 MiB byte budget before UTF-8 decoding or JSON deserialization, returning a distinct `FileTooLarge` parse error. The detached candidate validation checks creator version and every persisted user-authored string by UTF-8 byte count (project/object names, text content, font family and asset source path); `Project::validate` also enforces dimensions, duration, object count, and an aggregate keyframe budget across all transform/content/effect Animated fields. Exact limits are accepted, and an exceeded budget rejects the candidate without changing active work. Count checks use bounded arithmetic. These do not remove the need for an I/O layer to cap the bytes it reads into memory.
+
 These are safety limits, not performance promises.
 
 Renderer/device limits may impose stricter usable dimensions.
