@@ -233,6 +233,8 @@ No project load executes scripts/plugins because MVP has none.
 
 ## 18. Tests
 
+The minimal, versioned V1 fixture lives at `crates/rhythm_core/tests/fixtures/minimal_v1.rhfx`. The integration test loads it through parse → migrate → semantic validation and compares the result against a constructed default project. Preserve this historical fixture when future schemas ship.
+
 - V1 round trip;
 - stable IDs;
 - object/effect/keyframe order;
