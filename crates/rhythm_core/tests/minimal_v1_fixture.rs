@@ -31,3 +31,20 @@ fn committed_minimal_v1_fixture_loads_as_a_valid_semantic_project() {
 
     assert_eq!(validated, expected);
 }
+
+#[test]
+fn committed_fixture_has_semantically_equal_compact_and_pretty_json_round_trips() {
+    let original =
+        parse_project_file_v1(include_bytes!("fixtures/minimal_v1.rhfx")).expect("load fixture");
+    let compact = serde_json::to_vec(&original).expect("compact fixture serialization");
+    let pretty = serde_json::to_vec_pretty(&original).expect("pretty fixture serialization");
+
+    for bytes in [&compact[..], &pretty[..]] {
+        let parsed = parse_project_file_v1(bytes).expect("parse reserialized fixture");
+        let migrated = migrate_project_file_to_current(parsed).expect("migrate V1");
+        let restored =
+            validate_project_file_v1_candidate(migrated).expect("validate reserialized fixture");
+
+        assert_eq!(restored, original);
+    }
+}
