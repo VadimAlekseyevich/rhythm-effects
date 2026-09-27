@@ -1,4 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs::File,
+    io::{self, Read},
+    path::{Path, PathBuf},
+};
+
+use rhythm_core::serialization::MAX_PROJECT_FILE_BYTES;
 
 use rfd::FileDialog;
 
@@ -12,6 +18,16 @@ pub fn pick_project_to_open() -> Option<PathBuf> {
         .set_title("Open Rhythm Effects Project")
         .add_filter("Rhythm Effects Project", &[PROJECT_EXTENSION])
         .pick_file()
+}
+
+/// Read no more than one byte over the parser's .rhfx limit, including for
+/// files with misleading or unavailable filesystem size metadata.
+pub fn read_project_bytes(path: &Path) -> io::Result<Vec<u8>> {
+    let file = File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(MAX_PROJECT_FILE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 #[must_use]
