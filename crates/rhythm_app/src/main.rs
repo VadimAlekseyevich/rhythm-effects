@@ -8,13 +8,17 @@ mod shortcuts;
 mod timeline;
 mod viewport;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
-use rhythm_core::{APP_NAME, domain::Vec2, editor::EditCommand, project::AssetSource};
+use rhythm_core::{
+    APP_NAME, domain::Vec2, editor::EditCommand, project::AssetSource,
+    serialization::open_project_file_transactional,
+};
 use rhythm_engine::renderer::Renderer;
 use shortcuts::{EditorShortcut, ShortcutModifiers, dispatch_physical_shortcut};
 use tracing::{error, info, warn};
@@ -40,6 +44,7 @@ fn fail_startup(
 struct RhythmApp {
     session: EditorSession,
     project_editor: rhythm_core::editor::ProjectEditor,
+    project_path: Option<PathBuf>,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
@@ -66,6 +71,7 @@ impl Default for RhythmApp {
         Self {
             session: EditorSession::default(),
             project_editor,
+            project_path: None,
             window: None,
             gpu: None,
             renderer: None,
@@ -240,12 +246,47 @@ impl ApplicationHandler for RhythmApp {
                                 true
                             }
                             EditorShortcut::OpenProject => {
-                                if let Some(path) = file_dialogs::pick_project_to_open() {
-                                    info!(
-                                        path = %path.display(),
-                                        "project open path selected; transactional loading is implemented in AI-235"
-                                    );
+                                // Until Save is wired, never discard unsaved work silently.
+                                if self.project_editor.is_dirty() {
+                                    warn!("Open cancelled: current project has unsaved edits");
                                     true
+                                } else if let Some(path) = file_dialogs::pick_project_to_open() {
+                                    match file_dialogs::read_project_bytes(&path) {
+                                        Ok(bytes) => {
+                                            match open_project_file_transactional(
+                                                &mut self.project_editor,
+                                                &bytes,
+                                            ) {
+                                                Ok(()) => {
+                                                    // Reset ephemeral selection/playhead/drag state
+                                                    // only after the new editor was committed.
+                                                    self.session = EditorSession::default();
+                                                    self.waveform = None;
+                                                    self.project_path = Some(path);
+                                                    info!(
+                                                        project_path = ?self.project_path,
+                                                        "project opened transactionally"
+                                                    );
+                                                }
+                                                Err(error) => {
+                                                    warn!(
+                                                        path = %path.display(),
+                                                        %error,
+                                                        "Open failed; current project and session preserved"
+                                                    );
+                                                }
+                                            }
+                                            true
+                                        }
+                                        Err(error) => {
+                                            warn!(
+                                                path = %path.display(),
+                                                %error,
+                                                "failed to read project; current project preserved"
+                                            );
+                                            true
+                                        }
+                                    }
                                 } else {
                                     false
                                 }
