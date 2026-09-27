@@ -3,7 +3,12 @@ use crate::{
     project::{MAX_USER_TEXT_BYTES, Project, ProjectValidationError},
 };
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt, io::{self, Write}, str::Utf8Error};
+use std::{
+    error::Error,
+    fmt,
+    io::{self, Write},
+    str::Utf8Error,
+};
 
 pub const PROJECT_SCHEMA_VERSION_V1: u32 = 1;
 pub const MAX_PROJECT_FILE_BYTES: usize = 256 * 1024 * 1024;
