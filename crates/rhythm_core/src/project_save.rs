@@ -291,6 +291,78 @@ mod tests {
     }
 
     #[test]
+    fn flush_sync_and_close_keeps_valid_bytes_without_publishing() {
+        let root = TestDir::new();
+        let destination = root.join("creative.rhfx");
+        fs::write(&destination, b"known-good").expect("existing document");
+        let original = project();
+        let staged = stage_project_file_save(&original, &destination).expect("stage project");
+        let closed = staged.flush_and_close().expect("flush, sync and close");
+
+        assert_eq!(closed.destination(), destination.as_path());
+        assert_eq!(closed.temp_path().parent(), destination.parent());
+        let bytes = fs::read(closed.temp_path()).expect("read closed temporary file");
+        assert_eq!(
+            parse_project_file_v1(&bytes)
+                .expect("parse synchronized V1 document")
+                .project,
+            original
+        );
+        assert_eq!(fs::read(&destination).expect("existing"), b"known-good");
+
+        // On Windows this rename also exercises the absence of an open writer handle.
+        let relocated = root.join("renamed.tmp");
+        fs::rename(closed.temp_path(), &relocated).expect("closed temp can be renamed");
+        fs::rename(&relocated, closed.temp_path()).expect("restore temp name");
+        let temporary = closed.temp_path().to_path_buf();
+        drop(closed);
+        assert!(!temporary.exists(), "unpublished closed temp is cleaned up");
+        assert_eq!(fs::read(&destination).expect("existing"), b"known-good");
+    }
+
+    #[test]
+    fn failure_during_flush_or_sync_removes_temp_and_preserves_canonical() {
+        use std::io::{self, Write};
+
+        let root = TestDir::new();
+        let destination = root.join("creative.rhfx");
+        fs::write(&destination, b"known-good").expect("existing document");
+
+        let staged = stage_project_file_save(&project(), &destination).expect("stage");
+        let temp_path = staged.temp_path().to_path_buf();
+        let error = staged.finish_with(|_| Err(io::Error::other("injected flush failure")));
+        assert!(matches!(error, Err(ProjectSaveStageError::Io(_))));
+        assert!(!temp_path.exists(), "failure closes and removes stage");
+
+        let staged = stage_project_file_save(&project(), &destination).expect("stage again");
+        let temp_path = staged.temp_path().to_path_buf();
+        let error = staged.finish_with(|file| {
+            file.flush()?;
+            Err(io::Error::other("injected sync failure"))
+        });
+        assert!(matches!(error, Err(ProjectSaveStageError::Io(_))));
+        assert!(!temp_path.exists(), "sync failure also removes stage");
+        assert_eq!(fs::read(&destination).expect("existing"), b"known-good");
+        assert_eq!(fs::read_dir(&root.0).expect("list").count(), 1);
+    }
+
+    #[test]
+    fn flushed_new_document_is_still_unpublished_until_explicit_publication() {
+        let root = TestDir::new();
+        let destination = root.join("new.rhfx");
+        let closed = stage_project_file_save(&project(), &destination)
+            .expect("stage")
+            .flush_and_close()
+            .expect("synchronize");
+        assert!(!destination.exists());
+        let temporary = closed.temp_path().to_path_buf();
+        assert!(temporary.exists());
+        drop(closed);
+        assert!(!temporary.exists());
+        assert!(!destination.exists());
+    }
+
+    #[test]
     fn invalid_snapshot_cannot_touch_destination_or_create_temp() {
         let root = TestDir::new();
         let destination = root.join("existing.rhfx");
