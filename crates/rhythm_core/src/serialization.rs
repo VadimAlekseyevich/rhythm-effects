@@ -41,7 +41,10 @@ impl fmt::Display for ProjectFileParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::FileTooLarge { size, max } => {
-                write!(formatter, "project file is {size} bytes, exceeding {max}-byte limit")
+                write!(
+                    formatter,
+                    "project file is {size} bytes, exceeding {max}-byte limit"
+                )
             }
             Self::InvalidUtf8(error) => {
                 write!(formatter, "project file is not valid UTF-8: {error}")
@@ -435,10 +438,7 @@ mod tests {
 
     #[test]
     fn candidate_rejects_oversized_json_text_after_structural_parse() {
-        let oversized = ProjectFileV1::new(
-            project(),
-            "0.1.0-test",
-        );
+        let oversized = ProjectFileV1::new(project(), "0.1.0-test");
         let mut value = serde_json::to_value(oversized).expect("serialize candidate");
         value["project"]["metadata"]["name"] =
             serde_json::json!("é".repeat(crate::project::MAX_USER_TEXT_BYTES / 2 + 1));
