@@ -399,6 +399,62 @@ mod tests {
     }
 
     #[test]
+    fn file_size_limit_accepts_exact_boundary_and_rejects_excess_before_parsing() {
+        assert!(super::validate_project_file_size(super::MAX_PROJECT_FILE_BYTES).is_ok());
+        assert!(super::validate_project_file_size(0).is_ok());
+        assert!(matches!(
+            super::validate_project_file_size(super::MAX_PROJECT_FILE_BYTES + 1),
+            Err(super::ProjectFileParseError::FileTooLarge {
+                size,
+                max: super::MAX_PROJECT_FILE_BYTES,
+            }) if size == super::MAX_PROJECT_FILE_BYTES + 1
+        ));
+        assert!(matches!(
+            super::validate_project_file_size(usize::MAX),
+            Err(super::ProjectFileParseError::FileTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn created_with_version_obeys_the_same_individual_utf8_string_limit() {
+        let at_limit = "é".repeat(crate::project::MAX_USER_TEXT_BYTES / 2);
+        let candidate = ProjectFileV1::new(project(), at_limit.clone());
+        assert_eq!(
+            super::validate_project_file_v1_candidate(candidate.clone()),
+            Ok(candidate)
+        );
+
+        let oversized = ProjectFileV1::new(project(), format!("{at_limit}é"));
+        assert_eq!(
+            super::validate_project_file_v1_candidate(oversized),
+            Err(crate::project::ProjectValidationError::TextTooLong(
+                "created_with_version"
+            ))
+        );
+    }
+
+    #[test]
+    fn candidate_rejects_oversized_json_text_after_structural_parse() {
+        let oversized = ProjectFileV1::new(
+            project(),
+            "0.1.0-test",
+        );
+        let mut value = serde_json::to_value(oversized).expect("serialize candidate");
+        value["project"]["metadata"]["name"] =
+            serde_json::json!("é".repeat(crate::project::MAX_USER_TEXT_BYTES / 2 + 1));
+        let bytes = serde_json::to_vec(&value).expect("serialize oversized metadata");
+        let parsed = super::parse_project_file_v1(&bytes).expect("structurally valid JSON");
+        let migrated = super::migrate_project_file_to_current(parsed).expect("schema V1");
+
+        assert_eq!(
+            super::validate_project_file_v1_candidate(migrated),
+            Err(crate::project::ProjectValidationError::TextTooLong(
+                "metadata.name"
+            ))
+        );
+    }
+
+    #[test]
     fn parse_project_file_v1_accepts_utf8_json_as_a_candidate_document() {
         let file = ProjectFileV1::new(project(), "0.1.0-test");
         let json = serde_json::to_vec(&file).expect("serialize fixture");
