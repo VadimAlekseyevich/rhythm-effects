@@ -1,4 +1,7 @@
-use crate::project::{MAX_USER_TEXT_BYTES, Project, ProjectValidationError};
+use crate::{
+    editor::{EditError, ProjectEditor},
+    project::{MAX_USER_TEXT_BYTES, Project, ProjectValidationError},
+};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, str::Utf8Error};
 
@@ -175,6 +178,61 @@ pub fn validate_project_file_v1_candidate(
     }
     candidate.project.validate()?;
     Ok(candidate)
+}
+
+/// Failures in the detached Open pipeline; none may mutate an active editor.
+#[derive(Debug)]
+pub enum ProjectOpenError {
+    Parse(ProjectFileParseError),
+    Migration(ProjectFileMigrationError),
+    Validation(ProjectValidationError),
+    Editor(EditError),
+}
+
+impl fmt::Display for ProjectOpenError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse(error) => fmt::Display::fmt(error, formatter),
+            Self::Migration(error) => fmt::Display::fmt(error, formatter),
+            Self::Validation(error) => write!(formatter, "invalid project semantics: {error:?}"),
+            Self::Editor(error) => write!(formatter, "cannot initialize project editor: {error:?}"),
+        }
+    }
+}
+
+impl Error for ProjectOpenError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Parse(error) => Some(error),
+            Self::Migration(error) => Some(error),
+            Self::Validation(_) | Self::Editor(_) => None,
+        }
+    }
+}
+
+/// Constructs the complete replacement editor before touching any active project.
+///
+/// On success the new document starts with a clean, empty undo history. The
+/// caller handles session-only state (selection, playhead and runtime caches)
+/// only after this function succeeds.
+pub fn prepare_project_file_open(bytes: &[u8]) -> Result<ProjectEditor, ProjectOpenError> {
+    let candidate = parse_project_file_v1(bytes).map_err(ProjectOpenError::Parse)?;
+    let candidate =
+        migrate_project_file_to_current(candidate).map_err(ProjectOpenError::Migration)?;
+    let candidate =
+        validate_project_file_v1_candidate(candidate).map_err(ProjectOpenError::Validation)?;
+    ProjectEditor::new(candidate.project).map_err(ProjectOpenError::Editor)
+}
+
+/// Atomically swaps the active ProjectEditor only after the entire load succeeds.
+/// Failure preserves the previous document, revisions, undo/redo and transactions.
+pub fn open_project_file_transactional(
+    active_editor: &mut ProjectEditor,
+    bytes: &[u8],
+) -> Result<(), ProjectOpenError> {
+    let replacement = prepare_project_file_open(bytes)?;
+    *active_editor = replacement;
+    Ok(())
 }
 
 #[cfg(test)]
