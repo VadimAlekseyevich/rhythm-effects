@@ -267,7 +267,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-229** — Implement load-time semantic validation before active-project replacement.
 - [x] **AI-230** — Implement rejection of unknown newer schema versions.
 - [x] **AI-231** — Implement sequential migration framework even though only V1 initially exists.
-- [ ] **AI-232** — Commit a minimal V1 .rhfx fixture.
+- [x] **AI-232** — Commit a minimal V1 .rhfx fixture.
 - [ ] **AI-233** — Add semantic JSON round-trip equality tests.
 - [ ] **AI-234** — Implement the documented project-file safety limits.
 - [ ] **AI-235** — Implement transactional Open so failure leaves current Project untouched.
