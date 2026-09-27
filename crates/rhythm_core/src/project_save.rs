@@ -31,7 +31,9 @@ impl fmt::Display for ProjectSaveStageError {
             Self::Encode(error) => fmt::Display::fmt(error, formatter),
             Self::InvalidDestination => write!(formatter, "project destination has no filename"),
             Self::Io(error) => write!(formatter, "cannot stage project save: {error}"),
-            Self::TemporaryNameCollision => write!(formatter, "cannot allocate a unique sibling temp file"),
+            Self::TemporaryNameCollision => {
+                write!(formatter, "cannot allocate a unique sibling temp file")
+            }
         }
     }
 }
@@ -187,7 +189,12 @@ mod tests {
             assert_eq!(staged.destination(), destination.as_path());
             assert_eq!(staged.temp_path().parent(), destination.parent());
             assert_ne!(staged.temp_path(), destination);
-            assert!(staged.temp_path().file_name().is_some_and(|name| name.to_string_lossy().ends_with(".tmp")));
+            assert!(
+                staged
+                    .temp_path()
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().ends_with(".tmp"))
+            );
             assert_eq!(
                 fs::read(&destination).expect("read existing document"),
                 b"existing known-good document"
@@ -198,7 +205,10 @@ mod tests {
             staged.temp_path().to_path_buf()
         };
 
-        assert!(!temp_path.exists(), "dropping an unpublished stage cleans it");
+        assert!(
+            !temp_path.exists(),
+            "dropping an unpublished stage cleans it"
+        );
         assert_eq!(
             fs::read(&destination).expect("read unchanged document"),
             b"existing known-good document"
@@ -233,9 +243,11 @@ mod tests {
 
         assert!(matches!(
             stage_project_file_save(&invalid, &destination),
-            Err(ProjectSaveStageError::Encode(ProjectFileEncodeError::Validation(
-                ProjectValidationError::InvalidCompositionDimensions
-            )))
+            Err(ProjectSaveStageError::Encode(
+                ProjectFileEncodeError::Validation(
+                    ProjectValidationError::InvalidCompositionDimensions
+                )
+            ))
         ));
         assert_eq!(fs::read(&destination).expect("existing"), b"original");
         assert_eq!(fs::read_dir(&root.0).expect("list").count(), 1);
@@ -251,7 +263,10 @@ mod tests {
             stage_project_file_save(&project(), &impossible),
             Err(ProjectSaveStageError::Io(_))
         ));
-        assert_eq!(fs::read(&blocking_file).expect("existing"), b"do not overwrite");
+        assert_eq!(
+            fs::read(&blocking_file).expect("existing"),
+            b"do not overwrite"
+        );
         assert!(matches!(
             stage_project_file_save(&project(), Path::new("")),
             Err(ProjectSaveStageError::InvalidDestination)
