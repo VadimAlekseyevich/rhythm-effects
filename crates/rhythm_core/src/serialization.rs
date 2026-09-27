@@ -167,7 +167,7 @@ mod tests {
             RectangleObject, RgbSplitEffect, TextAlignment, TextObject, TintEffect,
             TransformAnimation,
         },
-        time::{BpmMicros, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
+        time::{BpmMicros, DurationNs, FrameRate, GridOffsetNs, MusicalTick, TempoMap, TimeSignature},
     };
     use serde::{Deserialize, Serialize};
 
@@ -611,6 +611,116 @@ mod tests {
             .project
             .validate()
             .expect("round-trip project valid");
+    }
+
+    #[test]
+    fn rich_v1_project_has_semantically_equal_compact_and_pretty_json_round_trips() {
+        let mut project = schema_project();
+        project.metadata.name = "Ритм 🎵 semantic round trip".to_owned();
+        project.settings.frame_rate = FrameRate::new(30_000, 1_001).expect("NTSC frame rate");
+        project.settings.duration = DurationNs::new(12_345_678_901);
+        project.assets[0].source = AssetSource::File {
+            path: "аудио/дорожка.flac".to_owned(),
+            relative_to_project: true,
+        };
+        // This value must not pass through a JSON floating-point representation.
+        project.next_entity_id = 9_007_199_254_740_993;
+        // Inserting out of order exercises the canonical keyframe sorting invariant.
+        project.composition.objects[0].transform.position = Animated::with_keyframes(
+            Vec2::new(960.0, 540.0).expect("position"),
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(16).expect("key id"),
+                    MusicalTick::new(960),
+                    Vec2::new(1_000.0, 540.0).expect("second position"),
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(15).expect("key id"),
+                    MusicalTick::new(-960),
+                    Vec2::new(900.0, 540.0).expect("first position"),
+                    Interpolation::Hold,
+                ),
+            ],
+        )
+        .expect("sorted position keys");
+        project.validate().expect("round-trip input is valid");
+
+        let original = ProjectFileV1::new(project, "0.1.0-creator");
+        let compact = serde_json::to_vec(&original).expect("compact JSON");
+        let pretty = serde_json::to_vec_pretty(&original).expect("pretty JSON");
+
+        for bytes in [&compact[..], &pretty[..]] {
+            let parsed = super::parse_project_file_v1(bytes).expect("UTF-8 JSON candidate");
+            let migrated = super::migrate_project_file_to_current(parsed).expect("V1 migration");
+            let restored = super::validate_project_file_v1_candidate(migrated)
+                .expect("semantically valid round-trip document");
+
+            assert_eq!(restored, original);
+            assert_eq!(restored.created_with_version, "0.1.0-creator");
+            assert_eq!(restored.project.next_entity_id, 9_007_199_254_740_993);
+            assert_eq!(restored.project.settings.frame_rate, FrameRate::new(30_000, 1_001).expect("rate"));
+            assert_eq!(restored.project.settings.duration, DurationNs::new(12_345_678_901));
+            assert_eq!(
+                restored.project.composition.objects.iter().map(|object| object.id.get()).collect::<Vec<_>>(),
+                vec![3, 4, 5, 6]
+            );
+            assert_eq!(
+                restored.project.assets.iter().map(|asset| asset.id.get()).collect::<Vec<_>>(),
+                vec![1, 2]
+            );
+            assert_eq!(
+                restored.project.assets[0].source,
+                AssetSource::File {
+                    path: "аудио/дорожка.flac".to_owned(),
+                    relative_to_project: true,
+                }
+            );
+            assert_eq!(
+                restored.project.assets[1].source,
+                AssetSource::File {
+                    path: "C:/media/card.webp".to_owned(),
+                    relative_to_project: false,
+                }
+            );
+
+            let rectangle = &restored.project.composition.objects[0];
+            assert_eq!(
+                rectangle.effects.iter().map(|effect| effect.id.get()).collect::<Vec<_>>(),
+                vec![7, 8, 9, 10, 11]
+            );
+            assert_eq!(
+                rectangle.transform.position.keyframes().iter().map(|key| (key.id.get(), key.tick.get())).collect::<Vec<_>>(),
+                vec![(15, -960), (16, 960)]
+            );
+            let EffectKind::Blur(blur) = &rectangle.effects[0].kind else {
+                panic!("first effect must remain Blur");
+            };
+            assert_eq!(
+                blur.radius_px.keyframes().iter().map(|key| (key.id.get(), key.tick.get(), key.interpolation)).collect::<Vec<_>>(),
+                vec![
+                    (12, 0, Interpolation::Hold),
+                    (13, 960, Interpolation::CubicBezier(BezierEasing::new(0.25, 0.1, 0.75, 0.9).expect("curve"))),
+                    (14, 1_920, Interpolation::Linear),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn json_root_property_order_and_whitespace_do_not_change_v1_semantics() {
+        let original = ProjectFileV1::new(schema_project(), "0.1.0-creator");
+        let project_json = serde_json::to_string(&original.project).expect("project JSON");
+        // Deliberately reverse the wrapper field order and change indentation.
+        let reordered = format!(
+            "{{\\n  \\"project\\": {project_json},\\n  \\"created_with_version\\": \\"0.1.0-creator\\",\\n  \\"schema_version\\": 1\\n}}"
+        );
+
+        let parsed = super::parse_project_file_v1(reordered.as_bytes()).expect("parse reordered JSON");
+        let migrated = super::migrate_project_file_to_current(parsed).expect("V1 migration");
+        let restored = super::validate_project_file_v1_candidate(migrated).expect("valid document");
+
+        assert_eq!(restored, original);
     }
 
     #[test]
