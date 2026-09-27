@@ -1,8 +1,9 @@
-use crate::project::{Project, ProjectValidationError};
+use crate::project::{MAX_USER_TEXT_BYTES, Project, ProjectValidationError};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, str::Utf8Error};
 
 pub const PROJECT_SCHEMA_VERSION_V1: u32 = 1;
+pub const MAX_PROJECT_FILE_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectFileV1 {
@@ -31,6 +32,7 @@ impl ProjectFileV1 {
 
 #[derive(Debug)]
 pub enum ProjectFileParseError {
+    FileTooLarge { size: usize, max: usize },
     InvalidUtf8(Utf8Error),
     InvalidJson(serde_json::Error),
 }
@@ -38,6 +40,9 @@ pub enum ProjectFileParseError {
 impl fmt::Display for ProjectFileParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::FileTooLarge { size, max } => {
+                write!(formatter, "project file is {size} bytes, exceeding {max}-byte limit")
+            }
             Self::InvalidUtf8(error) => {
                 write!(formatter, "project file is not valid UTF-8: {error}")
             }
@@ -51,13 +56,26 @@ impl fmt::Display for ProjectFileParseError {
 impl Error for ProjectFileParseError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
+            Self::FileTooLarge { .. } => None,
             Self::InvalidUtf8(error) => Some(error),
             Self::InvalidJson(error) => Some(error),
         }
     }
 }
 
+fn validate_project_file_size(size: usize) -> Result<(), ProjectFileParseError> {
+    if size > MAX_PROJECT_FILE_BYTES {
+        Err(ProjectFileParseError::FileTooLarge {
+            size,
+            max: MAX_PROJECT_FILE_BYTES,
+        })
+    } else {
+        Ok(())
+    }
+}
+
 pub fn parse_project_file_v1(bytes: &[u8]) -> Result<ProjectFileV1, ProjectFileParseError> {
+    validate_project_file_size(bytes.len())?;
     let json = std::str::from_utf8(bytes).map_err(ProjectFileParseError::InvalidUtf8)?;
     serde_json::from_str(json).map_err(ProjectFileParseError::InvalidJson)
 }
@@ -149,6 +167,9 @@ pub fn migrate_project_file_to_current(
 pub fn validate_project_file_v1_candidate(
     candidate: ProjectFileV1,
 ) -> Result<ProjectFileV1, ProjectValidationError> {
+    if candidate.created_with_version.len() > MAX_USER_TEXT_BYTES {
+        return Err(ProjectValidationError::TextTooLong("created_with_version"));
+    }
     candidate.project.validate()?;
     Ok(candidate)
 }
