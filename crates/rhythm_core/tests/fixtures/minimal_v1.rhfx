@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "created_with_version": "0.1.0",
+  "project": {
+    "metadata": {
+      "name": "Minimal V1"
+    },
+    "settings": {
+      "composition_width": 1920,
+      "composition_height": 1080,
+      "frame_rate": {
+        "numerator": 60,
+        "denominator": 1
+      },
+      "duration": 10000000000,
+      "background": {
+        "r": 0.0,
+        "g": 0.0,
+        "b": 0.0,
+        "a": 1.0
+      }
+    },
+    "tempo_map": {
+      "grid_offset": 0,
+      "segments": [
+        {
+          "start_tick": 0,
+          "bpm": 120000000,
+          "meter": {
+            "numerator": 4,
+            "denominator": 4
+          }
+        }
+      ]
+    },
+    "audio_track": null,
+    "assets": [],
+    "composition": {
+      "objects": []
+    },
+    "next_entity_id": 1
+  }
+}
