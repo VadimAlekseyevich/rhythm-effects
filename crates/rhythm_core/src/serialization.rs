@@ -512,6 +512,89 @@ mod tests {
         );
     }
 
+    fn dirty_editor() -> crate::editor::ProjectEditor {
+        let mut editor =
+            crate::editor::ProjectEditor::new(project()).expect("initial project valid");
+        editor
+            .execute(crate::editor::EditCommand::AddAsset {
+                kind: AssetKind::Image,
+                source: AssetSource::File {
+                    path: "previous-work.png".to_owned(),
+                    relative_to_project: true,
+                },
+            })
+            .expect("edit succeeds");
+        assert!(editor.is_dirty());
+        assert!(editor.can_undo());
+        editor
+    }
+
+    fn assert_failed_open_keeps_active_editor(
+        editor: &mut crate::editor::ProjectEditor,
+        bytes: &[u8],
+    ) {
+        let previous = editor.project().clone();
+        let revision = editor.current_revision();
+        let saved = editor.saved_revision();
+        let history_len = editor.history_len();
+        let cursor = editor.history_cursor();
+
+        assert!(super::open_project_file_transactional(editor, bytes).is_err());
+        assert_eq!(editor.project(), &previous);
+        assert_eq!(editor.current_revision(), revision);
+        assert_eq!(editor.saved_revision(), saved);
+        assert_eq!(editor.history_len(), history_len);
+        assert_eq!(editor.history_cursor(), cursor);
+        assert!(editor.is_dirty());
+        assert!(editor.can_undo());
+    }
+
+    #[test]
+    fn failed_open_keeps_dirty_project_history_and_saved_revision_untouched() {
+        let mut editor = dirty_editor();
+
+        assert_failed_open_keeps_active_editor(&mut editor, b"broken .rhfx");
+        assert_failed_open_keeps_active_editor(&mut editor, &[0xff, 0xfe]);
+
+        let mut invalid = ProjectFileV1::new(project(), "0.1.0");
+        invalid.project.settings.composition_width = 1;
+        let invalid_bytes = serde_json::to_vec(&invalid).expect("invalid semantic document");
+        assert_failed_open_keeps_active_editor(&mut editor, &invalid_bytes);
+
+        invalid.project.settings.composition_width = 1920;
+        invalid.schema_version = super::PROJECT_SCHEMA_VERSION_V1 + 1;
+        let future_bytes = serde_json::to_vec(&invalid).expect("future schema document");
+        assert_failed_open_keeps_active_editor(&mut editor, &future_bytes);
+
+        invalid.schema_version = 0;
+        let old_bytes = serde_json::to_vec(&invalid).expect("older schema document");
+        assert_failed_open_keeps_active_editor(&mut editor, &old_bytes);
+
+        editor.undo().expect("old undo history must still work");
+        assert_eq!(editor.project().assets.len(), 0);
+    }
+
+    #[test]
+    fn successful_open_replaces_document_and_resets_history_as_clean() {
+        let mut editor = dirty_editor();
+        let file = ProjectFileV1::new(schema_project(), "0.1.0");
+        let bytes = serde_json::to_vec(&file).expect("valid project JSON");
+
+        super::open_project_file_transactional(&mut editor, &bytes).expect("valid Open");
+
+        assert_eq!(editor.project(), &file.project);
+        assert_eq!(editor.history_len(), 0);
+        assert_eq!(editor.history_cursor(), 0);
+        assert!(!editor.can_undo());
+        assert!(!editor.can_redo());
+        assert!(!editor.is_dirty());
+        assert_eq!(editor.current_revision(), crate::editor::ProjectRevision::INITIAL);
+        assert_eq!(
+            editor.saved_revision(),
+            Some(crate::editor::ProjectRevision::INITIAL)
+        );
+    }
+
     #[test]
     fn parse_project_file_v1_accepts_utf8_json_as_a_candidate_document() {
         let file = ProjectFileV1::new(project(), "0.1.0-test");
