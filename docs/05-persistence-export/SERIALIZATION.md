@@ -116,6 +116,15 @@ serialize validated Project
 
 On Windows, implementation uses a platform replacement operation that preserves the old file until the new temp file is complete.
 
+The AI-236 staging API `rhythm_core::project_save::stage_project_file_save`
+validates and serializes a snapshot as bounded UTF-8 V1 JSON before touching the
+filesystem, then writes to a uniquely named sibling temporary file using
+`create_new` (never truncating the canonical document). Its returned
+`StagedProjectSave` owns the unpublished file; dropping it closes and removes
+the temp file. The serializer does not alter editor history or saved revision.
+Flushing/closing, safe publication and marking the saved revision are separate
+following steps (AI-237–AI-239); staging alone is not a completed Save.
+
 If replacement fails:
 
 - original stays the known-good canonical file;
