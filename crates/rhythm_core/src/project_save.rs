@@ -1,4 +1,4 @@
-//! Staging phase of explicit Save: do not replace the destination or mark an editor saved.
+//! Staging and flush/close phases of explicit Save, without publication or revision changes.
 use std::{
     error::Error,
     ffi::OsString,
@@ -49,7 +49,7 @@ impl Error for ProjectSaveStageError {
 }
 
 /// Owns an unpublished sibling temp file. Dropping the stage closes and removes
-/// it; subsequent Save steps will explicitly flush/close and then publish it.
+/// it; only a successfully flushed/closed stage can proceed to publication.
 #[derive(Debug)]
 pub struct StagedProjectSave {
     destination: PathBuf,
@@ -67,19 +67,76 @@ impl StagedProjectSave {
     pub fn temp_path(&self) -> &Path {
         &self.temp_path
     }
+
+    /// Flush buffered bytes, synchronize the file contents/metadata, then close
+    /// its handle. Only the closed stage may be handed to a future publisher.
+    /// A failed flush/sync drops the stage, removing the temp and preserving
+    /// the original destination. This does not publish or mark a revision saved.
+    pub fn flush_and_close(self) -> Result<ClosedProjectSave, ProjectSaveStageError> {
+        self.finish_with(|file| {
+            file.flush()?;
+            file.sync_all()
+        })
+    }
+
+    fn finish_with(
+        mut self,
+        finalize: impl FnOnce(&mut File) -> io::Result<()>,
+    ) -> Result<ClosedProjectSave, ProjectSaveStageError> {
+        finalize(self.file.as_mut().expect("staged file is open"))
+            .map_err(ProjectSaveStageError::Io)?;
+        // Explicitly drop the OS handle before a possible Windows rename/replace.
+        drop(self.file.take());
+        let closed = ClosedProjectSave {
+            destination: std::mem::take(&mut self.destination),
+            temp_path: std::mem::take(&mut self.temp_path),
+        };
+        Ok(closed)
+    }
 }
 
 impl Drop for StagedProjectSave {
     fn drop(&mut self) {
-        // A closed handle is needed to remove an unpublished file on Windows.
+        // Close before deleting: Windows does not remove an open staged file.
         drop(self.file.take());
-        let _ = fs::remove_file(&self.temp_path);
+        if !self.temp_path.as_os_str().is_empty() {
+            let _ = fs::remove_file(&self.temp_path);
+        }
+    }
+}
+
+/// Fully written and synchronized sibling file, with no open write handle.
+/// Still unpublished: dropping it cleans up the temp and leaves the canonical
+/// document unchanged. AI-238 will consume this type during safe publication.
+#[derive(Debug)]
+pub struct ClosedProjectSave {
+    destination: PathBuf,
+    temp_path: PathBuf,
+}
+
+impl ClosedProjectSave {
+    #[must_use]
+    pub fn destination(&self) -> &Path {
+        &self.destination
+    }
+
+    #[must_use]
+    pub fn temp_path(&self) -> &Path {
+        &self.temp_path
+    }
+}
+
+impl Drop for ClosedProjectSave {
+    fn drop(&mut self) {
+        if !self.temp_path.as_os_str().is_empty() {
+            let _ = fs::remove_file(&self.temp_path);
+        }
     }
 }
 
 /// Validate/encode the snapshot first, then create_new and write a sibling
 /// temp file. Never truncate or write the canonical destination. Publication,
-/// durability and saved_revision changes belong to later Save stages.
+/// publication and saved_revision changes belong to later Save stages.
 pub fn stage_project_file_save(
     project: &Project,
     destination: &Path,
