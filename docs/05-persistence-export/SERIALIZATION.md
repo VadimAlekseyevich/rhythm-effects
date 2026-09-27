@@ -75,6 +75,8 @@ Pretty JSON is acceptable for MVP fixtures/debugging.
 
 Bit-for-bit identical JSON is not a product guarantee, but semantically identical round trips are.
 
+Schema V1 regression tests compare decoded `ProjectFileV1` values after compact/pretty JSON and deliberately reordered root fields, including object/effect/keyframe order, ID allocator state, integer time units, easing, UTF-8 metadata, and relative/absolute asset references. The committed minimal fixture is also round-tripped through the parse/migrate/validate pipeline.
+
 ## 6. Numeric rules
 
 Persist:
