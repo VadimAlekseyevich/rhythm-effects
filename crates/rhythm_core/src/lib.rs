@@ -8,8 +8,8 @@ pub mod geometry;
 
 pub mod ids;
 pub mod project;
-pub mod property;
 pub mod project_save;
+pub mod property;
 pub mod serialization;
 pub mod time;
 
