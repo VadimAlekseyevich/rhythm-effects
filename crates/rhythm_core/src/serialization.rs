@@ -588,7 +588,10 @@ mod tests {
         assert!(!editor.can_undo());
         assert!(!editor.can_redo());
         assert!(!editor.is_dirty());
-        assert_eq!(editor.current_revision(), crate::editor::ProjectRevision::INITIAL);
+        assert_eq!(
+            editor.current_revision(),
+            crate::editor::ProjectRevision::INITIAL
+        );
         assert_eq!(
             editor.saved_revision(),
             Some(crate::editor::ProjectRevision::INITIAL)
