@@ -23,7 +23,8 @@ fn visit_effects_in_order<T>(
 ///
 /// The callback must encode one pass that reads `source` and writes `output`,
 /// without mutating the semantic effect list. The callback receives a
-/// distinct output checkout. Only after it has encoded the pass is the
+/// distinct output checkout and can acquire additional intermediates for
+/// two-pass filters. Only after it has encoded the pass is the
 /// previous input returned to the pool. The final checkout is returned to
 /// the caller for composition, and an empty effect list returns `source`
 /// unchanged without allocating intermediates.
@@ -38,11 +39,12 @@ pub fn encode_ordered_effect_chain(
         &EvaluatedEffect,
         &TemporaryTexture,
         &TemporaryTexture,
+        &mut TemporaryTexturePool,
     ),
 ) -> TemporaryTexture {
     visit_effects_in_order(effects, source, |effect, input| {
         let output = pool.acquire(device, input.key());
-        encode_effect(encoder, effect, &input, &output);
+        encode_effect(encoder, effect, &input, &output, pool);
         pool.release(input);
         output
     })
