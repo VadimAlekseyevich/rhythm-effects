@@ -544,8 +544,7 @@ impl Renderer {
             queue,
             encoder,
             &mut self.temporary_textures,
-            source,
-            output,
+            (source, output),
             radius_px,
         );
     }
