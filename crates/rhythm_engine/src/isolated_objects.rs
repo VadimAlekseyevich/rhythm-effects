@@ -52,6 +52,7 @@ pub fn effect_requires_isolation(kind: &EvaluatedEffectKind) -> bool {
     )
 }
 
+#[derive(Debug)]
 pub struct IsolatedObjectCompositor {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
