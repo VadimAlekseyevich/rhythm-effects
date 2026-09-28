@@ -310,6 +310,11 @@ mod tests {
         RECOVERY_INTERVAL, RecoveryAutosave, RecoverySchedule, TRANSACTION_SETTLE,
         write_recovery_generation,
     };
+    use crate::{
+        recovery_actions::{RecoveryGeneration, restore_recovery_candidate},
+        recovery_discovery::discover_recovery_candidates,
+        recovery_session::RecoverySession,
+    };
     use rhythm_core::{
         editor::{EditCommand, ProjectEditor},
         project::{AssetKind, AssetSource, Project, ProjectSettings},
@@ -319,6 +324,7 @@ mod tests {
     use std::{
         fs,
         path::PathBuf,
+        process::Command,
         sync::atomic::{AtomicU64, Ordering},
         time::{Duration, Instant},
     };
@@ -560,6 +566,97 @@ mod tests {
         assert_eq!(
             fs::read(&canonical).expect("canonical unchanged"),
             b"known-good"
+        );
+    }
+
+    /// Runs only when explicitly launched as a separate process by the
+    /// integration test. The parent kills this process without unwinding, so
+    /// neither clean-close nor Drop-based cleanup runs.
+    #[test]
+    fn forced_termination_child() {
+        if std::env::var("RHYTHM_RECOVERY_CRASH_TEST_CHILD")
+            .ok()
+            .as_deref()
+            != Some("run")
+        {
+            return;
+        }
+        let directory = PathBuf::from(
+            std::env::var_os("RHYTHM_RECOVERY_CRASH_TEST_DIR")
+                .expect("parent supplies isolated recovery directory"),
+        );
+        write_recovery_generation(&directory, &project("Before crash")).expect("first write");
+        write_recovery_generation(&directory, &project("Latest before crash"))
+            .expect("second write");
+        fs::write(directory.join(".ready"), b"ready").expect("signal fully published generations");
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    }
+
+    #[test]
+    fn forced_process_termination_preserves_recovery_and_canonical_document() {
+        let root = TestDir::new();
+        let canonical = root.0.join("original.rhfx");
+        fs::write(&canonical, b"known-good canonical").expect("existing document");
+        let session =
+            RecoverySession::create(&root.0, "Recoverable", Some(&canonical)).expect("session");
+        let ready = session.directory().join(".ready");
+        let mut child = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "recovery_autosave::tests::forced_termination_child",
+                "--nocapture",
+            ])
+            .env("RHYTHM_RECOVERY_CRASH_TEST_CHILD", "run")
+            .env("RHYTHM_RECOVERY_CRASH_TEST_DIR", session.directory())
+            .spawn()
+            .expect("launch recovery child");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !ready.exists() && Instant::now() < deadline {
+            if let Some(status) = child.try_wait().expect("poll child") {
+                panic!("crash child unexpectedly exited before writing: {status}");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if !ready.exists() {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("crash child did not publish recovery generations");
+        }
+        child
+            .kill()
+            .expect("force-kill process without clean close");
+        let status = child.wait().expect("reap child");
+        assert!(!status.success());
+
+        let candidate = discover_recovery_candidates(&root.0)
+            .expect("recovery discovery after forced termination")
+            .remove(0);
+        let mut editor = ProjectEditor::new(project("Active")).expect("editor");
+        let mut path = Some(canonical.clone());
+        assert_eq!(
+            restore_recovery_candidate(&mut editor, &mut path, &candidate)
+                .expect("restore current"),
+            RecoveryGeneration::Current
+        );
+        assert_eq!(editor.project().metadata.name, "Latest before crash");
+        assert!(editor.is_dirty());
+        assert_eq!(path.as_deref(), Some(canonical.as_path()));
+
+        fs::write(session.directory().join("current.rhfx"), b"corrupt")
+            .expect("simulate corrupt latest after crash");
+        let mut fallback_editor = ProjectEditor::new(project("Active")).expect("editor");
+        assert_eq!(
+            restore_recovery_candidate(&mut fallback_editor, &mut path, &candidate)
+                .expect("restore previous"),
+            RecoveryGeneration::Previous
+        );
+        assert_eq!(fallback_editor.project().metadata.name, "Before crash");
+        assert!(fallback_editor.is_dirty());
+        assert_eq!(
+            fs::read(&canonical).expect("canonical still known-good"),
+            b"known-good canonical"
         );
     }
 
