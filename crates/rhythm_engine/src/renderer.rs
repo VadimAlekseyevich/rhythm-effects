@@ -544,8 +544,7 @@ impl Renderer {
             queue,
             encoder,
             &mut self.temporary_textures,
-            source,
-            output,
+            (source, output),
             radius_px,
         );
     }
@@ -558,13 +557,12 @@ impl Renderer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
-        source: &TemporaryTexture,
-        output: &TemporaryTexture,
+        targets: (&TemporaryTexture, &TemporaryTexture),
         composition_radius_px: f32,
         preview_scale: f32,
     ) -> Result<(), BlurPreviewScaleError> {
         let radius_px = preview_blur_radius(composition_radius_px, preview_scale)?;
-        self.encode_blur(device, queue, encoder, source, output, radius_px);
+        self.encode_blur(device, queue, encoder, targets.0, targets.1, radius_px);
         Ok(())
     }
 
