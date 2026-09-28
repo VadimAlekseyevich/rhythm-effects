@@ -130,6 +130,14 @@ If user explicitly chooses Don't Save:
 If user Cancels:
 - keep editing/recovery.
 
+AI-253 replaces unconditional close of a dirty project with explicit Save,
+Don't Save or Cancel choices. Save must publish successfully before closing;
+cancel or Save failure keeps the editor and its recovery. Don't Save requires
+a positive click and waits for an already-running recovery worker before
+deleting only the active session directory. It does not delete any canonical
+project or another session. If discard itself fails, closing is cancelled
+rather than silently claiming that the recovery was removed.
+
 ## 8. Crash/abnormal exit
 
 Recovery/session record remains.
