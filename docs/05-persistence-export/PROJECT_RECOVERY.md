@@ -56,6 +56,23 @@ Policy:
 
 This provides frequent protection without writing on every drag/keystroke.
 
+The AI-244–247 implementation polls dirty state from the application event
+loop even when UI input is idle. Its 30-second due time is measured from the
+last successfully completed generation; failures have a five-second retry
+backoff. A live editor transaction blocks capture and the first eligible
+snapshot waits at least one second after that transaction ends.
+
+A cloned committed `Project` crosses to a named background recovery worker,
+so serialization, synchronization and publication do not run on the UI/audio
+path. The coordinator allows only one writer in flight and replaces any queued
+snapshot with the latest committed revision while it is busy. A successful
+generation writes `current.rhfx` through a sibling temporary file. When an
+older current is valid, it is staged independently and only published to
+`previous.rhfx` after the new current succeeds. Malformed current is never
+rotated over a known-good previous; failed publication does not delete the
+previous success. The current snapshot and previous fallback remain ordinary
+bounded, validated V1 project files in the session directory.
+
 ## 4. Snapshot semantics
 
 Recovery captures only a valid committed semantic Project.
