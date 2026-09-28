@@ -7,6 +7,29 @@ use crate::temporary_textures::{TemporaryTexture, TemporaryTexturePool};
 
 pub const MAX_BLUR_RADIUS_PX: f32 = 128.0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlurPreviewScaleError {
+    InvalidRadius,
+    InvalidPreviewScale,
+}
+
+/// Spatial effect parameters are specified in full composition pixels. A
+/// Half or Quarter preview adjusts the GPU sampling radius, not the Project.
+pub fn preview_blur_radius(
+    composition_radius_px: f32,
+    preview_scale: f32,
+) -> Result<f32, BlurPreviewScaleError> {
+    if !composition_radius_px.is_finite()
+        || !(0.0..=MAX_BLUR_RADIUS_PX).contains(&composition_radius_px)
+    {
+        return Err(BlurPreviewScaleError::InvalidRadius);
+    }
+    if !preview_scale.is_finite() || preview_scale <= 0.0 || preview_scale > 1.0 {
+        return Err(BlurPreviewScaleError::InvalidPreviewScale);
+    }
+    Ok(composition_radius_px * preview_scale)
+}
+
 const BLUR_SHADER: &str = r#"
 @group(0) @binding(0) var input_texture: texture_2d<f32>;
 @group(0) @binding(1) var input_sampler: sampler;
@@ -278,7 +301,32 @@ fn reference_kernel(radius_px: f32) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_BLUR_RADIUS_PX, reference_kernel};
+    use super::{
+        BlurPreviewScaleError, MAX_BLUR_RADIUS_PX, preview_blur_radius, reference_kernel,
+    };
+
+    #[test]
+    fn preview_blur_radius_keeps_composition_pixel_semantics() {
+        assert_eq!(preview_blur_radius(0.0, 0.25), Ok(0.0));
+        assert_eq!(preview_blur_radius(80.0, 1.0), Ok(80.0));
+        assert_eq!(preview_blur_radius(80.0, 0.5), Ok(40.0));
+        assert_eq!(preview_blur_radius(80.0, 0.25), Ok(20.0));
+        assert_eq!(preview_blur_radius(128.0, 0.25), Ok(32.0));
+        assert_eq!(
+            preview_blur_radius(f32::NAN, 1.0),
+            Err(BlurPreviewScaleError::InvalidRadius)
+        );
+        assert_eq!(
+            preview_blur_radius(129.0, 1.0),
+            Err(BlurPreviewScaleError::InvalidRadius)
+        );
+        for scale in [0.0, -1.0, 1.01, f32::NAN, f32::INFINITY] {
+            assert_eq!(
+                preview_blur_radius(10.0, scale),
+                Err(BlurPreviewScaleError::InvalidPreviewScale)
+            );
+        }
+    }
 
     #[test]
     fn radius_zero_is_identity_and_reference_kernel_is_normalized_symmetric() {
