@@ -9,8 +9,11 @@ use rhythm_core::ids::AssetId;
 
 use crate::{
     image_decode::ImageDecodeGeneration,
+    isolated_objects::IsolatedObjectCompositor,
     runtime_assets::ValidatedDecodedImage,
-    temporary_textures::{TemporaryTexturePool, TemporaryTexturePoolStats},
+    temporary_textures::{
+        TemporaryTexture, TemporaryTextureKey, TemporaryTexturePool, TemporaryTexturePoolStats,
+    },
     text::TextResources,
 };
 
@@ -268,6 +271,7 @@ pub struct Renderer {
     preview_pipeline: wgpu::RenderPipeline,
     image_textures: ImageTextureCache,
     temporary_textures: TemporaryTexturePool,
+    isolated_compositor: IsolatedObjectCompositor,
     text_resources: TextResources,
 }
 
@@ -401,6 +405,7 @@ impl Renderer {
             preview_pipeline,
             image_textures: ImageTextureCache::default(),
             temporary_textures: TemporaryTexturePool::default(),
+            isolated_compositor: IsolatedObjectCompositor::new(device, COMPOSITION_FORMAT),
             text_resources: TextResources::new(
                 device,
                 queue,
@@ -460,6 +465,47 @@ impl Renderer {
     #[must_use]
     pub fn temporary_texture_stats(&self) -> TemporaryTexturePoolStats {
         self.temporary_textures.stats()
+    }
+
+    /// The content encoder receives an exclusive transparent Rgba16Float
+    /// target; a multipass effect chain can consume the checkout before
+    /// calling encode_composite_isolated.
+    pub fn encode_isolated_object<F>(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        draw: F,
+    ) -> TemporaryTexture
+    where
+        F: FnOnce(&mut wgpu::RenderPass<'_>),
+    {
+        let key = TemporaryTextureKey::new(
+            self.composition_size[0],
+            self.composition_size[1],
+            COMPOSITION_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        )
+        .expect("composition size and usage are valid");
+        self.isolated_compositor.encode_object(
+            device,
+            encoder,
+            &mut self.temporary_textures,
+            key,
+            draw,
+        )
+    }
+
+    /// Composite after all effects, then return the checkout to the pool.
+    /// The source cannot alias the destination composition texture.
+    pub fn encode_composite_isolated(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        target: TemporaryTexture,
+    ) {
+        self.isolated_compositor
+            .encode_composite(device, encoder, &target, &self.composition_view);
+        self.temporary_textures.release(target);
     }
 
     pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {

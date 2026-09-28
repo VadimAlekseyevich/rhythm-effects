@@ -182,6 +182,18 @@ object content
 -> composite into scene
 ~~~
 
+AI-257 exposes this as two encoded GPU operations: an isolated full-composition
+Rgba16Float target is checked out of the renderer pool and cleared to
+transparent before the object-content draw callback, and the final target is
+sampled and premultiplied-alpha blended over the composition using a cached
+fullscreen shader/pipeline. The source stays separately owned through effect
+passes and returns to the pool only after its last encoded composite use;
+neighboring objects cannot contaminate object-local effects. The compositor
+never performs an sRGB conversion. This is a renderer pass boundary: scene
+object-content draw calls and effect shaders are wired in their subsequent
+tasks, rather than claiming the current placeholder composition already
+renders the full scene.
+
 Correct effect ordering is semantic.
 
 ## 17. Temporary texture pool
