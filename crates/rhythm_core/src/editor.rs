@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, path::Path};
 
 use crate::{
     animation::{AnimationInvariantError, Interpolation, Keyframe},
+    asset_paths::rebase_asset_source_for_save_as,
     domain::Vec2,
     ids::{AssetId, EffectId, EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{
@@ -715,6 +716,54 @@ impl ProjectEditor {
 
     pub fn mark_saved(&mut self) {
         self.history.mark_saved();
+    }
+
+    /// Update the current creative asset sources and every stored undo/redo
+    /// payload to the newly published project directory. All transformations
+    /// are deterministic and infallible; publication of an already-validated
+    /// rebased snapshot MUST precede this call. This does not add a creative
+    /// history entry or mark any revision saved by itself.
+    pub(crate) fn rebase_asset_sources_after_publication(
+        &mut self,
+        previous_project_path: Option<&Path>,
+        destination: &Path,
+    ) {
+        for asset in &mut self.project.assets {
+            asset.source = rebase_asset_source_for_save_as(
+                &asset.source,
+                previous_project_path,
+                destination,
+            );
+        }
+        for entry in &mut self.history.entries {
+            match &mut entry.payload {
+                HistoryPayload::AssetInserted { asset, .. }
+                | HistoryPayload::AssetDeleted { asset, .. } => {
+                    asset.source = rebase_asset_source_for_save_as(
+                        &asset.source,
+                        previous_project_path,
+                        destination,
+                    );
+                }
+                HistoryPayload::AssetSourceChanged { before, after, .. } => {
+                    *before =
+                        rebase_asset_source_for_save_as(before, previous_project_path, destination);
+                    *after =
+                        rebase_asset_source_for_save_as(after, previous_project_path, destination);
+                }
+                HistoryPayload::ImageFromFileAdded {
+                    inserted_asset: Some((_, asset)),
+                    ..
+                } => {
+                    asset.source = rebase_asset_source_for_save_as(
+                        &asset.source,
+                        previous_project_path,
+                        destination,
+                    );
+                }
+                _ => {}
+            }
+        }
     }
 
     pub fn ensure_asset_record(
