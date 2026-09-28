@@ -577,7 +577,8 @@ mod tests {
         if std::env::var("RHYTHM_RECOVERY_CRASH_TEST_CHILD")
             .ok()
             .as_deref()
-            != Some("run") {
+            != Some("run")
+        {
             return;
         }
         let directory = PathBuf::from(
@@ -623,7 +624,9 @@ mod tests {
             let _ = child.wait();
             panic!("crash child did not publish recovery generations");
         }
-        child.kill().expect("force-kill process without clean close");
+        child
+            .kill()
+            .expect("force-kill process without clean close");
         let status = child.wait().expect("reap child");
         assert!(!status.success());
 
@@ -633,7 +636,8 @@ mod tests {
         let mut editor = ProjectEditor::new(project("Active")).expect("editor");
         let mut path = Some(canonical.clone());
         assert_eq!(
-            restore_recovery_candidate(&mut editor, &mut path, &candidate).expect("restore current"),
+            restore_recovery_candidate(&mut editor, &mut path, &candidate)
+                .expect("restore current"),
             RecoveryGeneration::Current
         );
         assert_eq!(editor.project().metadata.name, "Latest before crash");
