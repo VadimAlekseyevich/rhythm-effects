@@ -196,7 +196,9 @@ mod tests {
         let mut editor = dirty_editor();
         let saved = editor.saved_revision();
 
-        assert!(save_project_as(&mut editor, &mut canonical_path, &blocker.join("new.rhfx")).is_err());
+        assert!(
+            save_project_as(&mut editor, &mut canonical_path, &blocker.join("new.rhfx")).is_err()
+        );
         assert!(canonical_path.is_none());
         assert_eq!(editor.saved_revision(), saved);
         assert!(editor.is_dirty());
