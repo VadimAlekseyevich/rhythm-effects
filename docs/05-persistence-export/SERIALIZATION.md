@@ -162,15 +162,24 @@ If replacement fails:
 
 ## 9. Save As
 
-Save As writes the new destination transactionally.
+Save As writes the new destination transactionally. AI-240 makes the application
+the owner of the canonical project path: Ctrl+Shift+S always asks for a new
+destination, calls `save_project_as`, and only assigns the returned published
+path after `save_project_file_transactional` succeeds. A cancelled dialog or
+failed staging/sync/publication leaves the old path, project/history and dirty
+state intact; the previous project file is not moved or deleted. First-time
+Ctrl+S uses Save As to obtain a path, while later Ctrl+S writes directly to
+the canonical path. Save and Save As report filesystem errors in the app log.
 
 Only after success:
 
 - session canonical project path changes;
-- relative asset paths may be recalculated against new project directory;
-- saved_revision updates.
+- saved_revision updates after publication (AI-239).
 
-A failed Save As leaves previous project path/state unchanged.
+Rebasing eligible relative AssetSource paths for a new project directory is
+deliberately reserved for AI-241; AI-240 itself does not rewrite asset records.
+Until that follow-up lands, a Save As to a different directory can leave
+previously relative asset references unresolved on reopen.
 
 ## 10. Load transaction
 
