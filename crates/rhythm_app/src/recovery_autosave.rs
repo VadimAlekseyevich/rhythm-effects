@@ -574,7 +574,10 @@ mod tests {
     /// neither clean-close nor Drop-based cleanup runs.
     #[test]
     fn forced_termination_child() {
-        if std::env::var("RHYTHM_RECOVERY_CRASH_TEST_CHILD").as_deref() != Ok("run") {
+        if std::env::var("RHYTHM_RECOVERY_CRASH_TEST_CHILD")
+            .ok()
+            .as_deref()
+            != Some("run") {
             return;
         }
         let directory = PathBuf::from(
