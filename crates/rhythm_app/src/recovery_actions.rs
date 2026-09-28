@@ -288,11 +288,13 @@ mod tests {
     fn fourteen_day_stale_cleanup_requires_canonical_at_least_as_new_as_recovery() {
         let root = TestDir::new();
         let canonical = root.0.join("saved.rhfx");
-        let session = RecoverySession::create(&root.0, "Safe to remove", Some(&canonical))
-            .expect("session");
+        let session =
+            RecoverySession::create(&root.0, "Safe to remove", Some(&canonical)).expect("session");
         write_recovery_generation(session.directory(), &project("Saved")).expect("recovery");
         fs::write(&canonical, b"newer canonical").expect("canonical");
-        let candidate = discover_recovery_candidates(&root.0).expect("scan").remove(0);
+        let candidate = discover_recovery_candidates(&root.0)
+            .expect("scan")
+            .remove(0);
         let timestamp = candidate.latest_recovery_modified().expect("snapshot time");
         let stale = timestamp + Duration::from_secs(15 * 24 * 60 * 60);
         let recent = timestamp + Duration::from_secs(13 * 24 * 60 * 60);
@@ -303,9 +305,15 @@ mod tests {
             Some(session.metadata().session_id.as_str())
         ));
         assert!(is_stale_cleanup_candidate(&candidate, stale, None));
-        assert_eq!(cleanup_stale_recovery(&root.0, stale, None).expect("cleanup"), 1);
+        assert_eq!(
+            cleanup_stale_recovery(&root.0, stale, None).expect("cleanup"),
+            1
+        );
         assert!(!session.directory().exists());
-        assert_eq!(fs::read(&canonical).expect("keep canonical"), b"newer canonical");
+        assert_eq!(
+            fs::read(&canonical).expect("keep canonical"),
+            b"newer canonical"
+        );
     }
 
     #[test]
@@ -322,17 +330,22 @@ mod tests {
             .expect("open canonical")
             .set_times(fs::FileTimes::new().set_modified(older))
             .expect("set canonical timestamp");
-        let saved = RecoverySession::create(&root.0, "Recoverable", Some(&canonical))
-            .expect("saved");
+        let saved =
+            RecoverySession::create(&root.0, "Recoverable", Some(&canonical)).expect("saved");
         write_recovery_generation(saved.directory(), &project("Later edits"))
             .expect("recovery newer than canonical");
         let candidates = discover_recovery_candidates(&root.0).expect("scan");
         assert_eq!(candidates.len(), 2);
         let now = SystemTime::now() + Duration::from_secs(15 * 24 * 60 * 60);
-        assert!(candidates
-            .iter()
-            .all(|candidate| !is_stale_cleanup_candidate(candidate, now, None)));
-        assert_eq!(cleanup_stale_recovery(&root.0, now, None).expect("cleanup"), 0);
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| !is_stale_cleanup_candidate(candidate, now, None))
+        );
+        assert_eq!(
+            cleanup_stale_recovery(&root.0, now, None).expect("cleanup"),
+            0
+        );
         assert!(unsaved.directory().exists());
         assert!(saved.directory().exists());
         assert_eq!(fs::read(&canonical).expect("canonical"), b"old canonical");
