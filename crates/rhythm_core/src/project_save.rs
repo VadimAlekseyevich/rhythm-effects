@@ -135,7 +135,7 @@ impl ClosedProjectSave {
     /// document intact (or a new destination absent). Drop cleans up the temp
     /// on failure. Publication does not change any editor saved revision.
     pub fn publish(self) -> io::Result<PathBuf> {
-        self.publish_with(fs::rename)
+        self.publish_with(|source, destination| fs::rename(source, destination)
     }
 
     fn publish_with(
