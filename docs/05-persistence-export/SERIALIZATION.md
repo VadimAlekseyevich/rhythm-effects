@@ -132,7 +132,8 @@ that failed finalization leaves the previous file untouched.
 
 AI-238 publishes only a closed stage through `ClosedProjectSave::publish`:
 `std::fs::rename` replaces the destination from its already-synchronized sibling
-temp. On Windows, Rust uses the replace-existing `MoveFileExW` path. There is
+temp. On Windows, Rust uses replace-existing `MoveFileExW` with a
+`SetFileInformationByHandle` fallback. There is
 no delete-old-first or in-place-copy fallback: if rename fails, the previous
 known-good file remains (or a first-save destination stays absent), and dropping
 the stage removes its unpublished temp. A successful publish consumes the stage
