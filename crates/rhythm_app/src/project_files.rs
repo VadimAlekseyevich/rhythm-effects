@@ -4,20 +4,21 @@ use std::path::{Path, PathBuf};
 
 use rhythm_core::{
     editor::ProjectEditor,
-    project_save::{ProjectSaveError, save_project_file_transactional},
+    project_save::{ProjectSaveError, save_project_file_with_rebased_assets},
 };
 
 /// Publish the new .rhfx document before changing the session's canonical path.
 ///
 /// A failed serialization, flush, sync, or publication keeps the previous path
-/// and the editor's prior saved revision/dirty state. Rewriting asset paths for
-/// a new project directory is the separate AI-241 step.
+/// and the editor's prior saved revision/dirty state. Eligible asset paths
+/// are rebased in the published snapshot, then in the live editor and history.
 pub fn save_project_as(
     editor: &mut ProjectEditor,
     canonical_path: &mut Option<PathBuf>,
     destination: &Path,
 ) -> Result<(), ProjectSaveError> {
-    let published_path = save_project_file_transactional(editor, destination)?;
+    let published_path =
+        save_project_file_with_rebased_assets(editor, canonical_path.as_deref(), destination)?;
     *canonical_path = Some(published_path);
     Ok(())
 }
@@ -184,6 +185,130 @@ mod tests {
         assert!(editor.is_dirty());
         assert_eq!(fs::read(&previous).expect("old document"), b"known-good");
         assert!(destination.is_dir());
+        assert_eq!(fs::read_dir(&root.0).expect("list directory").count(), 2);
+    }
+
+    #[test]
+    fn moving_project_rebases_relative_assets_in_file_editor_and_undo_history() {
+        let root = TestDir::new();
+        let old_dir = root.join("old");
+        let new_dir = root.join("new");
+        fs::create_dir(&old_dir).expect("old directory");
+        fs::create_dir(&new_dir).expect("new directory");
+        let previous = old_dir.join("previous.rhfx");
+        let destination = new_dir.join("moved.rhfx");
+        fs::write(&previous, b"previous version").expect("old file");
+        let mut canonical_path = Some(previous.clone());
+        let mut editor = dirty_editor();
+        let asset_id = editor.project().assets[0].id;
+        editor
+            .execute(EditCommand::RelinkAsset {
+                asset_id,
+                source: AssetSource::File {
+                    path: "assets/missing.png".into(),
+                    relative_to_project: true,
+                },
+            })
+            .expect("relink asset");
+        let revision = editor.current_revision();
+        let original_history = editor.history_len();
+        let original_old_file = fs::read(&previous).expect("old bytes");
+
+        save_project_as(&mut editor, &mut canonical_path, &destination).expect("move document");
+
+        let expected_asset = old_dir.join("assets/missing.png");
+        let expected_source = AssetSource::File {
+            path: expected_asset.to_str().expect("UTF-8").into(),
+            relative_to_project: false,
+        };
+        let persisted = parse_project_file_v1(&fs::read(&destination).expect("new bytes"))
+            .expect("valid new file");
+        assert_eq!(persisted.project.assets[0].source, expected_source);
+        assert_eq!(editor.project(), &persisted.project);
+        assert_eq!(canonical_path.as_deref(), Some(destination.as_path()));
+        assert_eq!(editor.current_revision(), revision);
+        assert_eq!(editor.saved_revision(), Some(revision));
+        assert_eq!(editor.history_len(), original_history);
+        assert!(!editor.is_dirty());
+        assert_eq!(fs::read(&previous).expect("old file"), original_old_file);
+
+        editor.undo().expect("undo relink");
+        assert!(editor.is_dirty());
+        editor.redo().expect("redo relink");
+        assert_eq!(editor.project().assets[0].source, expected_source);
+        assert!(!editor.is_dirty());
+    }
+
+    #[test]
+    fn first_save_as_rebases_absolute_asset_inside_project_directory() {
+        let root = TestDir::new();
+        let destination = root.join("first.rhfx");
+        let source = root.join("not-created.png");
+        let mut editor = ProjectEditor::new(Project::new(
+            "First save",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        ))
+        .expect("editor");
+        editor
+            .execute(EditCommand::AddAsset {
+                kind: AssetKind::Image,
+                source: AssetSource::File {
+                    path: source.to_str().expect("UTF-8").into(),
+                    relative_to_project: false,
+                },
+            })
+            .expect("asset");
+        let mut canonical_path = None;
+
+        save_project_as(&mut editor, &mut canonical_path, &destination).expect("first save");
+        assert_eq!(
+            editor.project().assets[0].source,
+            AssetSource::File {
+                path: "not-created.png".into(),
+                relative_to_project: true,
+            }
+        );
+        let persisted = parse_project_file_v1(&fs::read(&destination).expect("read"))
+            .expect("parse");
+        assert_eq!(persisted.project, *editor.project());
+        assert!(!editor.is_dirty());
+    }
+
+    #[test]
+    fn failed_rebased_save_as_preserves_original_asset_sources() {
+        let root = TestDir::new();
+        let old_dir = root.join("old");
+        fs::create_dir(&old_dir).expect("old directory");
+        let previous = old_dir.join("previous.rhfx");
+        fs::write(&previous, b"old file").expect("previous");
+        let destination = root.join("occupied.rhfx");
+        fs::create_dir(&destination).expect("occupied directory");
+        let mut editor = dirty_editor();
+        let asset_id = editor.project().assets[0].id;
+        editor
+            .execute(EditCommand::RelinkAsset {
+                asset_id,
+                source: AssetSource::File {
+                    path: "missing.png".into(),
+                    relative_to_project: true,
+                },
+            })
+            .expect("set relative");
+        let old_source = editor.project().assets[0].source.clone();
+        let old_revision = editor.current_revision();
+        let old_saved = editor.saved_revision();
+        let mut canonical_path = Some(previous.clone());
+
+        assert!(matches!(
+            save_project_as(&mut editor, &mut canonical_path, &destination),
+            Err(ProjectSaveError::Publish(_))
+        ));
+        assert_eq!(canonical_path.as_deref(), Some(previous.as_path()));
+        assert_eq!(editor.project().assets[0].source, old_source);
+        assert_eq!(editor.current_revision(), old_revision);
+        assert_eq!(editor.saved_revision(), old_saved);
+        assert!(editor.is_dirty());
         assert_eq!(fs::read_dir(&root.0).expect("list directory").count(), 2);
     }
 
