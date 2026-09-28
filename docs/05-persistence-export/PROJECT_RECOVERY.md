@@ -19,7 +19,14 @@ a setup error is logged without preventing the editor from opening. Tests cover
 normal resolution, repeated creation, invalid environment values and a blocked
 parent directory.
 
-Each editing session has a stable recovery directory/id (AI-243).
+AI-243 creates a unique per-editing-session directory using a timestamp,
+process ID and atomic counter, with `create_dir` collision protection.
+Its synchronized `session.json` records the stable session ID, project display
+name, optional canonical file path and creation timestamp. Save As updates
+metadata through a same-directory temporary file and safe replacement without
+changing the ID; opening a different document allocates a new session.
+Metadata is read back only if its session ID matches the directory name.
+These metadata records are not yet recovery project snapshots (AI-244 onward).
 
 Unsaved new projects receive recovery before first explicit Save.
 
