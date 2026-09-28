@@ -142,6 +142,24 @@ impl RecoveryAutosave {
         self.remove_obsolete_generations()
     }
 
+    /// Only invoke after the user has explicitly confirmed Don't Save.
+    /// Wait for a pre-existing worker so a late write cannot recreate recovery
+    /// after deletion; remove the entire active-session directory, not any
+    /// other session or the optional canonical project file.
+    pub fn discard_after_confirmation(&mut self) -> io::Result<()> {
+        self.queued = None;
+        if self.in_flight.is_some() {
+            let completion = self.finished_rx.recv().map_err(io::Error::other)?;
+            self.in_flight = None;
+            if let Err(error) = completion.outcome {
+                warn!(%error, "in-flight recovery failed before confirmed discard");
+            }
+        }
+        fs::remove_dir_all(&self.directory)?;
+        self.pending_clean = false;
+        Ok(())
+    }
+
     fn remove_obsolete_generations(&mut self) -> io::Result<()> {
         for filename in [CURRENT_FILE, PREVIOUS_FILE] {
             let path = self.directory.join(filename);
@@ -511,6 +529,38 @@ mod tests {
         assert!(root.0.join("current.rhfx").exists());
         assert!(manager.request_clean_after_save(&editor).is_err());
         assert!(root.0.join("current.rhfx").exists());
+    }
+
+    #[test]
+    fn confirmed_dont_save_deletes_only_active_session_after_worker_finishes() {
+        let root = TestDir::new();
+        let active = root.0.join("active");
+        let other = root.0.join("other");
+        fs::create_dir(&active).expect("active dir");
+        fs::create_dir(&other).expect("other dir");
+        let canonical = root.0.join("canonical.rhfx");
+        fs::write(&canonical, b"known-good").expect("canonical");
+        write_recovery_generation(&active, &project("Dirty")).expect("active generation");
+        write_recovery_generation(&other, &project("Different")).expect("other generation");
+        let editor = ProjectEditor::new(project("Dirty")).expect("editor");
+        let mut manager = RecoveryAutosave::new(active.clone());
+        manager.in_flight = Some(editor.current_revision());
+        manager
+            .finished_tx
+            .send(super::RecoveryResult {
+                revision: editor.current_revision(),
+                outcome: Ok(()),
+            })
+            .expect("completed writer");
+        manager
+            .discard_after_confirmation()
+            .expect("explicit discard");
+        assert!(!active.exists());
+        assert!(other.join("current.rhfx").exists());
+        assert_eq!(
+            fs::read(&canonical).expect("canonical unchanged"),
+            b"known-good"
+        );
     }
 
     #[test]
