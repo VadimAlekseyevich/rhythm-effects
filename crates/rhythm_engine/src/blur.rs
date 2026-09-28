@@ -194,10 +194,10 @@ impl SeparableBlur {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         pool: &mut TemporaryTexturePool,
-        source: &TemporaryTexture,
-        output: &TemporaryTexture,
+        targets: (&TemporaryTexture, &TemporaryTexture),
         radius_px: f32,
     ) {
+        let (source, output) = targets;
         debug_assert_eq!(source.key(), output.key());
         let middle = pool.acquire(device, source.key());
         let stride = u64::from(device.limits().min_uniform_buffer_offset_alignment.max(16));
