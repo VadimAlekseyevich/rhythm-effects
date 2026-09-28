@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use rhythm_core::ids::AssetId;
 
 use crate::{
+    blur::SeparableBlur,
     effect_chain::encode_ordered_effect_chain,
     image_decode::ImageDecodeGeneration,
     isolated_objects::IsolatedObjectCompositor,
@@ -274,6 +275,7 @@ pub struct Renderer {
     image_textures: ImageTextureCache,
     temporary_textures: TemporaryTexturePool,
     isolated_compositor: IsolatedObjectCompositor,
+    blur: SeparableBlur,
     text_resources: TextResources,
 }
 
@@ -408,6 +410,7 @@ impl Renderer {
             image_textures: ImageTextureCache::default(),
             temporary_textures: TemporaryTexturePool::default(),
             isolated_compositor: IsolatedObjectCompositor::new(device, COMPOSITION_FORMAT),
+            blur: SeparableBlur::new(device, COMPOSITION_FORMAT),
             text_resources: TextResources::new(
                 device,
                 queue,
@@ -522,6 +525,28 @@ impl Renderer {
             effects,
             encode_effect,
         )
+    }
+
+    /// Encode a horizontal/vertical blur between two distinct pooled targets.
+    /// The source and output are owned by the caller; the middle target is
+    /// acquired/released here after its final encoded use.
+    pub fn encode_blur(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &TemporaryTexture,
+        output: &TemporaryTexture,
+        radius_px: f32,
+    ) {
+        self.blur.encode(
+            device,
+            queue,
+            encoder,
+            &mut self.temporary_textures,
+            (source, output),
+            radius_px,
+        );
     }
 
     /// Composite after all effects, then return the checkout to the pool.

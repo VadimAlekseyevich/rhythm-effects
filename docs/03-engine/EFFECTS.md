@@ -52,6 +52,18 @@ radius_px: Animated<f32>, 0..128
 
 Use separable horizontal/vertical Gaussian-like blur.
 
+AI-259 supplies the WGSL implementation with cached Rgba16Float pipeline:
+an isolated source is sampled horizontally into a distinct pooled temporary,
+then vertically into the caller's output. The uniform kernel is symmetric,
+Gaussian-like and normalized per pass, with up to 128 taps on each side and
+a clamped radius of 0..128. RGB and alpha are convolved together in
+linear-premultiplied representation, never sampled in-place. Radius zero
+uses an identity sample in both passes. Shader radius is currently expressed
+in working texture pixels; AI-260 applies preview-scale compensation.
+This GPU blur encoder is now available to the effect-chain callback; later
+render-loop wiring and visual reference tests remain separate from the
+shader implementation.
+
 Radius zero is identity.
 
 Implementation may optimize kernel/downsample behavior without changing radius semantics.
