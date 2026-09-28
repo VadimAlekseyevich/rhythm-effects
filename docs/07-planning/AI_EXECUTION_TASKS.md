@@ -274,7 +274,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-236** — Implement explicit Save serialization to a sibling temporary file.
 - [x] **AI-237** — Flush/close the temporary file before publication.
 - [x] **AI-238** — Implement Windows-safe replacement/publication preserving the previous known-good file on failure.
-- [ ] **AI-239** — Only update saved_revision after successful publication.
+- [x] **AI-239** — Only update saved_revision after successful publication.
 - [ ] **AI-240** — Implement Save As so canonical path changes only after successful publication.
 - [ ] **AI-241** — Recalculate eligible relative AssetSource paths after successful Save As.
 - [ ] **AI-242** — Implement LocalAppData RhythmEffects/recovery directory resolution.
