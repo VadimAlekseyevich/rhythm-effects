@@ -269,8 +269,8 @@ mod tests {
                 relative_to_project: true,
             }
         );
-        let persisted = parse_project_file_v1(&fs::read(&destination).expect("read"))
-            .expect("parse");
+        let persisted =
+            parse_project_file_v1(&fs::read(&destination).expect("read")).expect("parse");
         assert_eq!(&persisted.project, editor.project());
         assert!(!editor.is_dirty());
     }
