@@ -315,7 +315,7 @@ mod tests {
         write_recovery_generation(unsaved.directory(), &project("Unsaved")).expect("unsaved data");
         let canonical = root.0.join("canonical.rhfx");
         fs::write(&canonical, b"old canonical").expect("canonical");
-        let older = SystemTime::UNIX_EPOCH + Duration::from_secs(86400);
+        let older = std::time::UNIX_EPOCH + Duration::from_secs(86400);
         fs::File::options()
             .write(true)
             .open(&canonical)
