@@ -431,9 +431,8 @@ impl ApplicationHandler for RhythmApp {
                                                 "project saved to canonical path"
                                             );
                                             if let Some(autosave) = self.recovery_autosave.as_mut()
-                                                && let Err(error) = autosave.request_clean_after_save(
-                                                    &self.project_editor,
-                                                )
+                                                && let Err(error) = autosave
+                                                    .request_clean_after_save(&self.project_editor)
                                             {
                                                 warn!(%error, "Save succeeded, but recovery cleanup failed");
                                             }
