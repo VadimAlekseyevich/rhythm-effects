@@ -294,7 +294,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 ## M9 — Effects and visual parity
 
-- [ ] **AI-256** — Implement renderer temporary texture pool keyed by size/format/usage.
+- [x] **AI-256** — Implement renderer temporary texture pool keyed by size/format/usage.
 - [ ] **AI-257** — Implement isolated object rendering for multipass effects.
 - [ ] **AI-258** — Implement ordered effect-chain execution.
 - [ ] **AI-259** — Implement separable Blur with radius 0..128 composition pixels.
