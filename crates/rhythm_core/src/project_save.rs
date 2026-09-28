@@ -1,4 +1,4 @@
-//! Staging and flush/close phases of explicit Save, without publication or revision changes.
+//! Staging, flush/close, and publication phases of explicit Save. Revision changes are separate.
 use std::{
     error::Error,
     ffi::OsString,
@@ -107,7 +107,7 @@ impl Drop for StagedProjectSave {
 
 /// Fully written and synchronized sibling file, with no open write handle.
 /// Still unpublished: dropping it cleans up the temp and leaves the canonical
-/// document unchanged. AI-238 will consume this type during safe publication.
+/// document unchanged. Only this state permits publication.
 #[derive(Debug)]
 pub struct ClosedProjectSave {
     destination: PathBuf,
@@ -124,6 +124,29 @@ impl ClosedProjectSave {
     pub fn temp_path(&self) -> &Path {
         &self.temp_path
     }
+
+    /// Replace the destination using a same-directory filesystem rename.
+    ///
+    /// The temporary file has already been synchronized and closed. On Windows,
+    /// std::fs::rename uses replace-existing MoveFileExW (with a Windows
+    /// FileRenameInfoEx fallback); on Unix, rename replaces the destination.
+    /// Never remove the old file first or fall back to copying into it: a
+    /// failed rename must leave the previous
+    /// document intact (or a new destination absent). Drop cleans up the temp
+    /// on failure. Publication does not change any editor saved revision.
+    pub fn publish(self) -> io::Result<PathBuf> {
+        self.publish_with(|source, destination| fs::rename(source, destination))
+    }
+
+    fn publish_with(
+        mut self,
+        replace: impl FnOnce(&Path, &Path) -> io::Result<()>,
+    ) -> io::Result<PathBuf> {
+        replace(&self.temp_path, &self.destination)?;
+        // After successful rename, this stage no longer owns the old temp name.
+        self.temp_path = PathBuf::new();
+        Ok(std::mem::take(&mut self.destination))
+    }
 }
 
 impl Drop for ClosedProjectSave {
@@ -135,8 +158,8 @@ impl Drop for ClosedProjectSave {
 }
 
 /// Validate/encode the snapshot first, then create_new and write a sibling
-/// temp file. Never truncate or write the canonical destination. Publication,
-/// publication and saved_revision changes belong to later Save stages.
+/// temp file. Never truncate or write the canonical destination. The closed
+/// stage may be published separately; saved_revision is a later Save stage.
 pub fn stage_project_file_save(
     project: &Project,
     destination: &Path,
@@ -191,7 +214,7 @@ mod tests {
     use super::{ProjectSaveStageError, stage_project_file_save};
     use crate::{
         project::{Project, ProjectSettings, ProjectValidationError},
-        serialization::{ProjectFileEncodeError, parse_project_file_v1},
+        serialization::{ProjectFileEncodeError, parse_project_file_v1, serialize_project_file_v1},
         time::{GridOffsetNs, TempoMap},
     };
     use std::{
@@ -360,6 +383,112 @@ mod tests {
         drop(closed);
         assert!(!temporary.exists());
         assert!(!destination.exists());
+    }
+
+    #[test]
+    fn publish_replaces_existing_document_with_valid_json() {
+        let root = TestDir::new();
+        let destination = root.join("creative-ритм.rhfx");
+        let original = project();
+        let old_bytes = serialize_project_file_v1(&original).expect("serialize old project");
+        fs::write(&destination, &old_bytes).expect("create known-good project");
+
+        let mut updated = project();
+        updated.metadata.name = "Published revision".into();
+        let closed = stage_project_file_save(&updated, &destination)
+            .expect("stage replacement")
+            .flush_and_close()
+            .expect("sync and close");
+        let temp_path = closed.temp_path().to_path_buf();
+        assert_eq!(fs::read(&destination).expect("old document"), old_bytes);
+
+        let published_path = closed.publish().expect("replace existing destination");
+        assert_eq!(published_path, destination);
+        assert!(!temp_path.exists(), "the renamed temp no longer exists");
+        assert_eq!(
+            parse_project_file_v1(&fs::read(&destination).expect("published JSON"))
+                .expect("parse published project")
+                .project,
+            updated
+        );
+        assert_eq!(fs::read_dir(&root.0).expect("list files").count(), 1);
+    }
+
+    #[test]
+    fn publish_creates_new_destination_only_after_closed_stage() {
+        let root = TestDir::new();
+        let destination = root.join("first-save.rhfx");
+        let expected = project();
+        let closed = stage_project_file_save(&expected, &destination)
+            .expect("stage")
+            .flush_and_close()
+            .expect("sync and close");
+        let temp_path = closed.temp_path().to_path_buf();
+        assert!(!destination.exists());
+
+        assert_eq!(closed.publish().expect("publish"), destination);
+        assert!(!temp_path.exists());
+        assert_eq!(
+            parse_project_file_v1(&fs::read(&destination).expect("new document"))
+                .expect("parse new document")
+                .project,
+            expected
+        );
+        assert_eq!(fs::read_dir(&root.0).expect("list files").count(), 1);
+    }
+
+    #[test]
+    fn failed_publication_preserves_old_document_and_cleans_temp() {
+        use std::io;
+
+        let root = TestDir::new();
+        let destination = root.join("existing.rhfx");
+        let old_bytes = serialize_project_file_v1(&project()).expect("serialize original");
+        fs::write(&destination, &old_bytes).expect("create known-good project");
+        let closed = stage_project_file_save(&project(), &destination)
+            .expect("stage")
+            .flush_and_close()
+            .expect("close");
+        let temp_path = closed.temp_path().to_path_buf();
+
+        let error = closed
+            .publish_with(|_, _| Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected")))
+            .expect_err("replacement must fail");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!temp_path.exists(), "failed publication cleans up the temp");
+        assert_eq!(fs::read(&destination).expect("old project"), old_bytes);
+        assert_eq!(fs::read_dir(&root.0).expect("list files").count(), 1);
+
+        let new_destination = root.join("not-yet-created.rhfx");
+        let closed = stage_project_file_save(&project(), &new_destination)
+            .expect("stage new destination")
+            .flush_and_close()
+            .expect("close");
+        let temp_path = closed.temp_path().to_path_buf();
+        assert!(
+            closed
+                .publish_with(|_, _| Err(io::Error::other("injected")))
+                .is_err()
+        );
+        assert!(!new_destination.exists());
+        assert!(!temp_path.exists());
+    }
+
+    #[test]
+    fn os_replacement_failure_does_not_remove_existing_destination() {
+        let root = TestDir::new();
+        let destination = root.join("occupied.rhfx");
+        fs::create_dir(&destination).expect("occupied destination directory");
+        let closed = stage_project_file_save(&project(), &destination)
+            .expect("stage")
+            .flush_and_close()
+            .expect("close");
+        let temp_path = closed.temp_path().to_path_buf();
+
+        assert!(closed.publish().is_err(), "file cannot replace directory");
+        assert!(destination.is_dir(), "existing destination is intact");
+        assert!(!temp_path.exists(), "failed rename cleans temp");
+        assert_eq!(fs::read_dir(&root.0).expect("list files").count(), 1);
     }
 
     #[test]
