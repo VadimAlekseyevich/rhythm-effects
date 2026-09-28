@@ -301,9 +301,7 @@ fn reference_kernel(radius_px: f32) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BlurPreviewScaleError, MAX_BLUR_RADIUS_PX, preview_blur_radius, reference_kernel,
-    };
+    use super::{BlurPreviewScaleError, MAX_BLUR_RADIUS_PX, preview_blur_radius, reference_kernel};
 
     #[test]
     fn preview_blur_radius_keeps_composition_pixel_semantics() {
