@@ -215,6 +215,15 @@ Recovery data older than 14 days with no active/relevant session may be cleaned 
 
 Never delete a recovery that appears newer than its canonical project solely because it is old without checking state.
 
+AI-254 startup maintenance applies a conservative 14-day rule. It deletes
+only discovered, identity-validated, non-active recovery sessions whose latest
+generation is older than the threshold **and** whose existing canonical file
+has a modification time at least as new as that generation. Unsaved-only
+sessions, missing canonical files, and recoveries newer than their canonical
+file are retained regardless of age. Any filesystem error is logged without
+blocking recovery discovery. Deletion uses the same checked direct-child
+operation as explicit Discard; no canonical project file is removed.
+
 ## 13. Assets
 
 Recovery stores the same external asset references as Project.

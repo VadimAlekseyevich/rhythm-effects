@@ -22,7 +22,9 @@ use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use project_files::save_project_as;
-use recovery_actions::{discard_recovery_candidate, restore_recovery_candidate};
+use recovery_actions::{
+    cleanup_stale_recovery, discard_recovery_candidate, restore_recovery_candidate,
+};
 use recovery_autosave::RecoveryAutosave;
 use recovery_discovery::{RecoveryCandidate, discover_recovery_candidates};
 use recovery_session::RecoverySession;
@@ -206,6 +208,10 @@ impl ApplicationHandler for RhythmApp {
         }
 
         if let Ok(root) = recovery_root::ensure_recovery_root() {
+            match cleanup_stale_recovery(&root, std::time::SystemTime::now(), None) {
+                Ok(removed) => info!(removed, "safe stale recovery cleanup completed"),
+                Err(error) => warn!(%error, "stale recovery cleanup failed; records preserved"),
+            }
             match discover_recovery_candidates(&root) {
                 Ok(candidates) => {
                     for candidate in &candidates {
