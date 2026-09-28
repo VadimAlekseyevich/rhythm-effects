@@ -5,6 +5,7 @@ mod editor_ui;
 mod file_dialogs;
 mod gpu;
 mod project_files;
+mod recovery_autosave;
 mod recovery_root;
 mod recovery_session;
 mod shortcuts;
@@ -13,12 +14,13 @@ mod viewport;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use project_files::save_project_as;
+use recovery_autosave::RecoveryAutosave;
 use recovery_session::RecoverySession;
 use rhythm_core::{
     APP_NAME, domain::Vec2, editor::EditCommand, project::AssetSource,
@@ -32,7 +34,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
     event::{ElementState, WindowEvent},
-    event_loop::{ActiveEventLoop, EventLoop},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, ModifiersState, PhysicalKey},
     window::{Window, WindowId},
 };
@@ -83,6 +85,7 @@ struct RhythmApp {
     project_editor: rhythm_core::editor::ProjectEditor,
     project_path: Option<PathBuf>,
     recovery_session: Option<RecoverySession>,
+    recovery_autosave: Option<RecoveryAutosave>,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
@@ -111,6 +114,7 @@ impl Default for RhythmApp {
             project_editor,
             project_path: None,
             recovery_session: None,
+            recovery_autosave: None,
             window: None,
             gpu: None,
             renderer: None,
@@ -141,17 +145,31 @@ impl RhythmApp {
                     path = %session.directory().display(),
                     "editing-session recovery identity created"
                 );
+                self.recovery_autosave =
+                    Some(RecoveryAutosave::new(session.directory().to_path_buf()));
                 self.recovery_session = Some(session);
             }
             Err(error) => {
                 warn!(%error, "recovery session unavailable");
                 self.recovery_session = None;
+                self.recovery_autosave = None;
             }
         }
     }
 }
 
 impl ApplicationHandler for RhythmApp {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(autosave) = self.recovery_autosave.as_mut() {
+            autosave.tick(Instant::now(), &self.project_editor);
+        }
+        // Poll non-blockingly for completed writes even while the UI is idle.
+        // File I/O and serialization always run on the recovery worker.
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(100),
+        ));
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
