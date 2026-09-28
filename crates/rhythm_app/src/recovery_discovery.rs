@@ -2,8 +2,7 @@
 
 use crate::recovery_session::{RecoverySession, RecoverySessionMetadata};
 use std::{
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -94,10 +93,7 @@ fn regular_file_modified(path: &Path) -> io::Result<Option<SystemTime>> {
 #[cfg(test)]
 mod tests {
     use super::discover_recovery_candidates;
-    use crate::{
-        recovery_autosave::write_recovery_generation,
-        recovery_session::RecoverySession,
-    };
+    use crate::{recovery_autosave::write_recovery_generation, recovery_session::RecoverySession};
     use rhythm_core::{
         project::{Project, ProjectSettings},
         time::{GridOffsetNs, TempoMap},
@@ -139,9 +135,17 @@ mod tests {
     #[test]
     fn absent_root_and_session_without_generation_are_not_candidates() {
         let root = TestDir::new();
-        assert!(discover_recovery_candidates(&root.0.join("absent")).expect("missing").is_empty());
+        assert!(
+            discover_recovery_candidates(&root.0.join("absent"))
+                .expect("missing")
+                .is_empty()
+        );
         RecoverySession::create(&root.0, "Unsaved", None).expect("create metadata");
-        assert!(discover_recovery_candidates(&root.0).expect("discover").is_empty());
+        assert!(
+            discover_recovery_candidates(&root.0)
+                .expect("discover")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -149,10 +153,9 @@ mod tests {
         let root = TestDir::new();
         let canonical = root.0.join("canonical.rhfx");
         fs::write(&canonical, b"existing canonical bytes").expect("canonical");
-        let saved = RecoverySession::create(&root.0, "Saved", Some(&canonical))
-            .expect("saved session");
-        let unsaved = RecoverySession::create(&root.0, "Unsaved", None)
-            .expect("unsaved session");
+        let saved =
+            RecoverySession::create(&root.0, "Saved", Some(&canonical)).expect("saved session");
+        let unsaved = RecoverySession::create(&root.0, "Unsaved", None).expect("unsaved session");
         write_recovery_generation(saved.directory(), &project()).expect("saved recovery");
         write_recovery_generation(unsaved.directory(), &project()).expect("unsaved recovery");
         let before = fs::read(&canonical).expect("canonical bytes");
