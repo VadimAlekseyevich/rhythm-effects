@@ -706,6 +706,13 @@ impl ProjectEditor {
         self.history.is_dirty()
     }
 
+    /// An in-progress drag/curve edit may have changed creative state without
+    /// committing a history revision. Explicit Save must not snapshot it.
+    #[must_use]
+    pub fn has_active_transaction(&self) -> bool {
+        self.transaction.is_some()
+    }
+
     pub fn mark_saved(&mut self) {
         self.history.mark_saved();
     }
