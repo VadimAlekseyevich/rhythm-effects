@@ -11,7 +11,7 @@ use rhythm_core::{
     },
 };
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{self, Read},
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
@@ -85,6 +85,7 @@ pub struct RecoveryAutosave {
     finished_rx: Receiver<RecoveryResult>,
     in_flight: Option<ProjectRevision>,
     queued: Option<(ProjectRevision, Project)>,
+    pending_clean: bool,
 }
 
 impl RecoveryAutosave {
@@ -98,7 +99,62 @@ impl RecoveryAutosave {
             finished_rx,
             in_flight: None,
             queued: None,
+            pending_clean: false,
         }
+    }
+
+    /// Call only after explicit publication succeeded. If an old recovery
+    /// worker is still writing, cleanup waits until that worker finishes.
+    pub fn request_clean_after_save(&mut self, editor: &ProjectEditor) -> io::Result<()> {
+        if editor.is_dirty() || editor.has_active_transaction() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot clean recovery while the project is dirty or editing",
+            ));
+        }
+        self.queued = None;
+        self.pending_clean = true;
+        if self.in_flight.is_none() {
+            self.remove_obsolete_generations()?;
+        }
+        Ok(())
+    }
+
+    /// Clean exit may wait for an already-running recovery worker to finish
+    /// before removing obsolete generations. Dirty-project close does not
+    /// invoke this method and keeps recovery intact.
+    pub fn finish_clean_close(&mut self, editor: &ProjectEditor) -> io::Result<()> {
+        if editor.is_dirty() || editor.has_active_transaction() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "dirty project recovery must remain on close",
+            ));
+        }
+        self.queued = None;
+        self.pending_clean = true;
+        if self.in_flight.is_some() {
+            let completion = self.finished_rx.recv().map_err(io::Error::other)?;
+            self.in_flight = None;
+            if let Err(error) = completion.outcome {
+                warn!(%error, "in-flight recovery failed before clean close");
+            }
+        }
+        self.remove_obsolete_generations()
+    }
+
+    fn remove_obsolete_generations(&mut self) -> io::Result<()> {
+        for filename in [CURRENT_FILE, PREVIOUS_FILE] {
+            let path = self.directory.join(filename);
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        self.pending_clean = false;
+        self.schedule.last_success = None;
+        self.schedule.last_attempt = None;
+        Ok(())
     }
 
     pub fn tick(&mut self, now: Instant, editor: &ProjectEditor) {
@@ -120,8 +176,15 @@ impl RecoveryAutosave {
 
         if !dirty {
             self.queued = None;
+            if self.pending_clean && self.in_flight.is_none()
+                && let Err(error) = self.remove_obsolete_generations()
+            {
+                warn!(%error, "cannot remove obsolete recovery after successful Save");
+            }
             return;
         }
+        // New creative edits supersede an earlier clean-save cleanup request.
+        self.pending_clean = false;
         if active {
             return;
         }
@@ -374,6 +437,73 @@ mod tests {
                 .name,
             "Third"
         );
+    }
+
+    #[test]
+    fn successful_save_cleans_only_recovery_generations_not_session_metadata() {
+        let root = TestDir::new();
+        let mut editor = ProjectEditor::new(project("Saved")).expect("editor");
+        write_recovery_generation(&root.0, editor.project()).expect("first generation");
+        write_recovery_generation(&root.0, editor.project()).expect("second generation");
+        fs::write(root.0.join("session.json"), b"keep stable session").expect("metadata");
+        let mut manager = RecoveryAutosave::new(root.0.clone());
+
+        manager.request_clean_after_save(&editor).expect("clean Save");
+        assert!(root.0.join("session.json").exists());
+        assert!(!root.0.join("current.rhfx").exists());
+        assert!(!root.0.join("previous.rhfx").exists());
+        editor
+            .execute(EditCommand::AddAsset {
+                kind: AssetKind::Image,
+                source: AssetSource::File {
+                    path: "later.png".into(),
+                    relative_to_project: false,
+                },
+            })
+            .expect("new edit");
+        assert!(manager.schedule.due(Instant::now(), editor.is_dirty(), false));
+    }
+
+    #[test]
+    fn in_flight_generation_defers_clean_save_cleanup_until_completion() {
+        let root = TestDir::new();
+        let editor = ProjectEditor::new(project("Saved")).expect("editor");
+        write_recovery_generation(&root.0, editor.project()).expect("generation");
+        let mut manager = RecoveryAutosave::new(root.0.clone());
+        manager.in_flight = Some(editor.current_revision());
+        manager.request_clean_after_save(&editor).expect("request");
+        assert!(root.0.join("current.rhfx").exists());
+        manager
+            .finished_tx
+            .send(super::RecoveryResult {
+                revision: editor.current_revision(),
+                outcome: Ok(()),
+            })
+            .expect("finish");
+        manager.tick(Instant::now(), &editor);
+        assert!(!root.0.join("current.rhfx").exists());
+        assert!(!manager.pending_clean);
+    }
+
+    #[test]
+    fn dirty_project_close_rejects_cleanup_and_preserves_recovery() {
+        let root = TestDir::new();
+        let mut editor = ProjectEditor::new(project("Unsaved")).expect("editor");
+        editor
+            .execute(EditCommand::AddAsset {
+                kind: AssetKind::Image,
+                source: AssetSource::File {
+                    path: "unsaved.png".into(),
+                    relative_to_project: false,
+                },
+            })
+            .expect("edit");
+        write_recovery_generation(&root.0, editor.project()).expect("generation");
+        let mut manager = RecoveryAutosave::new(root.0.clone());
+        assert!(manager.finish_clean_close(&editor).is_err());
+        assert!(root.0.join("current.rhfx").exists());
+        assert!(manager.request_clean_after_save(&editor).is_err());
+        assert!(root.0.join("current.rhfx").exists());
     }
 
     #[test]
