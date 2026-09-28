@@ -176,7 +176,8 @@ impl RecoveryAutosave {
 
         if !dirty {
             self.queued = None;
-            if self.pending_clean && self.in_flight.is_none()
+            if self.pending_clean
+                && self.in_flight.is_none()
                 && let Err(error) = self.remove_obsolete_generations()
             {
                 warn!(%error, "cannot remove obsolete recovery after successful Save");
@@ -448,7 +449,9 @@ mod tests {
         fs::write(root.0.join("session.json"), b"keep stable session").expect("metadata");
         let mut manager = RecoveryAutosave::new(root.0.clone());
 
-        manager.request_clean_after_save(&editor).expect("clean Save");
+        manager
+            .request_clean_after_save(&editor)
+            .expect("clean Save");
         assert!(root.0.join("session.json").exists());
         assert!(!root.0.join("current.rhfx").exists());
         assert!(!root.0.join("previous.rhfx").exists());
@@ -461,7 +464,11 @@ mod tests {
                 },
             })
             .expect("new edit");
-        assert!(manager.schedule.due(Instant::now(), editor.is_dirty(), false));
+        assert!(
+            manager
+                .schedule
+                .due(Instant::now(), editor.is_dirty(), false)
+        );
     }
 
     #[test]
