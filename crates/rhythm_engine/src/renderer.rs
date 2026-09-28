@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use rhythm_core::ids::AssetId;
 
 use crate::{
-    blur::SeparableBlur,
+    blur::{BlurPreviewScaleError, SeparableBlur, preview_blur_radius},
     effect_chain::encode_ordered_effect_chain,
     image_decode::ImageDecodeGeneration,
     isolated_objects::IsolatedObjectCompositor,
@@ -548,6 +548,24 @@ impl Renderer {
             output,
             radius_px,
         );
+    }
+
+    /// Apply composition-pixel blur semantics at the active preview scale.
+    /// Scale validation happens before GPU commands are encoded; the project
+    /// radius remains unchanged for full-resolution export and future edits.
+    pub fn encode_preview_blur(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &TemporaryTexture,
+        output: &TemporaryTexture,
+        composition_radius_px: f32,
+        preview_scale: f32,
+    ) -> Result<(), BlurPreviewScaleError> {
+        let radius_px = preview_blur_radius(composition_radius_px, preview_scale)?;
+        self.encode_blur(device, queue, encoder, source, output, radius_px);
+        Ok(())
     }
 
     /// Composite after all effects, then return the checkout to the pool.
