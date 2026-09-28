@@ -511,6 +511,7 @@ impl Renderer {
             &EvaluatedEffect,
             &TemporaryTexture,
             &TemporaryTexture,
+            &mut TemporaryTexturePool,
         ),
     ) -> TemporaryTexture {
         encode_ordered_effect_chain(
