@@ -502,7 +502,10 @@ No explicit Apply button is used for routine inspector/project numeric settings.
 
 Each committed history state receives a monotonically increasing session revision ID.
 
-Save records the current revision as saved_revision.
+An explicit Save records the current revision as saved_revision only after the
+closed temporary project file has been successfully published. An active edit
+transaction cannot be saved before it commits or cancels; failed staging or
+publication leaves saved_revision unchanged.
 
 Dirty state is false only when current history state is the recorded saved state.
 

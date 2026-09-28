@@ -139,10 +139,19 @@ known-good file remains (or a first-save destination stays absent), and dropping
 the stage removes its unpublished temp. A successful publish consumes the stage
 and returns its destination path; it does not update the editor revision or
 session canonical path. Tests exercise replacing a V1 document, a new file,
-injected publish failures, and a real OS rename failure. The separate AI-239
-step owns `saved_revision`; AI-240 owns the Save As path transition. This
-contract covers reported filesystem-operation failures; it does not claim a
-cross-platform guarantee against sudden power loss after rename.
+injected publish failures, and a real OS rename failure.
+
+AI-239 adds `save_project_file_transactional(&mut ProjectEditor, destination)`:
+it rejects an active/uncommitted edit transaction, serializes the current
+committed creative state, flushes and closes the sibling temp, publishes it,
+and calls `ProjectEditor::mark_saved` **only after** successful publication.
+The exclusive editor borrow keeps the snapshot and revision aligned during
+the synchronous operation. Staging, sync, and rename errors preserve both
+the history revision and prior `saved_revision` (including dirty state).
+Tests verify success, later edit/undo/redo, failed staging, failed publication,
+and an active drag. AI-240 owns the separate Save As canonical-path transition.
+This contract covers reported filesystem-operation failures; it does not
+claim a cross-platform guarantee against sudden power loss after rename.
 
 If replacement fails:
 
