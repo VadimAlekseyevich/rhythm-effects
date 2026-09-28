@@ -1,14 +1,10 @@
 //! Explicit recovery Restore/Discard actions. Never publish to canonical .rhfx.
 
 use crate::{
-    file_dialogs::read_project_bytes,
-    recovery_discovery::RecoveryCandidate,
+    file_dialogs::read_project_bytes, recovery_discovery::RecoveryCandidate,
     recovery_session::RecoverySession,
 };
-use rhythm_core::{
-    editor::ProjectEditor,
-    serialization::prepare_recovered_project_open,
-};
+use rhythm_core::{editor::ProjectEditor, serialization::prepare_recovered_project_open};
 use std::{
     error::Error,
     fmt, fs, io,
@@ -31,7 +27,10 @@ impl fmt::Display for RecoveryRestoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ActiveProjectIsDirty => {
-                write!(formatter, "save or close the current dirty project before Restore")
+                write!(
+                    formatter,
+                    "save or close the current dirty project before Restore"
+                )
             }
             Self::NoValidGeneration { current, previous } => write!(
                 formatter,
@@ -78,10 +77,7 @@ fn load_generation(path: &Path) -> Result<ProjectEditor, String> {
 /// Explicitly discard only the selected direct child of the recovery root.
 /// Revalidate its session identity and physical directory location at action
 /// time; never resolve the optional canonical path as a deletion target.
-pub fn discard_recovery_candidate(
-    root: &Path,
-    candidate: &RecoveryCandidate,
-) -> io::Result<()> {
+pub fn discard_recovery_candidate(root: &Path, candidate: &RecoveryCandidate) -> io::Result<()> {
     let root_real = fs::canonicalize(root)?;
     let directory = &candidate.directory;
     if fs::symlink_metadata(directory)?.file_type().is_symlink()
@@ -112,8 +108,7 @@ mod tests {
     };
     use crate::{
         recovery_autosave::write_recovery_generation,
-        recovery_discovery::discover_recovery_candidates,
-        recovery_session::RecoverySession,
+        recovery_discovery::discover_recovery_candidates, recovery_session::RecoverySession,
     };
     use rhythm_core::{
         editor::{EditCommand, ProjectEditor},
@@ -160,10 +155,11 @@ mod tests {
         let root = TestDir::new();
         let canonical = root.0.join("saved.rhfx");
         fs::write(&canonical, b"known-good canonical bytes").expect("canonical");
-        let session = RecoverySession::create(&root.0, "Saved", Some(&canonical))
-            .expect("session");
+        let session = RecoverySession::create(&root.0, "Saved", Some(&canonical)).expect("session");
         write_recovery_generation(session.directory(), &project("Recovered")).expect("write");
-        let candidate = discover_recovery_candidates(&root.0).expect("scan").remove(0);
+        let candidate = discover_recovery_candidates(&root.0)
+            .expect("scan")
+            .remove(0);
         let mut active = active_editor();
         let mut path = Some(root.0.join("active.rhfx"));
 
@@ -176,7 +172,10 @@ mod tests {
         assert_eq!(active.saved_revision(), None);
         assert_eq!(active.history_len(), 0);
         assert_eq!(path.as_deref(), Some(canonical.as_path()));
-        assert_eq!(fs::read(&canonical).expect("untouched file"), b"known-good canonical bytes");
+        assert_eq!(
+            fs::read(&canonical).expect("untouched file"),
+            b"known-good canonical bytes"
+        );
     }
 
     #[test]
@@ -186,7 +185,9 @@ mod tests {
         write_recovery_generation(session.directory(), &project("First")).expect("first");
         write_recovery_generation(session.directory(), &project("Second")).expect("second");
         fs::write(session.directory().join("current.rhfx"), b"corrupt").expect("corrupt current");
-        let candidate = discover_recovery_candidates(&root.0).expect("scan").remove(0);
+        let candidate = discover_recovery_candidates(&root.0)
+            .expect("scan")
+            .remove(0);
         let mut active = active_editor();
         let mut path = None;
         assert_eq!(
@@ -204,7 +205,9 @@ mod tests {
         let session = RecoverySession::create(&root.0, "Unsaved", None).expect("session");
         fs::write(session.directory().join("current.rhfx"), b"bad").expect("current");
         fs::write(session.directory().join("previous.rhfx"), b"also bad").expect("previous");
-        let candidate = discover_recovery_candidates(&root.0).expect("scan").remove(0);
+        let candidate = discover_recovery_candidates(&root.0)
+            .expect("scan")
+            .remove(0);
         let mut active = active_editor();
         let canonical = root.0.join("active.rhfx");
         let mut path = Some(canonical.clone());
@@ -251,6 +254,9 @@ mod tests {
         discard_recovery_candidate(&root.0, selected).expect("discard");
         assert!(!first.directory().exists());
         assert!(second.directory().exists());
-        assert_eq!(fs::read(&canonical).expect("canonical untouched"), b"canonical");
+        assert_eq!(
+            fs::read(&canonical).expect("canonical untouched"),
+            b"canonical"
+        );
     }
 }
