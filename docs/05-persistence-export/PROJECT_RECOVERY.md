@@ -136,6 +136,16 @@ Show:
 
 Keep UX simple.
 
+AI-248 startup discovery scans non-symlink session directories, validates that
+each `session.json` ID agrees with its directory name, and retains only sessions
+with a regular `current.rhfx` or `previous.rhfx` generation. It also observes
+the last-modified timestamps of recovery and canonical files, including unsaved
+projects with no canonical file; results are ordered newest first. Broken
+individual records are skipped without blocking other recoveries. Discovery
+does not parse/open the recovery project or change/delete canonical files.
+Its candidate list is retained by the application for the Restore/Discard UX
+in later tasks, and summarized in startup diagnostics.
+
 ## 9. Restore
 
 Restore:
