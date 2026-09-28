@@ -287,7 +287,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-249** — Implement Restore opening recovered state as dirty without silently overwriting canonical .rhfx.
 - [x] **AI-250** — Implement Discard deleting only selected recovery state.
 - [x] **AI-251** — Implement corrupt-current -> previous recovery fallback.
-- [ ] **AI-252** — Delete obsolete recovery after successful explicit Save/clean close.
+- [x] **AI-252** — Delete obsolete recovery after successful explicit Save/clean close.
 - [ ] **AI-253** — Delete recovery after explicit user Don't Save confirmation.
 - [ ] **AI-254** — Implement 14-day stale recovery cleanup with canonical-newer safeguards.
 - [ ] **AI-255** — Add forced-crash filesystem/integration recovery tests.
