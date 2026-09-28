@@ -5,6 +5,7 @@ mod editor_ui;
 mod file_dialogs;
 mod gpu;
 mod project_files;
+mod recovery_actions;
 mod recovery_autosave;
 mod recovery_discovery;
 mod recovery_root;
@@ -21,6 +22,7 @@ use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use project_files::save_project_as;
+use recovery_actions::{discard_recovery_candidate, restore_recovery_candidate};
 use recovery_autosave::RecoveryAutosave;
 use recovery_discovery::{RecoveryCandidate, discover_recovery_candidates};
 use recovery_session::RecoverySession;
@@ -89,6 +91,8 @@ struct RhythmApp {
     recovery_session: Option<RecoverySession>,
     recovery_autosave: Option<RecoveryAutosave>,
     recovery_candidates: Vec<RecoveryCandidate>,
+    recovery_error: Option<String>,
+    recovery_discard_confirmation: Option<usize>,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
@@ -119,6 +123,8 @@ impl Default for RhythmApp {
             recovery_session: None,
             recovery_autosave: None,
             recovery_candidates: Vec::new(),
+            recovery_error: None,
+            recovery_discard_confirmation: None,
             window: None,
             gpu: None,
             renderer: None,
@@ -313,6 +319,7 @@ impl ApplicationHandler for RhythmApp {
         }
 
         let mut project_opened = false;
+        let mut project_recovered = false;
         match event {
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
@@ -693,6 +700,8 @@ impl ApplicationHandler for RhythmApp {
                         .renderer
                         .as_ref()
                         .map(rhythm_engine::renderer::Renderer::text_resources);
+                    let mut recovery_action: Option<(usize, bool)> = None;
+                    let mut confirmation_change: Option<Option<usize>> = None;
                     let full_output = egui_context.run_ui(raw_input, |root_ui| {
                         if let Some(diagnostics) = self.diagnostics.as_ref() {
                             editor_ui::draw_editor_shell(
@@ -705,7 +714,107 @@ impl ApplicationHandler for RhythmApp {
                                 text_resources,
                             );
                         }
+                        if !self.recovery_candidates.is_empty() {
+                            egui::Window::new("Recover unsaved projects")
+                                .collapsible(false)
+                                .resizable(true)
+                                .show(root_ui.ctx(), |ui| {
+                                    ui.label("Restore opens a dirty project. No canonical file is overwritten automatically.");
+                                    if let Some(error) = self.recovery_error.as_deref() {
+                                        ui.colored_label(egui::Color32::RED, error);
+                                    }
+                                    for (index, candidate) in self.recovery_candidates.iter().enumerate() {
+                                        ui.group(|ui| {
+                                            ui.label(&candidate.metadata.project_name);
+                                            match candidate.metadata.canonical_project_path.as_ref() {
+                                                Some(path) => {
+                                                    ui.label(format!("Project: {}", path.display()));
+                                                }
+                                                None => {
+                                                    ui.label("Unsaved project: recovery may be the only copy.");
+                                                }
+                                            }
+                                            ui.label(format!(
+                                                "Recovery: {:?} | Canonical: {:?}",
+                                                candidate.latest_recovery_modified(),
+                                                candidate.canonical_modified
+                                            ));
+                                            if ui.button("Restore").clicked() {
+                                                recovery_action = Some((index, true));
+                                            }
+                                            if self.recovery_discard_confirmation == Some(index) {
+                                                ui.colored_label(
+                                                    egui::Color32::RED,
+                                                    "This removes only this recovery record and may discard the only copy.",
+                                                );
+                                                ui.horizontal(|ui| {
+                                                    if ui.button("Confirm discard").clicked() {
+                                                        recovery_action = Some((index, false));
+                                                    }
+                                                    if ui.button("Cancel").clicked() {
+                                                        confirmation_change = Some(None);
+                                                    }
+                                                });
+                                            } else if ui.button("Discard...").clicked() {
+                                                confirmation_change = Some(Some(index));
+                                            }
+                                        });
+                                    }
+                                });
+                        }
                     });
+
+                    if let Some(change) = confirmation_change {
+                        self.recovery_discard_confirmation = change;
+                    }
+                    if let Some((index, restore)) = recovery_action
+                        && let Some(candidate) = self.recovery_candidates.get(index).cloned()
+                    {
+                        if restore {
+                            match restore_recovery_candidate(
+                                &mut self.project_editor,
+                                &mut self.project_path,
+                                &candidate,
+                            ) {
+                                Ok(generation) => {
+                                    self.session = EditorSession::default();
+                                    self.waveform = None;
+                                    self.recovery_candidates.remove(index);
+                                    self.recovery_discard_confirmation = None;
+                                    self.recovery_error = None;
+                                    project_recovered = true;
+                                    info!(
+                                        ?generation,
+                                        session_id = %candidate.metadata.session_id,
+                                        "recovery restored as dirty without writing canonical project"
+                                    );
+                                }
+                                Err(error) => {
+                                    self.recovery_error = Some(error.to_string());
+                                    warn!(%error, "recovery Restore failed; current project preserved");
+                                }
+                            }
+                        } else {
+                            let discarded = recovery_root::ensure_recovery_root()
+                                .and_then(|root| discard_recovery_candidate(&root, &candidate));
+                            match discarded {
+                                Ok(()) => {
+                                    self.recovery_candidates.remove(index);
+                                    self.recovery_discard_confirmation = None;
+                                    self.recovery_error = None;
+                                    info!(
+                                        session_id = %candidate.metadata.session_id,
+                                        "selected recovery explicitly discarded; canonical untouched"
+                                    );
+                                }
+                                Err(error) => {
+                                    self.recovery_error = Some(error.to_string());
+                                    warn!(%error, "selected recovery Discard failed");
+                                }
+                            }
+                        }
+                        window.request_redraw();
+                    }
 
                     if self.session.take_import_dialog_request()
                         && let Some(path) = file_dialogs::pick_media_to_import()
@@ -1016,7 +1125,7 @@ impl ApplicationHandler for RhythmApp {
             },
             _ => {}
         }
-        if project_opened {
+        if project_opened || project_recovered {
             self.start_recovery_session();
         }
     }

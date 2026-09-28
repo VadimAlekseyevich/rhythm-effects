@@ -157,6 +157,16 @@ Restore:
 
 Restoring never silently overwrites the canonical project.
 
+AI-249/251 expose a validated, explicit Restore action. The candidate is loaded
+through the normal bounded read, schema parse/migration and semantic validation
+gates. If current fails, the previous successful generation is attempted. The
+active editor and canonical path are swapped only after a complete candidate
+has been prepared; the restored project starts dirty with no saved revision
+and must be explicitly saved. Restore refuses to replace an already-dirty
+active editor and never automatically publishes the recovered bytes to the
+canonical file. The UI shows the recovery timestamp and canonical file
+timestamp so the user can choose.
+
 ## 10. Discard
 
 Discard removes recovery only after explicit user action.
@@ -164,6 +174,12 @@ Discard removes recovery only after explicit user action.
 Canonical .rhfx remains untouched.
 
 For unsaved project, UI clearly indicates recovery may be the only copy.
+
+AI-250 displays a separate confirmation before Discard and warns that
+an unsaved project may have no other copy. Discard revalidates selected
+session metadata and rejects paths outside the immediate recovery root,
+removing only that session's recovery directory. It never follows the
+optional canonical project path as a deletion target.
 
 ## 11. Corrupt recovery
 

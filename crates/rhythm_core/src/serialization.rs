@@ -307,6 +307,15 @@ pub fn prepare_project_file_open(bytes: &[u8]) -> Result<ProjectEditor, ProjectO
     ProjectEditor::new(candidate.project).map_err(ProjectOpenError::Editor)
 }
 
+/// Prepare a recovered document through the same parse/migrate/semantic gates
+/// as Open, but do not treat the recovery snapshot as a canonical explicit Save.
+/// Callers swap this detached dirty editor only after the complete load succeeds.
+pub fn prepare_recovered_project_open(bytes: &[u8]) -> Result<ProjectEditor, ProjectOpenError> {
+    let mut replacement = prepare_project_file_open(bytes)?;
+    replacement.mark_recovered_dirty();
+    Ok(replacement)
+}
+
 /// Atomically swaps the active ProjectEditor only after the entire load succeeds.
 /// Failure preserves the previous document, revisions, undo/redo and transactions.
 pub fn open_project_file_transactional(
@@ -337,6 +346,20 @@ mod tests {
         },
     };
     use serde::{Deserialize, Serialize};
+
+    #[test]
+    fn recovered_project_is_dirty_and_has_no_saved_revision() {
+        let original = project();
+        let bytes = super::serialize_project_file_v1(&original).expect("encode");
+        let restored = super::prepare_recovered_project_open(&bytes).expect("restore");
+        assert_eq!(restored.project(), &original);
+        assert_eq!(restored.saved_revision(), None);
+        assert!(restored.is_dirty());
+        assert_eq!(restored.history_len(), 0);
+
+        let opened = super::prepare_project_file_open(&bytes).expect("normal Open");
+        assert!(!opened.is_dirty());
+    }
 
     fn project() -> Project {
         Project::new(

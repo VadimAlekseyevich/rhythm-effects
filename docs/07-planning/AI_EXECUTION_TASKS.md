@@ -284,9 +284,9 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-246** — Coalesce recovery requests so at most one write is in flight.
 - [x] **AI-247** — Keep current and previous successful recovery generations.
 - [x] **AI-248** — Implement startup recovery discovery.
-- [ ] **AI-249** — Implement Restore opening recovered state as dirty without silently overwriting canonical .rhfx.
-- [ ] **AI-250** — Implement Discard deleting only selected recovery state.
-- [ ] **AI-251** — Implement corrupt-current -> previous recovery fallback.
+- [x] **AI-249** — Implement Restore opening recovered state as dirty without silently overwriting canonical .rhfx.
+- [x] **AI-250** — Implement Discard deleting only selected recovery state.
+- [x] **AI-251** — Implement corrupt-current -> previous recovery fallback.
 - [ ] **AI-252** — Delete obsolete recovery after successful explicit Save/clean close.
 - [ ] **AI-253** — Delete recovery after explicit user Don't Save confirmation.
 - [ ] **AI-254** — Implement 14-day stale recovery cleanup with canonical-newer safeguards.

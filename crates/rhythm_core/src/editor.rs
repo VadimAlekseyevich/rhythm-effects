@@ -718,6 +718,12 @@ impl ProjectEditor {
         self.history.mark_saved();
     }
 
+    /// Recovery has no canonical published Save for its current creative state.
+    /// Leave history initially empty, but force explicit Save/Save As afterward.
+    pub(crate) fn mark_recovered_dirty(&mut self) {
+        self.history.saved_revision = None;
+    }
+
     /// Update the current creative asset sources and every stored undo/redo
     /// payload to the newly published project directory. All transformations
     /// are deterministic and infallible; publication of an already-validated
