@@ -339,7 +339,10 @@ mod tests {
                 assert!((a - b).abs() < 0.0001);
             }
         }
-        assert_eq!(reference_kernel(1000.0), reference_kernel(MAX_BLUR_RADIUS_PX));
+        assert_eq!(
+            reference_kernel(1000.0),
+            reference_kernel(MAX_BLUR_RADIUS_PX)
+        );
     }
 
     #[test]
