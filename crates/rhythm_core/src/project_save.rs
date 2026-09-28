@@ -267,9 +267,16 @@ pub fn stage_project_file_save(
 
 #[cfg(test)]
 mod tests {
-    use super::{ProjectSaveStageError, stage_project_file_save};
+    use super::{
+        ProjectSaveError, ProjectSaveStageError, save_project_file_transactional,
+        stage_project_file_save,
+    };
     use crate::{
-        project::{Project, ProjectSettings, ProjectValidationError},
+        domain::Vec2,
+        editor::{EditCommand, ProjectEditor},
+        project::{
+            AssetKind, AssetSource, Project, ProjectSettings, ProjectValidationError,
+        },
         serialization::{ProjectFileEncodeError, parse_project_file_v1, serialize_project_file_v1},
         time::{GridOffsetNs, TempoMap},
     };
@@ -311,6 +318,143 @@ mod tests {
             ProjectSettings::default(),
             TempoMap::unset(GridOffsetNs::new(0)),
         )
+    }
+
+    fn dirty_editor() -> ProjectEditor {
+        let mut editor = ProjectEditor::new(project()).expect("valid editor");
+        editor
+            .execute(EditCommand::AddAsset {
+                kind: AssetKind::Image,
+                source: AssetSource::File {
+                    path: "first-image.png".into(),
+                    relative_to_project: true,
+                },
+            })
+            .expect("add source");
+        assert!(editor.is_dirty());
+        editor
+    }
+
+    #[test]
+    fn successful_save_marks_exact_published_revision_and_preserves_undo_redo() {
+        let root = TestDir::new();
+        let destination = root.join("creative.rhfx");
+        let mut editor = dirty_editor();
+        let published_revision = editor.current_revision();
+        let original_history_len = editor.history_len();
+        let original_project = editor.project().clone();
+        assert_ne!(editor.saved_revision(), Some(published_revision));
+
+        assert_eq!(
+            save_project_file_transactional(&mut editor, &destination).expect("save"),
+            destination
+        );
+        assert_eq!(editor.saved_revision(), Some(published_revision));
+        assert!(!editor.is_dirty());
+        assert_eq!(editor.history_len(), original_history_len);
+        assert_eq!(
+            parse_project_file_v1(&fs::read(&destination).expect("published bytes"))
+                .expect("valid project")
+                .project,
+            original_project
+        );
+
+        editor
+            .execute(EditCommand::AddAsset {
+                kind: AssetKind::Image,
+                source: AssetSource::File {
+                    path: "second-image.png".into(),
+                    relative_to_project: true,
+                },
+            })
+            .expect("new edit");
+        assert!(editor.is_dirty());
+        editor.undo().expect("undo later edit");
+        assert_eq!(editor.current_revision(), published_revision);
+        assert!(!editor.is_dirty());
+        editor.redo().expect("redo later edit");
+        assert!(editor.is_dirty());
+    }
+
+    #[test]
+    fn staging_failure_keeps_previous_saved_revision_and_dirty_project() {
+        let root = TestDir::new();
+        let blocker = root.join("not-a-directory");
+        fs::write(&blocker, b"do not modify").expect("create blocker");
+        let destination = blocker.join("creative.rhfx");
+        let mut editor = dirty_editor();
+        let before_project = editor.project().clone();
+        let before_revision = editor.current_revision();
+        let saved_revision = editor.saved_revision();
+
+        assert!(matches!(
+            save_project_file_transactional(&mut editor, &destination),
+            Err(ProjectSaveError::Stage(ProjectSaveStageError::Io(_)))
+        ));
+        assert_eq!(editor.project(), &before_project);
+        assert_eq!(editor.current_revision(), before_revision);
+        assert_eq!(editor.saved_revision(), saved_revision);
+        assert!(editor.is_dirty());
+        assert_eq!(fs::read(&blocker).expect("read blocker"), b"do not modify");
+    }
+
+    #[test]
+    fn failed_publication_does_not_mark_revision_or_leave_temp() {
+        let root = TestDir::new();
+        let destination = root.join("occupied.rhfx");
+        fs::create_dir(&destination).expect("occupied canonical destination");
+        let mut editor = dirty_editor();
+        let saved_revision = editor.saved_revision();
+        let before_revision = editor.current_revision();
+        let before_project = editor.project().clone();
+
+        assert!(matches!(
+            save_project_file_transactional(&mut editor, &destination),
+            Err(ProjectSaveError::Publish(_))
+        ));
+        assert_eq!(editor.saved_revision(), saved_revision);
+        assert_eq!(editor.current_revision(), before_revision);
+        assert_eq!(editor.project(), &before_project);
+        assert!(editor.is_dirty());
+        assert!(destination.is_dir());
+        assert_eq!(fs::read_dir(&root.0).expect("list files").count(), 1);
+    }
+
+    #[test]
+    fn saving_during_active_drag_does_not_publish_uncommitted_state() {
+        let root = TestDir::new();
+        let destination = root.join("not-published.rhfx");
+        let mut editor = ProjectEditor::new(project()).expect("valid editor");
+        editor
+            .execute(EditCommand::AddImageFromFile {
+                source: AssetSource::File {
+                    path: "dragged-image.png".into(),
+                    relative_to_project: true,
+                },
+                name: "Image".into(),
+                position: Vec2::new(10.0, 20.0).expect("finite"),
+            })
+            .expect("create image");
+        let object_id = editor.project().composition.objects[0].id;
+        editor
+            .begin_position_transaction(object_id)
+            .expect("begin drag");
+        editor
+            .update_position_transaction(Vec2::new(30.0, 40.0).expect("finite"))
+            .expect("update drag");
+        let revision = editor.current_revision();
+        let saved_revision = editor.saved_revision();
+
+        assert!(matches!(
+            save_project_file_transactional(&mut editor, &destination),
+            Err(ProjectSaveError::ActiveTransaction)
+        ));
+        assert!(!destination.exists());
+        assert_eq!(fs::read_dir(&root.0).expect("list files").count(), 0);
+        assert_eq!(editor.current_revision(), revision);
+        assert_eq!(editor.saved_revision(), saved_revision);
+        assert!(editor.has_active_transaction());
+        editor.cancel_transaction().expect("cancel drag");
     }
 
     #[test]
