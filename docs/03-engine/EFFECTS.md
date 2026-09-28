@@ -58,8 +58,12 @@ then vertically into the caller's output. The uniform kernel is symmetric,
 Gaussian-like and normalized per pass, with up to 128 taps on each side and
 a clamped radius of 0..128. RGB and alpha are convolved together in
 linear-premultiplied representation, never sampled in-place. Radius zero
-uses an identity sample in both passes. Shader radius is currently expressed
-in working texture pixels; AI-260 applies preview-scale compensation.
+uses an identity sample in both passes. AI-260 converts the validated composition-pixel radius to the working
+preview scale before GPU encoding: Full uses 1.0, Half 0.5, Quarter 0.25,
+and Auto uses its resolved scale. Invalid/nonfinite scales or radii are
+rejected without encoding. The project value is never rewritten; export
+continues to use full-resolution radius. Unit tests cover identity,
+Full/Half/Quarter equivalence and rejected invalid inputs.
 This GPU blur encoder is now available to the effect-chain callback; later
 render-loop wiring and visual reference tests remain separate from the
 shader implementation.
