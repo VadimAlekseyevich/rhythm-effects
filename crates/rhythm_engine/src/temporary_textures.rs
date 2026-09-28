@@ -179,11 +179,21 @@ mod tests {
     #[test]
     fn rejects_invalid_target_dimensions_and_usage() {
         assert_eq!(
-            TemporaryTextureKey::new(0, 8, TextureFormat::Rgba16Float, TextureUsages::RENDER_ATTACHMENT),
+            TemporaryTextureKey::new(
+                0,
+                8,
+                TextureFormat::Rgba16Float,
+                TextureUsages::RENDER_ATTACHMENT
+            ),
             Err(TemporaryTextureError::ZeroDimension)
         );
         assert_eq!(
-            TemporaryTextureKey::new(8, 0, TextureFormat::Rgba16Float, TextureUsages::RENDER_ATTACHMENT),
+            TemporaryTextureKey::new(
+                8,
+                0,
+                TextureFormat::Rgba16Float,
+                TextureUsages::RENDER_ATTACHMENT
+            ),
             Err(TemporaryTextureError::ZeroDimension)
         );
         assert_eq!(
@@ -207,7 +217,11 @@ mod tests {
         assert_eq!(slots.take(other_format), None);
         assert_eq!(slots.take(other_usage), None);
         assert_eq!(slots.take(match_key), Some(17));
-        assert_eq!(slots.take(match_key), None, "checked-out target cannot alias");
+        assert_eq!(
+            slots.take(match_key),
+            None,
+            "checked-out target cannot alias"
+        );
         slots.put(match_key, 17);
         assert_eq!(slots.take(match_key), Some(17), "returned target is reused");
     }
