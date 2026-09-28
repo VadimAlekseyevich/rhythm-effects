@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::{
+    editor::ProjectEditor,
     project::Project,
     serialization::{ProjectFileEncodeError, serialize_project_file_v1},
 };
@@ -46,6 +47,61 @@ impl Error for ProjectSaveStageError {
             Self::InvalidDestination | Self::TemporaryNameCollision => None,
         }
     }
+}
+
+/// Explicit Save error. No failure may mark the editor revision as saved.
+#[derive(Debug)]
+pub enum ProjectSaveError {
+    ActiveTransaction,
+    Stage(ProjectSaveStageError),
+    Publish(io::Error),
+}
+
+impl fmt::Display for ProjectSaveError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ActiveTransaction => write!(
+                formatter,
+                "cannot save during an active edit transaction"
+            ),
+            Self::Stage(error) => fmt::Display::fmt(error, formatter),
+            Self::Publish(error) => write!(formatter, "cannot publish project save: {error}"),
+        }
+    }
+}
+
+impl Error for ProjectSaveError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::ActiveTransaction => None,
+            Self::Stage(error) => Some(error),
+            Self::Publish(error) => Some(error),
+        }
+    }
+}
+
+/// Serialize the current, committed editor revision and publish it before
+/// marking the matching revision saved. The exclusive editor borrow keeps the
+/// snapshot/revision stable across the synchronous filesystem operation.
+///
+/// On any staging, flush/sync, or publication failure, history and dirty state
+/// are unchanged; the owned temporary file is cleaned up. No canonical session
+/// path is changed here (Save As owns that separate transition in AI-240).
+pub fn save_project_file_transactional(
+    editor: &mut ProjectEditor,
+    destination: &Path,
+) -> Result<PathBuf, ProjectSaveError> {
+    if editor.has_active_transaction() {
+        return Err(ProjectSaveError::ActiveTransaction);
+    }
+
+    let closed = stage_project_file_save(editor.project(), destination)
+        .map_err(ProjectSaveError::Stage)?
+        .flush_and_close()
+        .map_err(ProjectSaveError::Stage)?;
+    let published_path = closed.publish().map_err(ProjectSaveError::Publish)?;
+    editor.mark_saved();
+    Ok(published_path)
 }
 
 /// Owns an unpublished sibling temp file. Dropping the stage closes and removes
