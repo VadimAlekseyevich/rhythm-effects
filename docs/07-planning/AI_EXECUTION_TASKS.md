@@ -283,7 +283,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-245** — Defer recovery while an edit transaction is active and wait at least 1 second after it ends.
 - [x] **AI-246** — Coalesce recovery requests so at most one write is in flight.
 - [x] **AI-247** — Keep current and previous successful recovery generations.
-- [ ] **AI-248** — Implement startup recovery discovery.
+- [x] **AI-248** — Implement startup recovery discovery.
 - [ ] **AI-249** — Implement Restore opening recovered state as dirty without silently overwriting canonical .rhfx.
 - [ ] **AI-250** — Implement Discard deleting only selected recovery state.
 - [ ] **AI-251** — Implement corrupt-current -> previous recovery fallback.
