@@ -12,7 +12,14 @@ Windows MVP recovery root:
 %LOCALAPPDATA%\RhythmEffects\recovery\
 ~~~
 
-Each editing session has a stable recovery directory/id.
+AI-242 resolves this root from the absolute `LOCALAPPDATA` environment value.
+An absent, empty or relative value is an explicit error, never a fallback to the
+working directory. The directory is created idempotently at application startup;
+a setup error is logged without preventing the editor from opening. Tests cover
+normal resolution, repeated creation, invalid environment values and a blocked
+parent directory.
+
+Each editing session has a stable recovery directory/id (AI-243).
 
 Unsaved new projects receive recovery before first explicit Save.
 
