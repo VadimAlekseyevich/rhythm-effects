@@ -4,8 +4,7 @@
 use std::{
     env,
     ffi::OsStr,
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -43,8 +42,7 @@ mod tests {
     use super::{ensure_recovery_root_at, recovery_root_from_local_app_data};
     use std::{
         ffi::OsStr,
-        fs,
-        io,
+        fs, io,
         path::Path,
         sync::atomic::{AtomicU64, Ordering},
     };
@@ -96,7 +94,11 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidInput
         );
-        assert!(!Path::new("relative-app-data").join("RhythmEffects").exists());
+        assert!(
+            !Path::new("relative-app-data")
+                .join("RhythmEffects")
+                .exists()
+        );
     }
 
     #[test]
