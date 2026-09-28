@@ -1,4 +1,4 @@
-//! Staging and flush/close phases of explicit Save, without publication or revision changes.
+//! Staging, flush/close, and publication phases of explicit Save. Revision changes are separate.
 use std::{
     error::Error,
     ffi::OsString,
@@ -107,7 +107,7 @@ impl Drop for StagedProjectSave {
 
 /// Fully written and synchronized sibling file, with no open write handle.
 /// Still unpublished: dropping it cleans up the temp and leaves the canonical
-/// document unchanged. AI-238 will consume this type during safe publication.
+/// document unchanged. Only this state permits publication.
 #[derive(Debug)]
 pub struct ClosedProjectSave {
     destination: PathBuf,
@@ -124,6 +124,28 @@ impl ClosedProjectSave {
     pub fn temp_path(&self) -> &Path {
         &self.temp_path
     }
+
+    /// Replace the destination using a same-directory filesystem rename.
+    ///
+    /// The temporary file has already been synchronized and closed. On Windows,
+    /// std::fs::rename uses the replace-existing MoveFileExW operation; on Unix,
+    /// rename replaces the destination. Never remove the old file first or
+    /// fall back to copying into it: a failed rename must leave the previous
+    /// document intact (or a new destination absent). Drop cleans up the temp
+    /// on failure. Publication does not change any editor saved revision.
+    pub fn publish(self) -> io::Result<PathBuf> {
+        self.publish_with(fs::rename)
+    }
+
+    fn publish_with(
+        mut self,
+        replace: impl FnOnce(&Path, &Path) -> io::Result<()>,
+    ) -> io::Result<PathBuf> {
+        replace(&self.temp_path, &self.destination)?;
+        // After successful rename, this stage no longer owns the old temp name.
+        self.temp_path = PathBuf::new();
+        Ok(std::mem::take(&mut self.destination))
+    }
 }
 
 impl Drop for ClosedProjectSave {
@@ -135,8 +157,8 @@ impl Drop for ClosedProjectSave {
 }
 
 /// Validate/encode the snapshot first, then create_new and write a sibling
-/// temp file. Never truncate or write the canonical destination. Publication,
-/// publication and saved_revision changes belong to later Save stages.
+/// temp file. Never truncate or write the canonical destination. The closed
+/// stage may be published separately; saved_revision is a later Save stage.
 pub fn stage_project_file_save(
     project: &Project,
     destination: &Path,
