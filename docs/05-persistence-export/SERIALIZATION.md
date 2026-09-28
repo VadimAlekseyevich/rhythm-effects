@@ -128,9 +128,20 @@ the handle before returning `ClosedProjectSave`. On a flush/sync failure the
 stage is dropped and the unpublished temp is cleaned up, without modifying
 the canonical `.rhfx`. The closed stage remains unpublished and also cleans
 up on drop. Tests verify that the closed temp is renameable on Windows and
-that failed finalization leaves the previous file untouched. Publication and
-marking the saved revision remain separate following steps (AI-238–AI-239);
-staging and closure alone are not a completed Save.
+that failed finalization leaves the previous file untouched.
+
+AI-238 publishes only a closed stage through `ClosedProjectSave::publish`:
+`std::fs::rename` replaces the destination from its already-synchronized sibling
+temp. On Windows, Rust uses the replace-existing `MoveFileExW` path. There is
+no delete-old-first or in-place-copy fallback: if rename fails, the previous
+known-good file remains (or a first-save destination stays absent), and dropping
+the stage removes its unpublished temp. A successful publish consumes the stage
+and returns its destination path; it does not update the editor revision or
+session canonical path. Tests exercise replacing a V1 document, a new file,
+injected publish failures, and a real OS rename failure. The separate AI-239
+step owns `saved_revision`; AI-240 owns the Save As path transition. This
+contract covers reported filesystem-operation failures; it does not claim a
+cross-platform guarantee against sudden power loss after rename.
 
 If replacement fails:
 
