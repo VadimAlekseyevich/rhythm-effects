@@ -60,10 +60,9 @@ pub enum ProjectSaveError {
 impl fmt::Display for ProjectSaveError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ActiveTransaction => write!(
-                formatter,
-                "cannot save during an active edit transaction"
-            ),
+            Self::ActiveTransaction => {
+                write!(formatter, "cannot save during an active edit transaction")
+            }
             Self::Stage(error) => fmt::Display::fmt(error, formatter),
             Self::Publish(error) => write!(formatter, "cannot publish project save: {error}"),
         }
@@ -274,9 +273,7 @@ mod tests {
     use crate::{
         domain::Vec2,
         editor::{EditCommand, ProjectEditor},
-        project::{
-            AssetKind, AssetSource, Project, ProjectSettings, ProjectValidationError,
-        },
+        project::{AssetKind, AssetSource, Project, ProjectSettings, ProjectValidationError},
         serialization::{ProjectFileEncodeError, parse_project_file_v1, serialize_project_file_v1},
         time::{GridOffsetNs, TempoMap},
     };
