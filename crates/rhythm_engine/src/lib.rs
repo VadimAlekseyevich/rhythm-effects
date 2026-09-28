@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod image_decode;
+pub mod isolated_objects;
 pub mod renderer;
 pub mod runtime_assets;
 pub mod scene_eval;
