@@ -76,9 +76,80 @@ pub fn relative_asset_source(
     }))
 }
 
+/// Re-express an asset against the published Save As location without touching
+/// the filesystem. Missing assets retain their identity, and ineligible paths
+/// (non-absolute origin/destination, parent traversal, non-UTF-8) are unchanged.
+///
+/// Existing project-relative paths are anchored to the *old* project directory
+/// before their representation is chosen for the *new* directory. In-project
+/// absolute paths may become relative on first Save As.
+#[must_use]
+pub fn rebase_asset_source_for_save_as(
+    source: &AssetSource,
+    previous_project_path: Option<&Path>,
+    destination: &Path,
+) -> AssetSource {
+    let AssetSource::File {
+        path,
+        relative_to_project,
+    } = source;
+    if !destination.is_absolute() {
+        return source.clone();
+    }
+
+    let stored = Path::new(path);
+    let absolute = if *relative_to_project {
+        let Some(previous) = previous_project_path.filter(|path| path.is_absolute()) else {
+            return source.clone();
+        };
+        if stored.as_os_str().is_empty()
+            || stored.is_absolute()
+            || stored.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::CurDir | Component::RootDir | Component::Prefix(_)
+                )
+            })
+        {
+            return source.clone();
+        }
+        let Some(parent) = previous.parent() else {
+            return source.clone();
+        };
+        parent.join(stored)
+    } else {
+        if !stored.is_absolute() {
+            return source.clone();
+        }
+        stored.to_path_buf()
+    };
+
+    asset_source_for_saved_project(destination, &absolute).unwrap_or_else(|_| source.clone())
+}
+
+/// Transform the detached Save As snapshot, without changing current editor
+/// state. The caller commits the corresponding in-memory rebasing only after
+/// its publication operation succeeds.
+pub fn rebase_project_assets_for_save_as(
+    project: &mut crate::project::Project,
+    previous_project_path: Option<&Path>,
+    destination: &Path,
+) {
+    for asset in &mut project.assets {
+        asset.source = rebase_asset_source_for_save_as(
+            &asset.source,
+            previous_project_path,
+            destination,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{AssetPathError, asset_source_for_saved_project, relative_asset_source};
+    use super::{
+        AssetPathError, asset_source_for_saved_project, rebase_asset_source_for_save_as,
+        relative_asset_source,
+    };
     use crate::project::AssetSource;
     use std::path::PathBuf;
 
@@ -181,6 +252,81 @@ mod tests {
             .join("outside.png");
 
         assert_eq!(relative_asset_source(&project, &asset), Ok(None));
+    }
+
+    #[test]
+    fn save_as_keeps_resource_identity_across_new_project_directory() {
+        let old_project = saved_project_path();
+        let old_parent = old_project.parent().expect("old project dir");
+        let destination = old_parent.parent().expect("root").join("new").join("saved.rhfx");
+        let original = AssetSource::File {
+            path: "assets/image.png".into(),
+            relative_to_project: true,
+        };
+        assert_eq!(
+            rebase_asset_source_for_save_as(&original, Some(&old_project), &destination),
+            AssetSource::File {
+                path: old_parent
+                    .join("assets/image.png")
+                    .to_str()
+                    .expect("UTF-8 test path")
+                    .into(),
+                relative_to_project: false,
+            }
+        );
+
+        let nested_destination = old_parent.join("assets").join("saved.rhfx");
+        assert_eq!(
+            rebase_asset_source_for_save_as(&original, Some(&old_project), &nested_destination),
+            AssetSource::File {
+                path: old_parent
+                    .join("assets/image.png")
+                    .to_str()
+                    .expect("UTF-8 test path")
+                    .into(),
+                relative_to_project: false,
+            }
+        );
+    }
+
+    #[test]
+    fn save_as_relativizes_absolute_resource_under_new_directory() {
+        let new_project = saved_project_path();
+        let absolute_asset = new_project.parent().expect("project directory").join("missing.png");
+        let source = AssetSource::File {
+            path: absolute_asset.to_str().expect("UTF-8 test path").into(),
+            relative_to_project: false,
+        };
+        assert_eq!(
+            rebase_asset_source_for_save_as(&source, None, &new_project),
+            AssetSource::File {
+                path: "missing.png".into(),
+                relative_to_project: true,
+            }
+        );
+    }
+
+    #[test]
+    fn save_as_keeps_ineligible_asset_sources_unchanged() {
+        let old_project = saved_project_path();
+        let new_project = old_project.parent().expect("parent").join("new.rhfx");
+        let relative = AssetSource::File {
+            path: "../outside.png".into(),
+            relative_to_project: true,
+        };
+        let bare = AssetSource::File {
+            path: "relative-without-origin.png".into(),
+            relative_to_project: false,
+        };
+        assert_eq!(
+            rebase_asset_source_for_save_as(&relative, Some(&old_project), &new_project),
+            relative
+        );
+        assert_eq!(
+            rebase_asset_source_for_save_as(&relative, None, &new_project),
+            relative
+        );
+        assert_eq!(rebase_asset_source_for_save_as(&bare, None, &new_project), bare);
     }
 
     #[test]
