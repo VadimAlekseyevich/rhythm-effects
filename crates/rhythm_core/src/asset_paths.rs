@@ -107,7 +107,10 @@ pub fn rebase_asset_source_for_save_as(
             || stored.components().any(|component| {
                 matches!(
                     component,
-                    Component::ParentDir | Component::CurDir | Component::RootDir | Component::Prefix(_)
+                    Component::ParentDir
+                        | Component::CurDir
+                        | Component::RootDir
+                        | Component::Prefix(_)
                 )
             })
         {
@@ -136,11 +139,8 @@ pub fn rebase_project_assets_for_save_as(
     destination: &Path,
 ) {
     for asset in &mut project.assets {
-        asset.source = rebase_asset_source_for_save_as(
-            &asset.source,
-            previous_project_path,
-            destination,
-        );
+        asset.source =
+            rebase_asset_source_for_save_as(&asset.source, previous_project_path, destination);
     }
 }
 
@@ -258,7 +258,11 @@ mod tests {
     fn save_as_keeps_resource_identity_across_new_project_directory() {
         let old_project = saved_project_path();
         let old_parent = old_project.parent().expect("old project dir");
-        let destination = old_parent.parent().expect("root").join("new").join("saved.rhfx");
+        let destination = old_parent
+            .parent()
+            .expect("root")
+            .join("new")
+            .join("saved.rhfx");
         let original = AssetSource::File {
             path: "assets/image.png".into(),
             relative_to_project: true,
@@ -288,7 +292,10 @@ mod tests {
     #[test]
     fn save_as_relativizes_absolute_resource_under_new_directory() {
         let new_project = saved_project_path();
-        let absolute_asset = new_project.parent().expect("project directory").join("missing.png");
+        let absolute_asset = new_project
+            .parent()
+            .expect("project directory")
+            .join("missing.png");
         let source = AssetSource::File {
             path: absolute_asset.to_str().expect("UTF-8 test path").into(),
             relative_to_project: false,
@@ -322,7 +329,10 @@ mod tests {
             rebase_asset_source_for_save_as(&relative, None, &new_project),
             relative
         );
-        assert_eq!(rebase_asset_source_for_save_as(&bare, None, &new_project), bare);
+        assert_eq!(
+            rebase_asset_source_for_save_as(&bare, None, &new_project),
+            bare
+        );
     }
 
     #[test]
