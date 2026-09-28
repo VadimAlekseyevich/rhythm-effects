@@ -6,6 +6,7 @@ mod file_dialogs;
 mod gpu;
 mod project_files;
 mod recovery_autosave;
+mod recovery_discovery;
 mod recovery_root;
 mod recovery_session;
 mod shortcuts;
@@ -21,6 +22,7 @@ use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use project_files::save_project_as;
 use recovery_autosave::RecoveryAutosave;
+use recovery_discovery::{RecoveryCandidate, discover_recovery_candidates};
 use recovery_session::RecoverySession;
 use rhythm_core::{
     APP_NAME, domain::Vec2, editor::EditCommand, project::AssetSource,
@@ -86,6 +88,7 @@ struct RhythmApp {
     project_path: Option<PathBuf>,
     recovery_session: Option<RecoverySession>,
     recovery_autosave: Option<RecoveryAutosave>,
+    recovery_candidates: Vec<RecoveryCandidate>,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
@@ -115,6 +118,7 @@ impl Default for RhythmApp {
             project_path: None,
             recovery_session: None,
             recovery_autosave: None,
+            recovery_candidates: Vec::new(),
             window: None,
             gpu: None,
             renderer: None,
@@ -178,6 +182,28 @@ impl ApplicationHandler for RhythmApp {
             return;
         }
 
+        if let Ok(root) = recovery_root::ensure_recovery_root() {
+            match discover_recovery_candidates(&root) {
+                Ok(candidates) => {
+                    for candidate in &candidates {
+                        info!(
+                            session_id = %candidate.metadata.session_id,
+                            project_name = %candidate.metadata.project_name,
+                            directory = %candidate.directory.display(),
+                            last_snapshot = ?candidate.latest_recovery_modified(),
+                            canonical_modified = ?candidate.canonical_modified,
+                            "recovery candidate discovered"
+                        );
+                    }
+                    self.recovery_candidates = candidates;
+                    info!(
+                        count = self.recovery_candidates.len(),
+                        "startup recovery discovery complete"
+                    );
+                }
+                Err(error) => warn!(%error, "cannot discover recovery sessions"),
+            }
+        }
         self.start_recovery_session();
 
         let attributes = Window::default_attributes()
