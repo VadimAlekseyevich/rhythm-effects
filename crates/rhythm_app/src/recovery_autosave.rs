@@ -128,10 +128,9 @@ impl RecoveryAutosave {
 
         if let Some(revision) = self.in_flight {
             if editor.current_revision() != revision
-                && self
-                    .queued
-                    .as_ref()
-                    .is_none_or(|(queued_revision, _)| *queued_revision != editor.current_revision())
+                && self.queued.as_ref().is_none_or(|(queued_revision, _)| {
+                    *queued_revision != editor.current_revision()
+                })
             {
                 // Overwrite pending work; only the newest committed snapshot
                 // needs writing after the currently running worker finishes.
@@ -165,8 +164,7 @@ impl RecoveryAutosave {
             .spawn(move || {
                 let outcome = write_recovery_generation(&directory, &project);
                 let _ = sender.send(RecoveryResult { revision, outcome });
-            })
-        {
+            }) {
             Ok(_) => self.in_flight = Some(revision),
             Err(error) => warn!(%error, "unable to start recovery write"),
         }
@@ -281,7 +279,11 @@ mod tests {
         assert!(!schedule.due(start + Duration::from_secs(4), true, false));
         assert!(schedule.due(start + Duration::from_secs(5), true, false));
         schedule.mark_success(start);
-        assert!(!schedule.due(start + RECOVERY_INTERVAL - Duration::from_millis(1), true, false));
+        assert!(!schedule.due(
+            start + RECOVERY_INTERVAL - Duration::from_millis(1),
+            true,
+            false
+        ));
         assert!(schedule.due(start + RECOVERY_INTERVAL, true, false));
     }
 
@@ -294,7 +296,11 @@ mod tests {
         let finished = start + Duration::from_secs(41);
         schedule.observe(finished, false);
         assert!(!schedule.due(finished, true, false));
-        assert!(!schedule.due(finished + TRANSACTION_SETTLE - Duration::from_millis(1), true, false));
+        assert!(!schedule.due(
+            finished + TRANSACTION_SETTLE - Duration::from_millis(1),
+            true,
+            false
+        ));
         assert!(schedule.due(finished + TRANSACTION_SETTLE, true, false));
     }
 
@@ -321,7 +327,10 @@ mod tests {
             Some(editor.current_revision())
         );
         assert_eq!(
-            coordinator.queued.as_ref().map(|(_, project)| project.assets.len()),
+            coordinator
+                .queued
+                .as_ref()
+                .map(|(_, project)| project.assets.len()),
             Some(3)
         );
         assert!(coordinator.in_flight.is_some());
@@ -334,14 +343,12 @@ mod tests {
         write_recovery_generation(&root.0, &project("First")).expect("first");
         assert!(!root.0.join("previous.rhfx").exists());
         write_recovery_generation(&root.0, &project("Second")).expect("second");
-        let current = parse_project_file_v1(
-            &fs::read(root.0.join("current.rhfx")).expect("current"),
-        )
-        .expect("parse current");
-        let previous = parse_project_file_v1(
-            &fs::read(root.0.join("previous.rhfx")).expect("previous"),
-        )
-        .expect("parse previous");
+        let current =
+            parse_project_file_v1(&fs::read(root.0.join("current.rhfx")).expect("current"))
+                .expect("parse current");
+        let previous =
+            parse_project_file_v1(&fs::read(root.0.join("previous.rhfx")).expect("previous"))
+                .expect("parse previous");
         assert_eq!(current.project.metadata.name, "Second");
         assert_eq!(previous.project.metadata.name, "First");
         assert_eq!(fs::read_dir(&root.0).expect("only two files").count(), 2);
@@ -360,13 +367,11 @@ mod tests {
             previous_bytes
         );
         assert_eq!(
-            parse_project_file_v1(
-                &fs::read(root.0.join("current.rhfx")).expect("current")
-            )
-            .expect("parse current")
-            .project
-            .metadata
-            .name,
+            parse_project_file_v1(&fs::read(root.0.join("current.rhfx")).expect("current"))
+                .expect("parse current")
+                .project
+                .metadata
+                .name,
             "Third"
         );
     }
@@ -385,6 +390,9 @@ mod tests {
             previous_bytes
         );
         assert!(root.0.join("current.rhfx").is_dir());
-        assert_eq!(fs::read_dir(&root.0).expect("no temporary files").count(), 2);
+        assert_eq!(
+            fs::read_dir(&root.0).expect("no temporary files").count(),
+            2
+        );
     }
 }
