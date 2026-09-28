@@ -5,6 +5,7 @@ mod editor_ui;
 mod file_dialogs;
 mod gpu;
 mod project_files;
+mod recovery_root;
 mod shortcuts;
 mod timeline;
 mod viewport;
@@ -114,6 +115,11 @@ impl ApplicationHandler for RhythmApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
+        }
+
+        match recovery_root::ensure_recovery_root() {
+            Ok(path) => info!(path = %path.display(), "recovery directory ready"),
+            Err(error) => warn!(%error, "recovery storage unavailable"),
         }
 
         let attributes = Window::default_attributes()
