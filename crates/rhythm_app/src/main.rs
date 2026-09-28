@@ -136,6 +136,9 @@ impl RhythmApp {
             )
         }) {
             Ok(session) => {
+                if let Err(error) = RecoverySession::read_metadata(session.directory()) {
+                    warn!(%error, "new recovery metadata failed read-back validation");
+                }
                 info!(
                     session_id = %session.metadata().session_id,
                     path = %session.directory().display(),
