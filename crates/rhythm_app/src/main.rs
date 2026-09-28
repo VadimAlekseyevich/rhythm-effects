@@ -6,6 +6,7 @@ mod file_dialogs;
 mod gpu;
 mod project_files;
 mod recovery_root;
+mod recovery_session;
 mod shortcuts;
 mod timeline;
 mod viewport;
@@ -18,6 +19,7 @@ use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
 use project_files::save_project_as;
+use recovery_session::RecoverySession;
 use rhythm_core::{
     APP_NAME, domain::Vec2, editor::EditCommand, project::AssetSource,
     project_save::save_project_file_transactional, serialization::open_project_file_transactional,
@@ -48,6 +50,7 @@ fn fail_startup(
 fn save_as_with_dialog(
     editor: &mut rhythm_core::editor::ProjectEditor,
     canonical_path: &mut Option<PathBuf>,
+    recovery_session: Option<&mut RecoverySession>,
 ) -> bool {
     let suggested_name = editor.project().metadata.name.clone();
     let Some(destination) = file_dialogs::pick_project_save_path(&suggested_name) else {
@@ -55,7 +58,17 @@ fn save_as_with_dialog(
     };
 
     match save_project_as(editor, canonical_path, &destination) {
-        Ok(()) => info!(path = %destination.display(), "project Save As published"),
+        Ok(()) => {
+            info!(path = %destination.display(), "project Save As published");
+            if let Some(session) = recovery_session
+                && let Err(error) = session.update_project_identity(
+                    &editor.project().metadata.name,
+                    canonical_path.as_deref(),
+                )
+            {
+                warn!(%error, "published project but recovery metadata update failed");
+            }
+        }
         Err(error) => warn!(
             path = %destination.display(),
             %error,
@@ -69,6 +82,7 @@ struct RhythmApp {
     session: EditorSession,
     project_editor: rhythm_core::editor::ProjectEditor,
     project_path: Option<PathBuf>,
+    recovery_session: Option<RecoverySession>,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
@@ -96,6 +110,7 @@ impl Default for RhythmApp {
             session: EditorSession::default(),
             project_editor,
             project_path: None,
+            recovery_session: None,
             window: None,
             gpu: None,
             renderer: None,
@@ -111,16 +126,38 @@ impl Default for RhythmApp {
     }
 }
 
+impl RhythmApp {
+    fn start_recovery_session(&mut self) {
+        match recovery_root::ensure_recovery_root().and_then(|root| {
+            RecoverySession::create(
+                &root,
+                &self.project_editor.project().metadata.name,
+                self.project_path.as_deref(),
+            )
+        }) {
+            Ok(session) => {
+                info!(
+                    session_id = %session.metadata().session_id,
+                    path = %session.directory().display(),
+                    "editing-session recovery identity created"
+                );
+                self.recovery_session = Some(session);
+            }
+            Err(error) => {
+                warn!(%error, "recovery session unavailable");
+                self.recovery_session = None;
+            }
+        }
+    }
+}
+
 impl ApplicationHandler for RhythmApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
         }
 
-        match recovery_root::ensure_recovery_root() {
-            Ok(path) => info!(path = %path.display(), "recovery directory ready"),
-            Err(error) => warn!(%error, "recovery storage unavailable"),
-        }
+        self.start_recovery_session();
 
         let attributes = Window::default_attributes()
             .with_title(APP_NAME)
@@ -292,6 +329,7 @@ impl ApplicationHandler for RhythmApp {
                                                     self.session = EditorSession::default();
                                                     self.waveform = None;
                                                     self.project_path = Some(path);
+                                                    self.start_recovery_session();
                                                     info!(
                                                         project_path = ?self.project_path,
                                                         "project opened transactionally"
@@ -341,12 +379,14 @@ impl ApplicationHandler for RhythmApp {
                                     save_as_with_dialog(
                                         &mut self.project_editor,
                                         &mut self.project_path,
+                                        self.recovery_session.as_mut(),
                                     )
                                 }
                             }
                             EditorShortcut::SaveProjectAs => save_as_with_dialog(
                                 &mut self.project_editor,
                                 &mut self.project_path,
+                                self.recovery_session.as_mut(),
                             ),
                             EditorShortcut::Undo => match self.project_editor.undo() {
                                 Ok(changed) => changed,
