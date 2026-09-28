@@ -29,7 +29,11 @@ pub struct RecoverySession {
 }
 
 impl RecoverySession {
-    pub fn create(root: &Path, project_name: &str, canonical_path: Option<&Path>) -> io::Result<Self> {
+    pub fn create(
+        root: &Path,
+        project_name: &str,
+        canonical_path: Option<&Path>,
+    ) -> io::Result<Self> {
         for _ in 0..64 {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -183,7 +187,10 @@ mod tests {
             .update_project_identity("Renamed", Some(&canonical))
             .expect("metadata update");
         assert_eq!(first.metadata().session_id, id);
-        assert_eq!(first.metadata().canonical_project_path.as_deref(), Some(canonical.as_path()));
+        assert_eq!(
+            first.metadata().canonical_project_path.as_deref(),
+            Some(canonical.as_path())
+        );
         assert_eq!(
             RecoverySession::read_metadata(first.directory()).expect("read updated"),
             *first.metadata()
@@ -210,15 +217,22 @@ mod tests {
         let session = RecoverySession::create(&root.0, "Original", None).expect("create");
         let wrong = root.0.join("wrong-id");
         fs::create_dir(&wrong).expect("wrong directory");
-        fs::copy(session.directory().join("session.json"), wrong.join("session.json"))
-            .expect("copy known metadata");
+        fs::copy(
+            session.directory().join("session.json"),
+            wrong.join("session.json"),
+        )
+        .expect("copy known metadata");
         assert_eq!(
-            RecoverySession::read_metadata(&wrong).expect_err("mismatch").kind(),
+            RecoverySession::read_metadata(&wrong)
+                .expect_err("mismatch")
+                .kind(),
             io::ErrorKind::InvalidData
         );
         fs::write(wrong.join("session.json"), b"invalid json").expect("corrupt");
         assert_eq!(
-            RecoverySession::read_metadata(&wrong).expect_err("malformed").kind(),
+            RecoverySession::read_metadata(&wrong)
+                .expect_err("malformed")
+                .kind(),
             io::ErrorKind::Other
         );
     }
