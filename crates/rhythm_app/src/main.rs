@@ -829,7 +829,10 @@ impl ApplicationHandler for RhythmApp {
                             }
                             CloseDecision::Save => {
                                 if let Some(path) = self.project_path.as_deref() {
-                                    match save_project_file_transactional(&mut self.project_editor, path) {
+                                    match save_project_file_transactional(
+                                        &mut self.project_editor,
+                                        path,
+                                    ) {
                                         Ok(_) => {
                                             self.close_error = None;
                                         }
@@ -852,7 +855,8 @@ impl ApplicationHandler for RhythmApp {
                                 }
                                 if self.close_error.is_none() {
                                     self.close_error = Some(
-                                        "Save was cancelled or failed; project remains open.".into(),
+                                        "Save was cancelled or failed; project remains open."
+                                            .into(),
                                     );
                                 }
                             }
