@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audio;
+pub mod blur;
 pub mod effect_chain;
 pub mod image_decode;
 pub mod isolated_objects;
