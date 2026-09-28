@@ -8,9 +8,11 @@ use std::collections::HashMap;
 use rhythm_core::ids::AssetId;
 
 use crate::{
+    effect_chain::encode_ordered_effect_chain,
     image_decode::ImageDecodeGeneration,
     isolated_objects::IsolatedObjectCompositor,
     runtime_assets::ValidatedDecodedImage,
+    scene_eval::EvaluatedEffect,
     temporary_textures::{
         TemporaryTexture, TemporaryTextureKey, TemporaryTexturePool, TemporaryTexturePoolStats,
     },
@@ -492,6 +494,32 @@ impl Renderer {
             &mut self.temporary_textures,
             key,
             draw,
+        )
+    }
+
+    /// Run evaluated effects in their ordered stack using distinct pooled
+    /// input/output targets; each output feeds the next pass. A source with
+    /// zero effects is returned untouched without an intermediate allocation.
+    pub fn encode_effect_chain(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source: TemporaryTexture,
+        effects: &[EvaluatedEffect],
+        encode_effect: impl FnMut(
+            &mut wgpu::CommandEncoder,
+            &EvaluatedEffect,
+            &TemporaryTexture,
+            &TemporaryTexture,
+        ),
+    ) -> TemporaryTexture {
+        encode_ordered_effect_chain(
+            device,
+            encoder,
+            &mut self.temporary_textures,
+            source,
+            effects,
+            encode_effect,
         )
     }
 
