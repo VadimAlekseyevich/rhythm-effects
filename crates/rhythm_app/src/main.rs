@@ -265,6 +265,7 @@ impl ApplicationHandler for RhythmApp {
             }
         }
 
+        let mut project_opened = false;
         match event {
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
@@ -329,7 +330,7 @@ impl ApplicationHandler for RhythmApp {
                                                     self.session = EditorSession::default();
                                                     self.waveform = None;
                                                     self.project_path = Some(path);
-                                                    self.start_recovery_session();
+                                                    project_opened = true;
                                                     info!(
                                                         project_path = ?self.project_path,
                                                         "project opened transactionally"
@@ -967,6 +968,9 @@ impl ApplicationHandler for RhythmApp {
                 }
             },
             _ => {}
+        }
+        if project_opened {
+            self.start_recovery_session();
         }
     }
 
