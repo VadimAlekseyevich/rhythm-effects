@@ -4,6 +4,7 @@ mod editor_session;
 mod editor_ui;
 mod file_dialogs;
 mod gpu;
+mod project_files;
 mod shortcuts;
 mod timeline;
 mod viewport;
@@ -15,9 +16,10 @@ use std::time::Instant;
 use editor_session::{EditorSession, ViewportCameraAction};
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
+use project_files::save_project_as;
 use rhythm_core::{
     APP_NAME, domain::Vec2, editor::EditCommand, project::AssetSource,
-    serialization::open_project_file_transactional,
+    project_save::save_project_file_transactional, serialization::open_project_file_transactional,
 };
 use rhythm_engine::renderer::Renderer;
 use shortcuts::{EditorShortcut, ShortcutModifiers, dispatch_physical_shortcut};
@@ -39,6 +41,27 @@ fn fail_startup(
 ) {
     error!(stage, error = %message, "fatal startup failure");
     event_loop.exit();
+}
+
+/// A cancelled native dialog never attempts publication or changes the path.
+fn save_as_with_dialog(
+    editor: &mut rhythm_core::editor::ProjectEditor,
+    canonical_path: &mut Option<PathBuf>,
+) -> bool {
+    let suggested_name = editor.project().metadata.name.clone();
+    let Some(destination) = file_dialogs::pick_project_save_path(&suggested_name) else {
+        return false;
+    };
+
+    match save_project_as(editor, canonical_path, &destination) {
+        Ok(()) => info!(path = %destination.display(), "project Save As published"),
+        Err(error) => warn!(
+            path = %destination.display(),
+            %error,
+            "Save As failed; canonical path and dirty state preserved"
+        ),
+    }
+    true
 }
 
 struct RhythmApp {
@@ -246,7 +269,7 @@ impl ApplicationHandler for RhythmApp {
                                 true
                             }
                             EditorShortcut::OpenProject => {
-                                // Until Save is wired, never discard unsaved work silently.
+                                // Do not discard dirty work without a user confirmation flow.
                                 if self.project_editor.is_dirty() {
                                     warn!("Open cancelled: current project has unsaved edits");
                                     true
@@ -291,21 +314,34 @@ impl ApplicationHandler for RhythmApp {
                                     false
                                 }
                             }
-                            EditorShortcut::SaveProject | EditorShortcut::SaveProjectAs => {
-                                let suggested_name =
-                                    self.project_editor.project().metadata.name.clone();
-                                if let Some(path) =
-                                    file_dialogs::pick_project_save_path(&suggested_name)
-                                {
-                                    info!(
-                                        path = %path.display(),
-                                        "project save path selected; serialization/publication is implemented in AI-236 through AI-240"
-                                    );
+                            EditorShortcut::SaveProject => {
+                                if let Some(path) = self.project_path.as_deref() {
+                                    match save_project_file_transactional(
+                                        &mut self.project_editor,
+                                        path,
+                                    ) {
+                                        Ok(_) => info!(
+                                            path = %path.display(),
+                                            "project saved to canonical path"
+                                        ),
+                                        Err(error) => warn!(
+                                            path = %path.display(),
+                                            %error,
+                                            "Save failed; canonical path and dirty state preserved"
+                                        ),
+                                    }
                                     true
                                 } else {
-                                    false
+                                    save_as_with_dialog(
+                                        &mut self.project_editor,
+                                        &mut self.project_path,
+                                    )
                                 }
                             }
+                            EditorShortcut::SaveProjectAs => save_as_with_dialog(
+                                &mut self.project_editor,
+                                &mut self.project_path,
+                            ),
                             EditorShortcut::Undo => match self.project_editor.undo() {
                                 Ok(changed) => changed,
                                 Err(error) => {
