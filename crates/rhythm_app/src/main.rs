@@ -57,6 +57,7 @@ fn save_as_with_dialog(
     editor: &mut rhythm_core::editor::ProjectEditor,
     canonical_path: &mut Option<PathBuf>,
     recovery_session: Option<&mut RecoverySession>,
+    recovery_autosave: Option<&mut RecoveryAutosave>,
 ) -> bool {
     let suggested_name = editor.project().metadata.name.clone();
     let Some(destination) = file_dialogs::pick_project_save_path(&suggested_name) else {
@@ -66,6 +67,11 @@ fn save_as_with_dialog(
     match save_project_as(editor, canonical_path, &destination) {
         Ok(()) => {
             info!(path = %destination.display(), "project Save As published");
+            if let Some(autosave) = recovery_autosave
+                && let Err(error) = autosave.request_clean_after_save(editor)
+            {
+                warn!(%error, "Save As succeeded, but recovery cleanup failed");
+            }
             if let Some(session) = recovery_session
                 && let Err(error) = session.update_project_identity(
                     &editor.project().metadata.name,
@@ -419,10 +425,19 @@ impl ApplicationHandler for RhythmApp {
                                         &mut self.project_editor,
                                         path,
                                     ) {
-                                        Ok(_) => info!(
-                                            path = %path.display(),
-                                            "project saved to canonical path"
-                                        ),
+                                        Ok(_) => {
+                                            info!(
+                                                path = %path.display(),
+                                                "project saved to canonical path"
+                                            );
+                                            if let Some(autosave) = self.recovery_autosave.as_mut()
+                                                && let Err(error) = autosave.request_clean_after_save(
+                                                    &self.project_editor,
+                                                )
+                                            {
+                                                warn!(%error, "Save succeeded, but recovery cleanup failed");
+                                            }
+                                        }
                                         Err(error) => warn!(
                                             path = %path.display(),
                                             %error,
@@ -435,6 +450,7 @@ impl ApplicationHandler for RhythmApp {
                                         &mut self.project_editor,
                                         &mut self.project_path,
                                         self.recovery_session.as_mut(),
+                                        self.recovery_autosave.as_mut(),
                                     )
                                 }
                             }
@@ -442,6 +458,7 @@ impl ApplicationHandler for RhythmApp {
                                 &mut self.project_editor,
                                 &mut self.project_path,
                                 self.recovery_session.as_mut(),
+                                self.recovery_autosave.as_mut(),
                             ),
                             EditorShortcut::Undo => match self.project_editor.undo() {
                                 Ok(changed) => changed,
@@ -1131,6 +1148,13 @@ impl ApplicationHandler for RhythmApp {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(autosave) = self.recovery_autosave.as_mut() {
+            if self.project_editor.is_dirty() || self.project_editor.has_active_transaction() {
+                info!("leaving dirty project's recovery intact on close");
+            } else if let Err(error) = autosave.finish_clean_close(&self.project_editor) {
+                warn!(%error, "could not clean obsolete recovery on clean close");
+            }
+        }
         info!("application exiting");
     }
 }
