@@ -176,10 +176,18 @@ Only after success:
 - session canonical project path changes;
 - saved_revision updates after publication (AI-239).
 
-Rebasing eligible relative AssetSource paths for a new project directory is
-deliberately reserved for AI-241; AI-240 itself does not rewrite asset records.
-Until that follow-up lands, a Save As to a different directory can leave
-previously relative asset references unresolved on reopen.
+AI-241 prepares a detached Save As snapshot with eligible asset paths
+resolved against the *previous* project directory and re-expressed against
+the new directory. Sources inside the destination's directory become
+project-relative; sources outside it become absolute. The operation never
+requires referenced media to exist, and skips malformed/non-absolute paths
+that cannot be safely rebased. Only after the complete snapshot is published
+does the editor rebase its live assets and all asset-bearing undo/redo history
+payloads without creating an extra creative revision, mark the published
+revision saved, and switch the canonical path. Failed publication preserves
+the former path, live assets, history, revision and original file. Tests
+cover moving relative sources, first-save absolute-to-relative conversion,
+missing media, history undo/redo, and failed publication.
 
 ## 10. Load transaction
 
