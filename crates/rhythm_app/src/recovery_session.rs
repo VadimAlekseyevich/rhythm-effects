@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -123,7 +123,9 @@ impl RecoverySession {
         let bytes = fs::read(directory.join(METADATA_FILE))?;
         let metadata: RecoverySessionMetadata =
             serde_json::from_slice(&bytes).map_err(io::Error::other)?;
-        if directory.file_name().is_none_or(|name| name != metadata.session_id) {
+        if directory.file_name().and_then(|name| name.to_str())
+            != Some(metadata.session_id.as_str())
+        {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "recovery session directory/metadata ID mismatch",
