@@ -101,6 +101,16 @@ After successful explicit Save:
 
 Do not delete recovery before Save succeeds.
 
+AI-252 deletes only the obsolete `current.rhfx` and `previous.rhfx`
+generations after successful explicit Save/Save As, preserving stable
+`session.json` for future editing in the same session. If a recovery worker
+is already in flight, cleanup waits until its completion rather than racing
+the writer. A new dirty edit cancels pending clean-save cleanup; the next
+generation is again due immediately. Clean close joins an existing worker
+before removing obsolete generations. A dirty project's close keeps recovery
+intact. Successful Save is always the prerequisite: a failed Save cannot
+request cleanup.
+
 ## 7. Clean close
 
 If user closes a clean project:
