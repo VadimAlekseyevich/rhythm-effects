@@ -11,7 +11,7 @@ use rhythm_core::{
     },
 };
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{self, Read},
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, Sender},
