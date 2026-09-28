@@ -277,7 +277,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-239** — Only update saved_revision after successful publication.
 - [x] **AI-240** — Implement Save As so canonical path changes only after successful publication.
 - [x] **AI-241** — Recalculate eligible relative AssetSource paths after successful Save As.
-- [ ] **AI-242** — Implement LocalAppData RhythmEffects/recovery directory resolution.
+- [x] **AI-242** — Implement LocalAppData RhythmEffects/recovery directory resolution.
 - [ ] **AI-243** — Implement stable editing-session recovery identifier/metadata.
 - [ ] **AI-244** — Implement dirty-project recovery scheduling at max 30-second interval.
 - [ ] **AI-245** — Defer recovery while an edit transaction is active and wait at least 1 second after it ends.
