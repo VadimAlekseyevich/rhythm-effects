@@ -8,7 +8,10 @@ use std::collections::HashMap;
 use rhythm_core::ids::AssetId;
 
 use crate::{
-    image_decode::ImageDecodeGeneration, runtime_assets::ValidatedDecodedImage, text::TextResources,
+    image_decode::ImageDecodeGeneration,
+    runtime_assets::ValidatedDecodedImage,
+    temporary_textures::{TemporaryTexturePool, TemporaryTexturePoolStats},
+    text::TextResources,
 };
 
 pub const INITIAL_COMPOSITION_WIDTH: u32 = 1920;
@@ -264,6 +267,7 @@ pub struct Renderer {
     preview_bind_group: wgpu::BindGroup,
     preview_pipeline: wgpu::RenderPipeline,
     image_textures: ImageTextureCache,
+    temporary_textures: TemporaryTexturePool,
     text_resources: TextResources,
 }
 
@@ -396,6 +400,7 @@ impl Renderer {
             preview_bind_group,
             preview_pipeline,
             image_textures: ImageTextureCache::default(),
+            temporary_textures: TemporaryTexturePool::default(),
             text_resources: TextResources::new(
                 device,
                 queue,
@@ -445,6 +450,16 @@ impl Renderer {
 
     pub fn remove_image_texture(&mut self, asset_id: AssetId) -> bool {
         self.image_textures.remove(asset_id)
+    }
+
+    #[must_use]
+    pub fn temporary_texture_pool(&mut self) -> &mut TemporaryTexturePool {
+        &mut self.temporary_textures
+    }
+
+    #[must_use]
+    pub fn temporary_texture_stats(&self) -> TemporaryTexturePoolStats {
+        self.temporary_textures.stats()
     }
 
     pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {

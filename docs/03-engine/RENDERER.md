@@ -192,7 +192,16 @@ Temporary targets are pooled by:
 - format;
 - usage class.
 
-Normal effects do not create/destroy textures every frame.
+Normal effects do not create/destroy textures every frame. AI-256 provides
+`TemporaryTexturePool` owned by `Renderer`: checked-out targets are exclusive,
+exact-match reuse requires equal width/height, format and usage flags, and
+returning a target transfers it into a bounded free list (at most 12 idle
+textures). Excess returned targets are dropped rather than held indefinitely.
+A caller releases targets only after encoding their final use in the frame;
+the next checkout may overwrite their contents. Diagnostics expose idle,
+allocated and reused counts. Unsupported zero dimensions/empty usage are
+rejected by the key constructor; resize/quality changes can clear the free
+list. Later multipass work consumes this pool.
 
 ## 18. Pipelines/shaders
 
