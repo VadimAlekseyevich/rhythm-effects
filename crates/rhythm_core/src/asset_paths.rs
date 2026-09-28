@@ -279,12 +279,8 @@ mod tests {
         assert_eq!(
             rebase_asset_source_for_save_as(&original, Some(&old_project), &nested_destination),
             AssetSource::File {
-                path: old_parent
-                    .join("assets/image.png")
-                    .to_str()
-                    .expect("UTF-8 test path")
-                    .into(),
-                relative_to_project: false,
+                path: "image.png".into(),
+                relative_to_project: true,
             }
         );
     }
