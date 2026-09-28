@@ -552,10 +552,15 @@ mod tests {
                 outcome: Ok(()),
             })
             .expect("completed writer");
-        manager.discard_after_confirmation().expect("explicit discard");
+        manager
+            .discard_after_confirmation()
+            .expect("explicit discard");
         assert!(!active.exists());
         assert!(other.join("current.rhfx").exists());
-        assert_eq!(fs::read(&canonical).expect("canonical unchanged"), b"known-good");
+        assert_eq!(
+            fs::read(&canonical).expect("canonical unchanged"),
+            b"known-good"
+        );
     }
 
     #[test]
