@@ -795,9 +795,8 @@ impl ApplicationHandler for RhythmApp {
                                 }
                             }
                         } else {
-                            let discarded = recovery_root::ensure_recovery_root().and_then(|root| {
-                                discard_recovery_candidate(&root, &candidate)
-                            });
+                            let discarded = recovery_root::ensure_recovery_root()
+                                .and_then(|root| discard_recovery_candidate(&root, &candidate));
                             match discarded {
                                 Ok(()) => {
                                     self.recovery_candidates.remove(index);
