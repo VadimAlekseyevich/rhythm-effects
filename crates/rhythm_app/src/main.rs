@@ -90,6 +90,13 @@ fn save_as_with_dialog(
     true
 }
 
+#[derive(Clone, Copy)]
+enum CloseDecision {
+    Save,
+    DontSave,
+    Cancel,
+}
+
 struct RhythmApp {
     session: EditorSession,
     project_editor: rhythm_core::editor::ProjectEditor,
@@ -99,6 +106,8 @@ struct RhythmApp {
     recovery_candidates: Vec<RecoveryCandidate>,
     recovery_error: Option<String>,
     recovery_discard_confirmation: Option<usize>,
+    close_confirmation: bool,
+    close_error: Option<String>,
     window: Option<Arc<Window>>,
     gpu: Option<GpuContext>,
     renderer: Option<Renderer>,
@@ -131,6 +140,8 @@ impl Default for RhythmApp {
             recovery_candidates: Vec::new(),
             recovery_error: None,
             recovery_discard_confirmation: None,
+            close_confirmation: false,
+            close_error: None,
             window: None,
             gpu: None,
             renderer: None,
@@ -687,8 +698,14 @@ impl ApplicationHandler for RhythmApp {
                 }
             }
             WindowEvent::CloseRequested => {
-                info!("close requested");
-                event_loop.exit();
+                if self.project_editor.is_dirty() || self.project_editor.has_active_transaction() {
+                    self.close_confirmation = true;
+                    self.close_error = None;
+                    window.request_redraw();
+                } else {
+                    info!("clean close requested");
+                    event_loop.exit();
+                }
             }
             WindowEvent::RedrawRequested => {
                 if let (Some(gpu), Some(egui_context), Some(egui_state), Some(egui_renderer)) = (
@@ -718,6 +735,7 @@ impl ApplicationHandler for RhythmApp {
                         .map(rhythm_engine::renderer::Renderer::text_resources);
                     let mut recovery_action: Option<(usize, bool)> = None;
                     let mut confirmation_change: Option<Option<usize>> = None;
+                    let mut close_decision: Option<CloseDecision> = None;
                     let full_output = egui_context.run_ui(raw_input, |root_ui| {
                         if let Some(diagnostics) = self.diagnostics.as_ref() {
                             editor_ui::draw_editor_shell(
@@ -729,6 +747,29 @@ impl ApplicationHandler for RhythmApp {
                                 self.waveform.as_ref(),
                                 text_resources,
                             );
+                        }
+                        if self.close_confirmation {
+                            egui::Window::new("Unsaved changes")
+                                .collapsible(false)
+                                .resizable(false)
+                                .show(root_ui.ctx(), |ui| {
+                                    ui.label("Save changes before closing?");
+                                    ui.label("Don't Save also deletes this editing session's recovery, if available.");
+                                    if let Some(error) = self.close_error.as_deref() {
+                                        ui.colored_label(egui::Color32::RED, error);
+                                    }
+                                    ui.horizontal(|ui| {
+                                        if ui.button("Save").clicked() {
+                                            close_decision = Some(CloseDecision::Save);
+                                        }
+                                        if ui.button("Don't Save").clicked() {
+                                            close_decision = Some(CloseDecision::DontSave);
+                                        }
+                                        if ui.button("Cancel").clicked() {
+                                            close_decision = Some(CloseDecision::Cancel);
+                                        }
+                                    });
+                                });
                         }
                         if !self.recovery_candidates.is_empty() {
                             egui::Window::new("Recover unsaved projects")
@@ -779,6 +820,67 @@ impl ApplicationHandler for RhythmApp {
                                 });
                         }
                     });
+
+                    if let Some(decision) = close_decision {
+                        match decision {
+                            CloseDecision::Cancel => {
+                                self.close_confirmation = false;
+                                self.close_error = None;
+                            }
+                            CloseDecision::Save => {
+                                if let Some(path) = self.project_path.as_deref() {
+                                    match save_project_file_transactional(&mut self.project_editor, path) {
+                                        Ok(_) => {
+                                            self.close_error = None;
+                                        }
+                                        Err(error) => self.close_error = Some(error.to_string()),
+                                    }
+                                } else {
+                                    save_as_with_dialog(
+                                        &mut self.project_editor,
+                                        &mut self.project_path,
+                                        self.recovery_session.as_mut(),
+                                        self.recovery_autosave.as_mut(),
+                                    );
+                                }
+                                if !self.project_editor.is_dirty()
+                                    && !self.project_editor.has_active_transaction()
+                                {
+                                    self.close_confirmation = false;
+                                    event_loop.exit();
+                                    return;
+                                }
+                                if self.close_error.is_none() {
+                                    self.close_error = Some(
+                                        "Save was cancelled or failed; project remains open.".into(),
+                                    );
+                                }
+                            }
+                            CloseDecision::DontSave => {
+                                let discard = self
+                                    .recovery_autosave
+                                    .as_mut()
+                                    .map_or(Ok(()), RecoveryAutosave::discard_after_confirmation);
+                                match discard {
+                                    Ok(()) => {
+                                        self.recovery_autosave = None;
+                                        self.recovery_session = None;
+                                        self.close_confirmation = false;
+                                        info!("Don't Save confirmed: active recovery discarded");
+                                        event_loop.exit();
+                                        return;
+                                    }
+                                    Err(error) => {
+                                        self.close_error = Some(format!(
+                                            "Could not discard recovery: {error}. Project remains open."
+                                        ));
+                                        warn!(%error, "confirmed Don't Save could not discard active recovery");
+                                    }
+                                }
+                            }
+                        }
+                        window.request_redraw();
+                    }
 
                     if let Some(change) = confirmation_change {
                         self.recovery_discard_confirmation = change;
