@@ -214,9 +214,7 @@ mod tests {
     use super::{ProjectSaveStageError, stage_project_file_save};
     use crate::{
         project::{Project, ProjectSettings, ProjectValidationError},
-        serialization::{
-            ProjectFileEncodeError, parse_project_file_v1, serialize_project_file_v1,
-        },
+        serialization::{ProjectFileEncodeError, parse_project_file_v1, serialize_project_file_v1},
         time::{GridOffsetNs, TempoMap},
     };
     use std::{
@@ -467,9 +465,11 @@ mod tests {
             .flush_and_close()
             .expect("close");
         let temp_path = closed.temp_path().to_path_buf();
-        assert!(closed
-            .publish_with(|_, _| Err(io::Error::other("injected")))
-            .is_err());
+        assert!(
+            closed
+                .publish_with(|_, _| Err(io::Error::other("injected")))
+                .is_err()
+        );
         assert!(!new_destination.exists());
         assert!(!temp_path.exists());
     }
