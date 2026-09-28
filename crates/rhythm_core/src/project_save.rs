@@ -10,6 +10,7 @@ use std::{
 };
 
 use crate::{
+    asset_paths::rebase_project_assets_for_save_as,
     editor::ProjectEditor,
     project::Project,
     serialization::{ProjectFileEncodeError, serialize_project_file_v1},
@@ -94,13 +95,43 @@ pub fn save_project_file_transactional(
         return Err(ProjectSaveError::ActiveTransaction);
     }
 
-    let closed = stage_project_file_save(editor.project(), destination)
-        .map_err(ProjectSaveError::Stage)?
-        .flush_and_close()
-        .map_err(ProjectSaveError::Stage)?;
-    let published_path = closed.publish().map_err(ProjectSaveError::Publish)?;
+    let published_path = publish_project_snapshot(editor.project(), destination)?;
     editor.mark_saved();
     Ok(published_path)
+}
+
+/// Save As projects eligible asset references against the new project directory
+/// *before* serialization; the live editor and all undo/redo asset references
+/// are rebased only after the new snapshot has been published successfully.
+/// The old canonical file and editor state survive every prepublication failure.
+pub fn save_project_file_with_rebased_assets(
+    editor: &mut ProjectEditor,
+    previous_project_path: Option<&Path>,
+    destination: &Path,
+) -> Result<PathBuf, ProjectSaveError> {
+    if editor.has_active_transaction() {
+        return Err(ProjectSaveError::ActiveTransaction);
+    }
+
+    let mut snapshot = editor.project().clone();
+    rebase_project_assets_for_save_as(&mut snapshot, previous_project_path, destination);
+    let published_path = publish_project_snapshot(&snapshot, destination)?;
+
+    editor.rebase_asset_sources_after_publication(previous_project_path, destination);
+    editor.mark_saved();
+    Ok(published_path)
+}
+
+fn publish_project_snapshot(
+    project: &Project,
+    destination: &Path,
+) -> Result<PathBuf, ProjectSaveError> {
+    stage_project_file_save(project, destination)
+        .map_err(ProjectSaveError::Stage)?
+        .flush_and_close()
+        .map_err(ProjectSaveError::Stage)?
+        .publish()
+        .map_err(ProjectSaveError::Publish)
 }
 
 /// Owns an unpublished sibling temp file. Dropping the stage closes and removes
