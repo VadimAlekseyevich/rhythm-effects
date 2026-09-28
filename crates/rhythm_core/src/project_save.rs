@@ -129,8 +129,9 @@ impl ClosedProjectSave {
     ///
     /// The temporary file has already been synchronized and closed. On Windows,
     /// std::fs::rename uses replace-existing MoveFileExW (with a Windows
-    /// FileRenameInfoEx fallback); on Unix, rename replaces the destination. Never remove the old file first or
-    /// fall back to copying into it: a failed rename must leave the previous
+    /// FileRenameInfoEx fallback); on Unix, rename replaces the destination.
+    /// Never remove the old file first or fall back to copying into it: a
+    /// failed rename must leave the previous
     /// document intact (or a new destination absent). Drop cleans up the temp
     /// on failure. Publication does not change any editor saved revision.
     pub fn publish(self) -> io::Result<PathBuf> {
