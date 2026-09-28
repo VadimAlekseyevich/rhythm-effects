@@ -254,6 +254,13 @@ If serialization snapshot itself becomes too expensive, optimize snapshot genera
 - Discard leaves canonical untouched;
 - cleanup policy.
 
+AI-255 adds a separate-process forced-termination regression test. The child
+publishes two recovery generations, signals readiness, and the parent kills it
+without running normal close/Drop handlers. The parent then discovers current,
+restores it as dirty, corrupts current to test previous-generation fallback,
+and checks that the original canonical file remains untouched. This tests an
+abrupt termination boundary, not sudden power-loss durability on all devices.
+
 ## 16. Definition of Done
 
 Recovery is MVP-ready when a forced crash after ordinary editing can restore recent committed work, corrupt-current fallback works, and autosave does not disrupt audio/editor responsiveness.
