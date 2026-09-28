@@ -729,11 +729,8 @@ impl ProjectEditor {
         destination: &Path,
     ) {
         for asset in &mut self.project.assets {
-            asset.source = rebase_asset_source_for_save_as(
-                &asset.source,
-                previous_project_path,
-                destination,
-            );
+            asset.source =
+                rebase_asset_source_for_save_as(&asset.source, previous_project_path, destination);
         }
         for entry in &mut self.history.entries {
             match &mut entry.payload {
