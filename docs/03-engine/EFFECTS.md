@@ -26,7 +26,15 @@ Effect {
 
 Typed enum variants only.
 
-Effect order is semantic and deterministic.
+Effect order is semantic and deterministic. AI-258 provides the effect
+execution boundary: an evaluated enabled effect list is visited strictly in
+stack order, each pass receives the previous output and a distinct pooled
+destination (ping-pong), and the last output goes to isolated compositing.
+The previous source is released only once its pass is encoded. With an empty
+list there is no intermediate allocation or shader call. The pass encoder is
+a callback supplied by the actual effect implementation; AI-259 onward
+supply individual shader algorithms. This scheduling boundary itself does
+not pretend that the later filter shaders are already implemented.
 
 ## 3. Units
 
