@@ -101,7 +101,9 @@ mod tests {
         assert_eq!(snapshot.project(), &original);
         assert!(snapshot.project().assets.is_empty());
         assert_eq!(
-            snapshot.evaluate_at(ProjectTimeNs::new(0)).expect("evaluate again"),
+            snapshot
+                .evaluate_at(ProjectTimeNs::new(0))
+                .expect("evaluate again"),
             snapshot_scene
         );
         assert_eq!(snapshot.captured_revision(), initial_revision);
