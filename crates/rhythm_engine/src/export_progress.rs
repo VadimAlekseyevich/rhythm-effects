@@ -113,9 +113,20 @@ mod tests {
     fn invalid_progress_never_corrupts_prior_count() {
         let start = Instant::now();
         assert_eq!(
-            ExportProgress::new(0, start).expect_err("zero frames").total,
-            0
+            ExportProgress::new(0, start).expect_err("zero frames"),
+            ExportProgressError::NoFrames
         );
+        let mut progress = ExportProgress::new(8, start).expect("eight frames");
+        progress.record_completed(4).expect("four completed");
+        assert_eq!(
+            progress.record_completed(3),
+            Err(ExportProgressError::WentBackwards)
+        );
+        assert_eq!(
+            progress.record_completed(9),
+            Err(ExportProgressError::OutOfRange)
+        );
+        assert_eq!(progress.completed(), 4);
     }
 
     #[test]
