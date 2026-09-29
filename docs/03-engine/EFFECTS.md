@@ -203,7 +203,13 @@ No per-frame texture create/destroy on normal path.
 
 All animated effect parameters use the same Animated<T> and timeline system as transforms.
 
-No effect-specific animation model exists.
+AI-268 adds a single regression covering each evaluated Blur/Glow/Tint/Noise/
+RGB Split parameter at an interpolated mid-beat time. Numeric and color
+parameters use the shared interpolation path; RGB angle uses scalar rotation
+rather than shortest-arc normalization. Noise's seed remains a static u32.
+Static parameters can evaluate without an active tempo map; an animated
+parameter requires musical-time resolution. No effect-specific animation
+model exists.
 
 ## 12. Inspector
 
