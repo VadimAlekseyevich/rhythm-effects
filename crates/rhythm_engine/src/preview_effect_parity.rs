@@ -6,9 +6,7 @@ use crate::{
     glow::{GlowParameters, preview_glow_parameters},
     noise::{NoiseParameters, noise_cell, preview_noise_parameters},
     reference_scenes::five_effects_reference_scene,
-    rgb_split::{
-        RgbSplitParameters, channel_offsets, preview_rgb_split_parameters,
-    },
+    rgb_split::{RgbSplitParameters, channel_offsets, preview_rgb_split_parameters},
     scene_eval::{EvaluatedEffectKind, evaluate_scene},
 };
 
@@ -35,7 +33,8 @@ fn all_five_effects_preserve_composition_semantics_at_three_preview_qualities() 
         intensity,
         threshold,
         color: glow_color,
-    } = &stack[1].kind else {
+    } = &stack[1].kind
+    else {
         panic!("second is Glow");
     };
     let glow = GlowParameters {
@@ -44,7 +43,11 @@ fn all_five_effects_preserve_composition_semantics_at_three_preview_qualities() 
         threshold: *threshold,
         color: *glow_color,
     };
-    let EvaluatedEffectKind::Tint { color: tint, amount } = &stack[2].kind else {
+    let EvaluatedEffectKind::Tint {
+        color: tint,
+        amount,
+    } = &stack[2].kind
+    else {
         panic!("third is Tint");
     };
     let original_tint = (*tint, *amount);
@@ -53,7 +56,8 @@ fn all_five_effects_preserve_composition_semantics_at_three_preview_qualities() 
         size_px,
         evolution,
         seed,
-    } = &stack[3].kind else {
+    } = &stack[3].kind
+    else {
         panic!("fourth is Noise");
     };
     let noise = NoiseParameters {
@@ -65,7 +69,8 @@ fn all_five_effects_preserve_composition_semantics_at_three_preview_qualities() 
     let EvaluatedEffectKind::RgbSplit {
         amount_px,
         angle_degrees,
-    } = &stack[4].kind else {
+    } = &stack[4].kind
+    else {
         panic!("fifth is RGB Split");
     };
     let split = RgbSplitParameters {
@@ -104,8 +109,7 @@ fn all_five_effects_preserve_composition_semantics_at_three_preview_qualities() 
             noise_cell(48, 72, noise.size_px).expect("composition cell")
         );
 
-        let preview_split =
-            preview_rgb_split_parameters(split, scale).expect("valid split");
+        let preview_split = preview_rgb_split_parameters(split, scale).expect("valid split");
         close(preview_split.amount_px, split.amount_px * scale);
         assert_eq!(preview_split.angle_degrees, split.angle_degrees);
         let working_offsets = channel_offsets(preview_split).expect("working offsets");
@@ -117,7 +121,10 @@ fn all_five_effects_preserve_composition_semantics_at_three_preview_qualities() 
             assert_eq!(working_offsets.0[channel], -working_offsets.1[channel]);
         }
     }
-    assert_eq!(fixture.project, before, "preview never changes creative project");
+    assert_eq!(
+        fixture.project, before,
+        "preview never changes creative project"
+    );
 }
 
 #[test]
@@ -156,9 +163,7 @@ fn zero_spatial_effects_remain_identity_at_every_preview_scale() {
 #[test]
 fn invalid_preview_scale_is_rejected_by_each_spatial_parameter_path() {
     use crate::{
-        blur::BlurPreviewScaleError,
-        glow::GlowPreviewScaleError,
-        noise::NoiseError,
+        blur::BlurPreviewScaleError, glow::GlowPreviewScaleError, noise::NoiseError,
         rgb_split::RgbSplitError,
     };
 
