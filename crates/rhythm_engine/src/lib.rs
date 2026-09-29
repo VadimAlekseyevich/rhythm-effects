@@ -3,6 +3,7 @@
 pub mod audio;
 pub mod blur;
 pub mod effect_chain;
+pub mod export_ffmpeg;
 pub mod export_job;
 pub mod export_readback;
 pub mod export_renderer;
