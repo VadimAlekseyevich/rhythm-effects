@@ -5,14 +5,14 @@ pub mod blur;
 pub mod effect_chain;
 pub mod glow;
 pub mod image_decode;
-pub mod noise_hash;
 pub mod isolated_objects;
+pub mod noise_hash;
 pub mod renderer;
 pub mod runtime_assets;
 pub mod scene_eval;
 pub mod temporary_textures;
-pub mod tint;
 pub mod text;
+pub mod tint;
 pub mod waveform;
 
 #[must_use]
