@@ -16,6 +16,7 @@ use crate::{
     },
     image_decode::ImageDecodeGeneration,
     isolated_objects::IsolatedObjectCompositor,
+    noise::{Noise, NoiseError, NoiseParameters, preview_noise_parameters},
     runtime_assets::ValidatedDecodedImage,
     scene_eval::EvaluatedEffect,
     temporary_textures::{
@@ -282,6 +283,7 @@ pub struct Renderer {
     isolated_compositor: IsolatedObjectCompositor,
     blur: SeparableBlur,
     glow: Glow,
+    noise: Noise,
     tint: Tint,
     text_resources: TextResources,
 }
@@ -419,6 +421,7 @@ impl Renderer {
             isolated_compositor: IsolatedObjectCompositor::new(device, COMPOSITION_FORMAT),
             blur: SeparableBlur::new(device, COMPOSITION_FORMAT),
             glow: Glow::new(device, COMPOSITION_FORMAT),
+            noise: Noise::new(device, COMPOSITION_FORMAT),
             tint: Tint::new(device, COMPOSITION_FORMAT),
             text_resources: TextResources::new(
                 device,
@@ -630,6 +633,35 @@ impl Renderer {
     ) -> Result<(), TintError> {
         self.tint
             .encode(device, queue, encoder, targets, parameters)
+    }
+
+    /// Encode deterministic, alpha-preserving monochrome Noise. The semantic
+    /// project parameters are validated before creating any GPU resources.
+    pub fn encode_noise(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        targets: (&TemporaryTexture, &TemporaryTexture),
+        parameters: NoiseParameters,
+    ) -> Result<(), NoiseError> {
+        self.noise
+            .encode(device, queue, encoder, targets, parameters)
+    }
+
+    /// Convert composition pixel-block size to the resolved preview scale,
+    /// then encode without changing the Project's full-size value.
+    pub fn encode_preview_noise(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        targets: (&TemporaryTexture, &TemporaryTexture),
+        parameters: NoiseParameters,
+        preview_scale: f32,
+    ) -> Result<(), NoiseError> {
+        let working = preview_noise_parameters(parameters, preview_scale)?;
+        self.noise.encode(device, queue, encoder, targets, working)
     }
 
     /// Composite after all effects, then return the checkout to the pool.

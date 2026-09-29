@@ -6,6 +6,7 @@ pub mod effect_chain;
 pub mod glow;
 pub mod image_decode;
 pub mod isolated_objects;
+pub mod noise;
 pub mod noise_hash;
 pub mod renderer;
 pub mod runtime_assets;
