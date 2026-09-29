@@ -4,7 +4,7 @@
 use std::{
     io::{self, Read, Write},
     path::{Component, PathBuf},
-    process::{Child, ChildStderr, ChildStdin, Command, ExitStatus, Stdio},
+    process::{Child, ChildStdin, Command, ExitStatus, Stdio},
     thread::{self, JoinHandle},
 };
 
