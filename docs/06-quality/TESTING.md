@@ -202,6 +202,15 @@ Its static values also remain identical when evaluated at another timestamp.
 It is a semantic fixture for subsequent pixel/GPU visual references, **not**
 a claim that the current placeholder composition produces verified pixels.
 
+AI-271 exercises the same fixture across resolved preview scales Full=1,
+Half=0.5 and Quarter=0.25. Tests check composition-unit parity for Blur,
+Glow, Noise block size/cell identity and signed RGB channel displacement;
+non-spatial Glow/Tint/Noise values stay identical. Zero-radius/displacement
+identity and rejected invalid/nonfinite scales are also covered. These are
+pure semantic tests with no physical GPU dependency; full visual/pixel
+parity still needs hardware-backed offscreen rendering once the scene draw
+path is wired.
+
 ## 13. Export tests
 
 Automated where environment has FFmpeg:
