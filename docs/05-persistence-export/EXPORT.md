@@ -325,6 +325,17 @@ Translate common failures:
 
 Raw stderr goes to logs/details.
 
+AI-292 replaces inherited process stderr with a dedicated immediately started
+reader that continuously drains the pipe until FFmpeg closes it; the encoder
+therefore cannot deadlock because its stderr pipe becomes full. Only the final
+64 KiB of diagnostic bytes are retained, independent of export duration or
+log volume. On nonzero exit, an `FfmpegDiagnostic` reports the bounded
+stderr tail and maps common messages into encoder unavailable, permission
+denied, disk full, invalid source audio, or general process failure. Reader
+spawn/read/join errors are separate structured process-stage errors. The
+reader is also joined when an unfinished process is killed/reaped by Drop.
+Tests verify exact last-64-KiB retention and each diagnostic category.
+
 ## 18. Encoder quality presets
 
 Fast/Balanced/High map to encoder-specific settings inside export backend.
