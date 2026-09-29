@@ -22,6 +22,7 @@ use crate::{
         TemporaryTexture, TemporaryTextureKey, TemporaryTexturePool, TemporaryTexturePoolStats,
     },
     text::TextResources,
+    tint::{Tint, TintError, TintParameters},
 };
 
 pub const INITIAL_COMPOSITION_WIDTH: u32 = 1920;
@@ -281,6 +282,7 @@ pub struct Renderer {
     isolated_compositor: IsolatedObjectCompositor,
     blur: SeparableBlur,
     glow: Glow,
+    tint: Tint,
     text_resources: TextResources,
 }
 
@@ -417,6 +419,7 @@ impl Renderer {
             isolated_compositor: IsolatedObjectCompositor::new(device, COMPOSITION_FORMAT),
             blur: SeparableBlur::new(device, COMPOSITION_FORMAT),
             glow: Glow::new(device, COMPOSITION_FORMAT),
+            tint: Tint::new(device, COMPOSITION_FORMAT),
             text_resources: TextResources::new(
                 device,
                 queue,
@@ -613,6 +616,20 @@ impl Renderer {
         let working = preview_glow_parameters(parameters, preview_scale)?;
         self.encode_glow(device, queue, encoder, targets.0, targets.1, working)
             .map_err(GlowPreviewScaleError::InvalidParameters)
+    }
+
+    /// Encode linear-light Tint into a distinct pooled target, keeping the
+    /// original alpha and preserving exact identity at zero amount.
+    pub fn encode_tint(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        targets: (&TemporaryTexture, &TemporaryTexture),
+        parameters: TintParameters,
+    ) -> Result<(), TintError> {
+        self.tint
+            .encode(device, queue, encoder, targets, parameters)
     }
 
     /// Composite after all effects, then return the checkout to the pool.
