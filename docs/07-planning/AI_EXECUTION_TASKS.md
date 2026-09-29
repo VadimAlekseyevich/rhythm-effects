@@ -316,8 +316,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 - [x] **AI-273** — Add export-job immutable Project snapshot creation.
 - [x] **AI-274** — Resolve and validate all required image/audio/font resources before frame 0.
-- [ ] **AI-275** — Implement exact export ProjectTimeNs from frame index and rational output FPS.
-- [ ] **AI-276** — Implement full-composition default export range.
+- [x] **AI-275** — Implement exact export ProjectTimeNs from frame index and rational output FPS.
+- [x] **AI-276** — Implement full-composition default export range.
 - [ ] **AI-277** — Implement output resolution scaling while preserving composition aspect ratio.
 - [ ] **AI-278** — Create export renderer state that reuses creative shader/evaluation semantics without mutating preview state.
 - [ ] **AI-279** — Render one full-resolution export frame into an offscreen target.
