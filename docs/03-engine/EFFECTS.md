@@ -147,6 +147,18 @@ checks protect this contract. Evolution changes are intentionally a
 deterministic new pattern, not an FPS-dependent feedback process. AI-265
 uses this function to implement amount and pixel-size rendering semantics.
 
+AI-265 implements that WGSL pass: amount 0..1 adds centered monochrome
+noise to RGB multiplied by original source alpha, never modifying alpha;
+zero amount and transparent pixels are identity. size_px 1..256 groups
+the working texture into repeatable rectangular blocks that sample one
+seeded hash per block, with no frame dependence. The shader uses a single
+cached pipeline and no GPU readback. A preview helper scales the creative
+size by the resolved quality factor, with a one-working-pixel floor.
+Amount, evolution and seed remain unchanged. Tests cover block boundaries,
+intensity behavior, alpha retention, zero identity, preview sizing and
+input validation. End-to-end effect pass integration and GPU references
+remain separate from these renderer APIs.
+
 ## 8. RGB Split
 
 ~~~text
