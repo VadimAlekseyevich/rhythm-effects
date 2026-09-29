@@ -307,7 +307,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-266** — Implement RGB Split amount/angle channel offsets.
 - [x] **AI-267** — Test RGB Split alpha behavior for transparent edges.
 - [x] **AI-268** — Animate every documented effect parameter through Animated<T>.
-- [ ] **AI-269** — Skip disabled effects without unnecessary pass/resource cost.
+- [x] **AI-269** — Skip disabled effects without unnecessary pass/resource cost.
 - [ ] **AI-270** — Add visual reference scenes for all five effects.
 - [ ] **AI-271** — Add preview Full/Half/Quarter effect-semantic parity tests.
 - [ ] **AI-272** — Run Text Heavy and Effects Heavy performance fixtures.
