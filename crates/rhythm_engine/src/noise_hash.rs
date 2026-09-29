@@ -23,10 +23,8 @@ fn rhythm_unit_noise(seed: u32, evolution: f32, pixel: vec2<u32>) -> f32 {
 /// Portable 32-bit wrapping integer avalanche, matching the WGSL helper.
 #[must_use]
 pub fn noise_hash(seed: u32, evolution: f32, x: u32, y: u32) -> u32 {
-    let mut hash = seed
-        ^ evolution.to_bits()
-        ^ x.wrapping_mul(0x9e37_79b9)
-        ^ y.wrapping_mul(0x85eb_ca6b);
+    let mut hash =
+        seed ^ evolution.to_bits() ^ x.wrapping_mul(0x9e37_79b9) ^ y.wrapping_mul(0x85eb_ca6b);
     hash ^= hash >> 16;
     hash = hash.wrapping_mul(0x7feb_352d);
     hash ^= hash >> 15;
