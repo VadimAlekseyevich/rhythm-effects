@@ -167,6 +167,19 @@ Before first frame:
 
 Missing required asset blocks export with actionable list rather than silently producing broken output.
 
+AI-274 implements `ExportJobSnapshot::prepare_resources(canonical_project_path)`
+as an all-or-nothing, pre-frame worker operation. It resolves normalized
+absolute/project-relative sources, deduplicates and fully decodes all visible
+referenced images using the editor's PNG/JPEG/WebP decoder, probes the primary
+audio file with Symphonia and shapes visible Text objects using the same
+font-system creation and bundled Inter fallback as preview. A requested font
+that is not installed produces an explicit fallback report; missing glyphs
+are an actionable preflight failure. It collects every missing/broken media
+and glyph issue before declining to start frame 0; invisible images and
+unreferenced asset records are not required. The decoded resources are owned
+by the export job, and the project remains unchanged. This is CPU/media/font
+preparation, not yet GPU upload or FFmpeg encoding; those are separate tasks.
+
 ## 14. Progress
 
 Show:
