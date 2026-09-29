@@ -9,6 +9,7 @@ pub mod isolated_objects;
 pub mod noise;
 pub mod noise_hash;
 pub mod renderer;
+pub mod rgb_split;
 pub mod runtime_assets;
 pub mod scene_eval;
 pub mod temporary_textures;
