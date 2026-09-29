@@ -46,6 +46,11 @@ with wide integer intermediates and explicit rounding.
 
 Never accumulate frame delta.
 
+AI-275 reuses the central `rhythm_core::time::project_time_for_frame`
+rational i128 computation for arbitrary direct frame indexes, with a
+nearest-nanosecond/ties-away-from-zero result; the export timestamp is
+independent of prior frames, playback tempo, or preview seek order.
+
 ## 4. Range
 
 Default export range is whole composition:
@@ -55,6 +60,14 @@ Default export range is whole composition:
 ~~~
 
 Custom in/out range is post-MVP.
+
+AI-276 captures the default half-open [0, composition duration) range in
+`ExportFrameTimeline`. Frame count is computed by exact integer ceiling
+of `duration_ns * fps_numerator / (fps_denominator * 1e9)`, so a
+non-frame-aligned final fraction still receives its last frame start
+without adding a spurious frame at an exact end boundary. Frame-index
+queries reject indexes outside this precomputed count. FPS overrides
+never alter the snapshot's semantic composition frame rate.
 
 ## 5. Export settings
 
