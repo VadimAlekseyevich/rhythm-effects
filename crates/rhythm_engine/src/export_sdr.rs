@@ -17,7 +17,7 @@ fn export_sdr_shader() -> String {
 #[derive(Debug)]
 pub struct SdrExportConverter {
     texture: wgpu::Texture,
-    _view: wgpu::TextureView,
+    view: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
     size: [u32; 2],
@@ -124,7 +124,7 @@ impl SdrExportConverter {
         });
         Self {
             texture,
-            _view: view,
+            view,
             bind_group,
             pipeline,
             size,
@@ -144,11 +144,10 @@ impl SdrExportConverter {
     /// Encode after composing the entire frame in linear Rgba16Float;
     /// the export source and destination textures are distinct.
     pub fn encode(&self, encoder: &mut wgpu::CommandEncoder) {
-        let view = self.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Rhythm Effects export SDR conversion"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
+                view: &self.view,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
