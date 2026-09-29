@@ -7,7 +7,8 @@ use cosmic_text::{Align, Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Wr
 use rhythm_core::{
     domain::Vec2,
     geometry::LocalBounds2d,
-    project::{FontReference, FontStyle, FontWeight, TextAlignment},
+    ids::ObjectId,
+    project::{FontReference, FontStyle, FontWeight, ObjectContent, Project, TextAlignment},
 };
 
 pub const COMPOSITION_FALLBACK_FAMILY: &str = "Inter";
@@ -172,6 +173,55 @@ fn install_bundled_inter(font_system: &mut FontSystem) {
 
     database.load_font_data(INTER_VARIABLE.to_vec());
     database.load_font_data(INTER_VARIABLE_ITALIC.to_vec());
+}
+
+/// CPU-only export font decision, obtained with the same shaping and bundled
+/// Inter fallback as the interactive composition renderer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExportFontReadiness {
+    pub object_id: ObjectId,
+    pub requested_family: String,
+    pub resolved_family: String,
+    pub fallback_used: bool,
+    pub missing_glyphs: usize,
+}
+
+/// Resolve and shape all visible Text objects before exporting frame zero.
+/// A missing requested family is explicitly reported as the bundled Inter
+/// fallback; missing glyphs are surfaced to the export preflight as errors.
+#[must_use]
+pub fn preflight_export_fonts(project: &Project) -> Vec<ExportFontReadiness> {
+    let (mut font_system, _) = create_composition_font_system_and_cache();
+    project
+        .composition
+        .objects
+        .iter()
+        .filter(|object| object.visible)
+        .filter_map(|object| {
+            let ObjectContent::Text(text) = &object.content else {
+                return None;
+            };
+            let shaped = shape_with_font_system(
+                &mut font_system,
+                &text.text,
+                &text.font,
+                text.font_size,
+                text.alignment,
+            );
+            let fallback_used = shaped.requested_font_missing();
+            Some(ExportFontReadiness {
+                object_id: object.id,
+                requested_family: text.font.family.clone(),
+                resolved_family: if fallback_used {
+                    COMPOSITION_FALLBACK_FAMILY.to_owned()
+                } else {
+                    text.font.family.clone()
+                },
+                fallback_used,
+                missing_glyphs: shaped.missing_glyph_count(),
+            })
+        })
+        .collect()
 }
 
 /// A shaped composition text buffer backed by cosmic-text.
