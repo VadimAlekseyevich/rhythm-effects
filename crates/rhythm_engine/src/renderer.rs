@@ -293,11 +293,26 @@ pub struct Renderer {
 impl Renderer {
     #[must_use]
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        Self::new_with_composition_size(
+            device,
+            queue,
+            [INITIAL_COMPOSITION_WIDTH, INITIAL_COMPOSITION_HEIGHT],
+        )
+    }
+
+    /// Export owns a separate renderer with its own textures, pipelines and
+    /// caches; preview's renderer is never resized or borrowed for this job.
+    pub(crate) fn new_with_composition_size(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: [u32; 2],
+    ) -> Self {
+        debug_assert!(size[0] > 0 && size[1] > 0);
         let composition_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Rhythm Effects composition"),
             size: wgpu::Extent3d {
-                width: INITIAL_COMPOSITION_WIDTH,
-                height: INITIAL_COMPOSITION_HEIGHT,
+                width: size[0],
+                height: size[1],
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -315,8 +330,8 @@ impl Renderer {
         let preview_display_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Rhythm Effects preview display"),
             size: wgpu::Extent3d {
-                width: INITIAL_COMPOSITION_WIDTH,
-                height: INITIAL_COMPOSITION_HEIGHT,
+                width: size[0],
+                height: size[1],
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -413,7 +428,7 @@ impl Renderer {
         Self {
             _composition_texture: composition_texture,
             composition_view,
-            composition_size: [INITIAL_COMPOSITION_WIDTH, INITIAL_COMPOSITION_HEIGHT],
+            composition_size: size,
             _preview_display_texture: preview_display_texture,
             preview_display_view,
             preview_bind_group,
@@ -430,7 +445,7 @@ impl Renderer {
                 device,
                 queue,
                 COMPOSITION_FORMAT,
-                [INITIAL_COMPOSITION_WIDTH, INITIAL_COMPOSITION_HEIGHT],
+                size,
             ),
         }
     }
@@ -443,6 +458,11 @@ impl Renderer {
     #[must_use]
     pub const fn composition_format(&self) -> wgpu::TextureFormat {
         COMPOSITION_FORMAT
+    }
+
+    #[must_use]
+    pub fn composition_view(&self) -> &wgpu::TextureView {
+        &self.composition_view
     }
 
     #[must_use]
