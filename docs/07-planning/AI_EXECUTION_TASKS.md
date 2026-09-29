@@ -304,7 +304,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-263** — Implement Tint color/amount shader and identity-at-zero test.
 - [x] **AI-264** — Implement deterministic Noise from seed/evolution/pixel coordinates without mutable RNG state.
 - [x] **AI-265** — Implement Noise amount and size semantics.
-- [ ] **AI-266** — Implement RGB Split amount/angle channel offsets.
+- [x] **AI-266** — Implement RGB Split amount/angle channel offsets.
 - [ ] **AI-267** — Test RGB Split alpha behavior for transparent edges.
 - [ ] **AI-268** — Animate every documented effect parameter through Animated<T>.
 - [ ] **AI-269** — Skip disabled effects without unnecessary pass/resource cost.

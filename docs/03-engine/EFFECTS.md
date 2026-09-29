@@ -168,6 +168,17 @@ angle_degrees: Animated<f32>
 
 Channels sample deterministic signed offsets along the angle.
 
+AI-266 adds the Rgba16Float RGB Split shader: red samples along positive
+`(cos(angle), sin(angle)) * amount_px`, blue along the negative displacement,
+and green at the unshifted pixel. Top-left-origin composition coordinates
+make positive angles clockwise. Its sampled colors are unpremultiplied
+before reweighting with the original center alpha, ensuring neighboring
+transparent pixels do not receive shifted RGB. Radius/amount is validated
+in 0..64 and the angle must be finite; zero amount returns the center
+sample exactly. The preview entry point scales amount by the resolved
+quality factor without changing creative units. Separate alpha-edge
+regression tests are AI-267, and GPU reference scenes are AI-270.
+
 Alpha behavior is stable and tested to avoid colored transparent fringes.
 
 ## 9. Isolation
