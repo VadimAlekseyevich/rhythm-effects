@@ -340,13 +340,17 @@ fn evaluate_rgba(
 
 #[cfg(test)]
 mod tests {
-    use super::{EvaluatedObjectContent, SceneEvaluationError, evaluate_scene};
+    use super::{
+        EvaluatedEffectKind, EvaluatedObjectContent, SceneEvaluationError, evaluate_effect,
+        evaluate_scene,
+    };
     use rhythm_core::{
         animation::{Animated, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
         ids::{KeyframeId, ObjectId},
         project::{
-            Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
+            BlurEffect, EffectKind, GlowEffect, NoiseEffect, Object, ObjectContent, Project,
+            ProjectSettings, RectangleObject, RgbSplitEffect, TintEffect, TransformAnimation,
         },
         time::{BpmMicros, GridOffsetNs, MusicalTick, ProjectTimeNs, TempoMap, TimeSignature},
     };
@@ -473,4 +477,190 @@ mod tests {
             Err(SceneEvaluationError::TempoUnavailable)
         );
     }
+    fn animated_scalar(id: u64, start: f32, end: f32) -> Animated<f32> {
+        Animated::with_keyframes(
+            start,
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(id).expect("start key id"),
+                    MusicalTick::new(0),
+                    start,
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(id + 1).expect("end key id"),
+                    MusicalTick::new(960),
+                    end,
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("valid scalar keys")
+    }
+
+    fn color(r: f32, g: f32, b: f32, a: f32) -> LinearRgba {
+        LinearRgba::new(r, g, b, a).expect("finite color")
+    }
+
+    fn animated_color(
+        id: u64,
+        start: LinearRgba,
+        end: LinearRgba,
+    ) -> Animated<LinearRgba> {
+        Animated::with_keyframes(
+            start,
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(id).expect("start color id"),
+                    MusicalTick::new(0),
+                    start,
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(id + 1).expect("end color id"),
+                    MusicalTick::new(960),
+                    end,
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("valid color keys")
+    }
+
+    fn near(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 0.00001,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn every_documented_effect_parameter_uses_shared_animated_evaluation() {
+        let mid = Some(480.0);
+        assert_eq!(
+            evaluate_effect(
+                &EffectKind::Blur(BlurEffect {
+                    radius_px: animated_scalar(100, 0.0, 128.0),
+                }),
+                mid
+            ),
+            Ok(EvaluatedEffectKind::Blur { radius_px: 64.0 })
+        );
+
+        let first_color = color(0.2, 0.0, 0.0, 0.5);
+        let second_color = color(0.6, 1.0, 0.8, 1.0);
+        let glow = evaluate_effect(
+            &EffectKind::Glow(GlowEffect {
+                radius_px: animated_scalar(110, 16.0, 32.0),
+                intensity: animated_scalar(112, 0.0, 4.0),
+                threshold: animated_scalar(114, 0.2, 0.8),
+                color: animated_color(116, first_color, second_color),
+            }),
+            mid,
+        )
+        .expect("animated glow");
+        let EvaluatedEffectKind::Glow {
+            radius_px,
+            intensity,
+            threshold,
+            color: glow_color,
+        } = glow
+        else {
+            panic!("expected Glow");
+        };
+        near(radius_px, 24.0);
+        near(intensity, 2.0);
+        near(threshold, 0.5);
+        near(glow_color.r(), 0.4);
+        near(glow_color.g(), 0.5);
+        near(glow_color.b(), 0.4);
+        near(glow_color.a(), 0.75);
+
+        let tint = evaluate_effect(
+            &EffectKind::Tint(TintEffect {
+                color: animated_color(120, first_color, second_color),
+                amount: animated_scalar(122, 0.0, 1.0),
+            }),
+            mid,
+        )
+        .expect("animated tint");
+        let EvaluatedEffectKind::Tint { color, amount } = tint else {
+            panic!("expected Tint");
+        };
+        near(amount, 0.5);
+        near(color.r(), 0.4);
+        near(color.g(), 0.5);
+        near(color.b(), 0.4);
+        near(color.a(), 0.75);
+
+        let noise = evaluate_effect(
+            &EffectKind::Noise(NoiseEffect {
+                amount: animated_scalar(130, 0.0, 1.0),
+                size_px: animated_scalar(132, 1.0, 255.0),
+                evolution: animated_scalar(134, -2.0, 2.0),
+                seed: 47,
+            }),
+            mid,
+        )
+        .expect("animated noise");
+        let EvaluatedEffectKind::Noise {
+            amount,
+            size_px,
+            evolution,
+            seed,
+        } = noise
+        else {
+            panic!("expected Noise");
+        };
+        near(amount, 0.5);
+        near(size_px, 128.0);
+        near(evolution, 0.0);
+        assert_eq!(seed, 47, "seed remains a nonanimated semantic parameter");
+
+        let rgb = evaluate_effect(
+            &EffectKind::RgbSplit(RgbSplitEffect {
+                amount_px: animated_scalar(140, 0.0, 64.0),
+                angle_degrees: animated_scalar(142, 0.0, 270.0),
+            }),
+            mid,
+        )
+        .expect("animated RGB Split");
+        let EvaluatedEffectKind::RgbSplit {
+            amount_px,
+            angle_degrees,
+        } = rgb
+        else {
+            panic!("expected RGB Split");
+        };
+        near(amount_px, 32.0);
+        near(angle_degrees, 135.0);
+    }
+
+    #[test]
+    fn static_effects_evaluate_without_tempo_but_animated_effects_require_it() {
+        let static_tint = EffectKind::Tint(TintEffect {
+            color: Animated::new_static(color(0.5, 0.3, 0.1, 1.0)),
+            amount: Animated::new_static(0.75),
+        });
+        assert_eq!(
+            evaluate_effect(&static_tint, None),
+            Ok(EvaluatedEffectKind::Tint {
+                color: color(0.5, 0.3, 0.1, 1.0),
+                amount: 0.75,
+            })
+        );
+        assert_eq!(
+            evaluate_effect(
+                &EffectKind::Noise(NoiseEffect {
+                    amount: Animated::new_static(0.1),
+                    size_px: animated_scalar(150, 4.0, 12.0),
+                    evolution: Animated::new_static(0.0),
+                    seed: 5,
+                }),
+                None,
+            ),
+            Err(SceneEvaluationError::TempoUnavailable)
+        );
+    }
+
 }
