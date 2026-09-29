@@ -323,13 +323,13 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [ ] **AI-279** — Render one full-resolution export frame into an offscreen target.
 - [x] **AI-280** — Convert final frame to standard SDR RGBA/BGRA readback representation.
 - [x] **AI-281** — Implement a bounded pool of at most three GPU readback/frame buffers.
-- [ ] **AI-282** — Spawn bundled/resolved FFmpeg through structured process arguments, never cmd.exe shell interpolation.
-- [ ] **AI-283** — Pipe raw video frames to FFmpeg stdin.
-- [ ] **AI-284** — Configure MP4/H.264/yuv420p output.
-- [ ] **AI-285** — Pass original primary audio asset to FFmpeg for AAC mux when present.
-- [ ] **AI-286** — Trim audio to composition duration and permit video tail after audio ends.
-- [ ] **AI-287** — Support video-only export when Project has no audio.
-- [ ] **AI-288** — Implement Fast/Balanced/High encoder-quality backend mapping.
+- [x] **AI-282** — Spawn bundled/resolved FFmpeg through structured process arguments, never cmd.exe shell interpolation.
+- [x] **AI-283** — Pipe raw video frames to FFmpeg stdin.
+- [x] **AI-284** — Configure MP4/H.264/yuv420p output.
+- [x] **AI-285** — Pass original primary audio asset to FFmpeg for AAC mux when present.
+- [x] **AI-286** — Trim audio to composition duration and permit video tail after audio ends.
+- [x] **AI-287** — Support video-only export when Project has no audio.
+- [x] **AI-288** — Implement Fast/Balanced/High encoder-quality backend mapping.
 - [ ] **AI-289** — Implement current-frame/total/percent/elapsed export progress.
 - [ ] **AI-290** — Implement cooperative export cancellation and owned FFmpeg process termination.
 - [ ] **AI-291** — Write export to a temporary destination and publish final path only after successful FFmpeg completion.
