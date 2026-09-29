@@ -1,9 +1,7 @@
 //! Exact, non-accumulating export frame timestamps and default full range.
 //! The start of frame N is computed directly from rational FPS in i128 math.
 
-use rhythm_core::{
-    time::{FrameRate, ProjectTimeNs, TimeConversionError, project_time_for_frame},
-};
+use rhythm_core::time::{FrameRate, ProjectTimeNs, TimeConversionError, project_time_for_frame};
 
 use crate::export_job::ExportJobSnapshot;
 
@@ -33,8 +31,7 @@ impl ExportFrameTimeline {
         if duration_ns == 0 {
             return Err(ExportTimelineError::EmptyComposition);
         }
-        let end_ns = i64::try_from(duration_ns)
-            .map_err(|_| ExportTimelineError::TimeOverflow)?;
+        let end_ns = i64::try_from(duration_ns).map_err(|_| ExportTimelineError::TimeOverflow)?;
 
         // Number of frame STARTS with exact rational timestamp < duration.
         // Ceil(duration * fps_numerator / (fps_denominator * 1e9)).
@@ -92,10 +89,10 @@ impl ExportFrameTimeline {
         snapshot: &ExportJobSnapshot,
         frame_index: u64,
     ) -> Result<crate::scene_eval::EvaluatedScene, ExportFrameError> {
-        let time = self.frame_time(frame_index).map_err(ExportFrameError::Timeline)?;
-        snapshot
-            .evaluate_at(time)
-            .map_err(ExportFrameError::Scene)
+        let time = self
+            .frame_time(frame_index)
+            .map_err(ExportFrameError::Timeline)?;
+        snapshot.evaluate_at(time).map_err(ExportFrameError::Scene)
     }
 }
 
@@ -108,10 +105,7 @@ pub enum ExportFrameError {
 #[cfg(test)]
 mod tests {
     use super::{ExportFrameTimeline, ExportTimelineError};
-    use crate::{
-        export_job::ExportJobSnapshot,
-        reference_scenes::five_effects_reference_scene,
-    };
+    use crate::{export_job::ExportJobSnapshot, reference_scenes::five_effects_reference_scene};
     use rhythm_core::{
         editor::ProjectEditor,
         time::{DurationNs, FrameRate, ProjectTimeNs},
@@ -120,10 +114,8 @@ mod tests {
     fn captured(duration_ns: u64) -> ExportJobSnapshot {
         let mut scene = five_effects_reference_scene();
         scene.project.settings.duration = DurationNs::new(duration_ns);
-        ExportJobSnapshot::capture(
-            &ProjectEditor::new(scene.project).expect("valid project"),
-        )
-        .expect("snapshot")
+        ExportJobSnapshot::capture(&ProjectEditor::new(scene.project).expect("valid project"))
+            .expect("snapshot")
     }
 
     #[test]
@@ -149,7 +141,10 @@ mod tests {
             timeline.frame_time(600),
             Err(ExportTimelineError::FrameIndexOutOfRange)
         );
-        assert_eq!(timeline.evaluate_frame(&snapshot, 0), timeline.evaluate_frame(&snapshot, 0));
+        assert_eq!(
+            timeline.evaluate_frame(&snapshot, 0),
+            timeline.evaluate_frame(&snapshot, 0)
+        );
     }
 
     #[test]
@@ -161,7 +156,10 @@ mod tests {
         assert_eq!(timeline.frame_time(0), Ok(ProjectTimeNs::new(0)));
         assert_eq!(timeline.frame_time(1), Ok(ProjectTimeNs::new(33_366_667)));
         assert_eq!(timeline.frame_time(2), Ok(ProjectTimeNs::new(66_733_333)));
-        assert_eq!(timeline.frame_time(299), Ok(ProjectTimeNs::new(9_976_633_333)));
+        assert_eq!(
+            timeline.frame_time(299),
+            Ok(ProjectTimeNs::new(9_976_633_333))
+        );
         assert_eq!(
             timeline.frame_time(300),
             Err(ExportTimelineError::FrameIndexOutOfRange)
@@ -186,7 +184,10 @@ mod tests {
         )
         .expect("range");
         assert_eq!(timeline.frame_count(), 31);
-        assert_eq!(timeline.frame_time(30), Ok(ProjectTimeNs::new(1_000_000_000)));
+        assert_eq!(
+            timeline.frame_time(30),
+            Ok(ProjectTimeNs::new(1_000_000_000))
+        );
         assert_eq!(
             timeline.frame_time(31),
             Err(ExportTimelineError::FrameIndexOutOfRange)
@@ -197,19 +198,18 @@ mod tests {
     fn changing_export_fps_does_not_modify_composition_or_snapshot() {
         let snapshot = captured(10_000_000_000);
         let original = snapshot.project().clone();
-        let first = ExportFrameTimeline::full_composition(
-            &snapshot,
-            FrameRate::new(60, 1).expect("60"),
-        )
-        .expect("60 range");
-        let second = ExportFrameTimeline::full_composition(
-            &snapshot,
-            FrameRate::new(25, 1).expect("25"),
-        )
-        .expect("25 range");
+        let first =
+            ExportFrameTimeline::full_composition(&snapshot, FrameRate::new(60, 1).expect("60"))
+                .expect("60 range");
+        let second =
+            ExportFrameTimeline::full_composition(&snapshot, FrameRate::new(25, 1).expect("25"))
+                .expect("25 range");
         assert_eq!(first.frame_count(), 600);
         assert_eq!(second.frame_count(), 250);
         assert_eq!(snapshot.project(), &original);
-        assert_eq!(snapshot.project().settings.frame_rate, FrameRate::new(60, 1).expect("60"));
+        assert_eq!(
+            snapshot.project().settings.frame_rate,
+            FrameRate::new(60, 1).expect("60")
+        );
     }
 }
