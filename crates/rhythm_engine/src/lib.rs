@@ -4,6 +4,7 @@ pub mod audio;
 pub mod blur;
 pub mod effect_chain;
 pub mod export_job;
+pub mod export_readback;
 pub mod export_renderer;
 pub mod export_resolution;
 pub mod export_resources;
