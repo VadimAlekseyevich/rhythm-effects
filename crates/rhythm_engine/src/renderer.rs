@@ -693,7 +693,8 @@ impl Renderer {
         preview_scale: f32,
     ) -> Result<(), RgbSplitError> {
         let working = preview_rgb_split_parameters(parameters, preview_scale)?;
-        self.rgb_split.encode(device, queue, encoder, targets, working)
+        self.rgb_split
+            .encode(device, queue, encoder, targets, working)
     }
 
     /// Composite after all effects, then return the checkout to the pool.
