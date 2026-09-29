@@ -330,9 +330,9 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-286** — Trim audio to composition duration and permit video tail after audio ends.
 - [x] **AI-287** — Support video-only export when Project has no audio.
 - [x] **AI-288** — Implement Fast/Balanced/High encoder-quality backend mapping.
-- [ ] **AI-289** — Implement current-frame/total/percent/elapsed export progress.
-- [ ] **AI-290** — Implement cooperative export cancellation and owned FFmpeg process termination.
-- [ ] **AI-291** — Write export to a temporary destination and publish final path only after successful FFmpeg completion.
+- [x] **AI-289** — Implement current-frame/total/percent/elapsed export progress.
+- [x] **AI-290** — Implement cooperative export cancellation and owned FFmpeg process termination.
+- [x] **AI-291** — Write export to a temporary destination and publish final path only after successful FFmpeg completion.
 - [ ] **AI-292** — Capture bounded FFmpeg stderr and map common failures to structured ExportError stages.
 - [ ] **AI-293** — Create generated click/flash A/V sync fixture.
 - [ ] **AI-294** — Validate short, 1-minute, 5-minute and 10-minute export sync.
