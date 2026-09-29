@@ -9,6 +9,7 @@ use crate::{
     export_job::ExportJobSnapshot,
     export_resolution::{ExportOutputResolution, ExportResolutionError},
     export_resources::{ExportResourceErrors, PreparedExportResources},
+    export_sdr::SdrExportConverter,
     export_timeline::{ExportFrameError, ExportFrameTimeline, ExportTimelineError},
     renderer::Renderer,
     scene_eval::EvaluatedScene,
@@ -88,9 +89,15 @@ impl ExportRendererPlan {
     pub fn initialize_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> ExportRendererState {
         let renderer =
             Renderer::new_with_composition_size(device, queue, self.resolution.output_size());
+        let sdr = SdrExportConverter::new(
+            device,
+            renderer.composition_view(),
+            self.resolution.output_size(),
+        );
         ExportRendererState {
             plan: self,
             renderer,
+            sdr,
         }
     }
 }
@@ -101,6 +108,7 @@ impl ExportRendererPlan {
 pub struct ExportRendererState {
     plan: ExportRendererPlan,
     renderer: Renderer,
+    sdr: SdrExportConverter,
 }
 
 impl ExportRendererState {
@@ -116,6 +124,17 @@ impl ExportRendererState {
 
     pub fn renderer_mut(&mut self) -> &mut Renderer {
         &mut self.renderer
+    }
+
+    #[must_use]
+    pub const fn sdr_output(&self) -> &SdrExportConverter {
+        &self.sdr
+    }
+
+    /// After the creative frame is composed, encode shared linear-to-sRGB
+    /// conversion into a distinct straight-alpha RGBA8 COPY_SRC target.
+    pub fn encode_sdr_frame(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.sdr.encode(encoder);
     }
 
     pub fn evaluate_frame(&self, index: u64) -> Result<EvaluatedScene, ExportFrameError> {
