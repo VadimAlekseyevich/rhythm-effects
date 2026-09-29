@@ -131,7 +131,9 @@ impl ImageDecodeWorker {
     }
 }
 
-fn decode_image_file(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
+/// Decode supported local images for both live-editor workers and pre-export
+/// resource validation; export must not discover a corrupt image at frame N.
+pub fn decode_image_file(path: &Path) -> Result<DecodedImage, ImageDecodeError> {
     let reader =
         ImageReader::open(path).map_err(|error| ImageDecodeError::Io(error.to_string()))?;
     let reader = reader
