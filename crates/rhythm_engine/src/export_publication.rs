@@ -62,7 +62,11 @@ impl PartialExportOutput {
             let mut marker_name = stem.clone();
             marker_name.push(".export-lock");
             let marker = parent.join(marker_name);
-            match OpenOptions::new().write(true).create_new(true).open(&marker) {
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&marker)
+            {
                 Ok(file) => drop(file),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(ExportPublicationError::Io(error)),
@@ -184,11 +188,17 @@ mod tests {
         fs::write(&final_path, b"old known good").expect("old output");
         let stage = PartialExportOutput::reserve(&final_path).expect("reserve");
         assert!(!stage.partial_path().exists());
-        assert_eq!(fs::read(&final_path).expect("old still intact"), b"old known good");
+        assert_eq!(
+            fs::read(&final_path).expect("old still intact"),
+            b"old known good"
+        );
         let partial = stage.partial_path().to_path_buf();
         fs::write(&partial, b"finalized MP4 bytes").expect("simulate finalized encoder");
         assert_eq!(stage.publish_completed().expect("publish"), final_path);
-        assert_eq!(fs::read(&final_path).expect("new output"), b"finalized MP4 bytes");
+        assert_eq!(
+            fs::read(&final_path).expect("new output"),
+            b"finalized MP4 bytes"
+        );
         assert!(!partial.exists());
         assert_eq!(fs::read_dir(&root.0).expect("list").count(), 1);
     }
@@ -207,8 +217,14 @@ mod tests {
         fs::write(&other, b"other partial").expect("other");
         drop(first);
         assert!(!unfinished.exists());
-        assert_eq!(fs::read(&other).expect("second untouched"), b"other partial");
-        assert_eq!(fs::read(&final_path).expect("old untouched"), b"old known good");
+        assert_eq!(
+            fs::read(&other).expect("second untouched"),
+            b"other partial"
+        );
+        assert_eq!(
+            fs::read(&final_path).expect("old untouched"),
+            b"old known good"
+        );
         drop(second);
         assert!(!other.exists());
         assert_eq!(fs::read_dir(&root.0).expect("list").count(), 1);
