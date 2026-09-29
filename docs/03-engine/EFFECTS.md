@@ -116,9 +116,16 @@ color: Animated<LinearRgba>
 amount: Animated<f32>, 0..1
 ~~~
 
-Amount zero is identity.
+AI-263 implements the Rgba16Float Tint shader with a cached pipeline.
+The effective tint factor is `amount * color.a`; it mixes source linear
+premultiplied RGB with `color.rgb * source.a`, preserving source alpha.
+Thus amount zero and transparent tint are identity, while fully transparent
+input cannot acquire colored fringes. Amount is validated in 0..1 and color
+channels are checked before any GPU pass is encoded. Unit tests cover
+identity, opacity mixing, nonfinite/out-of-range input and alpha edge
+behavior. GPU visual references are scheduled separately in AI-270.
 
-Shader behavior is covered by visual reference tests.
+Amount zero is identity.
 
 ## 7. Noise
 
