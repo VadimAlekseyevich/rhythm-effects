@@ -280,15 +280,11 @@ impl Glow {
         });
         let threshold_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Rhythm Effects Glow threshold shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!("{VERTEX_SHADER}\n{THRESHOLD_SHADER}").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(format!("{VERTEX_SHADER}\n{THRESHOLD_SHADER}").into()),
         });
         let additive_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Rhythm Effects Glow additive shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!("{VERTEX_SHADER}\n{ADDITIVE_SHADER}").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(format!("{VERTEX_SHADER}\n{ADDITIVE_SHADER}").into()),
         });
         let threshold_pipeline = create_pipeline(
             device,
@@ -421,11 +417,7 @@ impl Glow {
 }
 
 #[cfg(test)]
-fn reference_additive(
-    source: [f32; 4],
-    mask_coverage: f32,
-    params: GlowParameters,
-) -> [f32; 4] {
+fn reference_additive(source: [f32; 4], mask_coverage: f32, params: GlowParameters) -> [f32; 4] {
     let coverage = mask_coverage.clamp(0.0, 1.0) * params.color.a() * params.intensity;
     [
         source[0] + params.color.r() * coverage,
@@ -526,7 +518,10 @@ mod tests {
                 ..params()
             },
         );
-        assert!(boosted[0] > 1.0, "linear working color retains HDR headroom");
+        assert!(
+            boosted[0] > 1.0,
+            "linear working color retains HDR headroom"
+        );
         assert_eq!(boosted[3], 1.0, "alpha stays normalized");
     }
 
