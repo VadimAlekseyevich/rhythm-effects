@@ -140,14 +140,15 @@ pub fn preview_glow_parameters(
     let validated = parameters
         .validate()
         .map_err(GlowPreviewScaleError::InvalidParameters)?;
-    let radius_px = preview_blur_radius(validated.radius_px, preview_scale).map_err(|error| {
-        match error {
+    let radius_px =
+        preview_blur_radius(validated.radius_px, preview_scale).map_err(|error| match error {
             BlurPreviewScaleError::InvalidRadius => {
                 GlowPreviewScaleError::InvalidParameters(GlowError::InvalidRadius)
             }
-            BlurPreviewScaleError::InvalidPreviewScale => GlowPreviewScaleError::InvalidPreviewScale,
-        }
-    })?;
+            BlurPreviewScaleError::InvalidPreviewScale => {
+                GlowPreviewScaleError::InvalidPreviewScale
+            }
+        })?;
     Ok(GlowParameters {
         radius_px,
         ..validated
@@ -309,15 +310,11 @@ impl Glow {
         });
         let threshold_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Rhythm Effects Glow threshold shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!("{VERTEX_SHADER}\n{THRESHOLD_SHADER}").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(format!("{VERTEX_SHADER}\n{THRESHOLD_SHADER}").into()),
         });
         let additive_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Rhythm Effects Glow additive shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!("{VERTEX_SHADER}\n{ADDITIVE_SHADER}").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(format!("{VERTEX_SHADER}\n{ADDITIVE_SHADER}").into()),
         });
         let threshold_pipeline = create_pipeline(
             device,
@@ -450,11 +447,7 @@ impl Glow {
 }
 
 #[cfg(test)]
-fn reference_additive(
-    source: [f32; 4],
-    mask_coverage: f32,
-    params: GlowParameters,
-) -> [f32; 4] {
+fn reference_additive(source: [f32; 4], mask_coverage: f32, params: GlowParameters) -> [f32; 4] {
     let coverage = mask_coverage.clamp(0.0, 1.0) * params.color.a() * params.intensity;
     [
         source[0] + params.color.r() * coverage,
@@ -522,7 +515,9 @@ mod tests {
                 },
                 0.5
             ),
-            Err(GlowPreviewScaleError::InvalidParameters(GlowError::InvalidRadius))
+            Err(GlowPreviewScaleError::InvalidParameters(
+                GlowError::InvalidRadius
+            ))
         );
         assert_eq!(
             preview_glow_parameters(
@@ -532,7 +527,9 @@ mod tests {
                 },
                 0.5
             ),
-            Err(GlowPreviewScaleError::InvalidParameters(GlowError::InvalidIntensity))
+            Err(GlowPreviewScaleError::InvalidParameters(
+                GlowError::InvalidIntensity
+            ))
         );
     }
 
@@ -613,7 +610,10 @@ mod tests {
                 ..params()
             },
         );
-        assert!(boosted[0] > 1.0, "linear working color retains HDR headroom");
+        assert!(
+            boosted[0] > 1.0,
+            "linear working color retains HDR headroom"
+        );
         assert_eq!(boosted[3], 1.0, "alpha stays normalized");
     }
 
