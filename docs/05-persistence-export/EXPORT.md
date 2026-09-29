@@ -115,6 +115,17 @@ Export job owns separate export-renderer state while reusing the same shader/sem
 
 It may share thread-safe wgpu Device/Queue handles where implementation supports clean ownership, but it does not mutate preview renderer caches/state.
 
+AI-278 separates two phases: `ExportRendererPlan::prepare` validates
+aspect-safe output dimensions, exact frame timeline and ALL required media/font
+dependencies from an immutable job snapshot, before allocating GPU targets.
+`initialize_gpu` then creates its own size-specific `Renderer`, retaining
+independent composition/preview-display textures, effect pipelines, temporary
+pool, text/font state, and image caches. The construction reuses the actual
+preview Renderer implementation and its semantic evaluator, never borrows or
+resizes the app preview Renderer. Hardware-free tests check that the plan
+respects resolution/FPS overrides, captures the original Project and rejects
+stretching ahead of GPU work. Upload/render/FFmpeg remain subsequent steps.
+
 If concurrent GPU use hurts editor responsiveness, preview can be throttled while export runs; Project editing remains semantically independent.
 
 ## 8. Render pipeline
