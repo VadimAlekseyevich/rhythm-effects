@@ -441,12 +441,7 @@ impl Renderer {
             noise: Noise::new(device, COMPOSITION_FORMAT),
             rgb_split: RgbSplit::new(device, COMPOSITION_FORMAT),
             tint: Tint::new(device, COMPOSITION_FORMAT),
-            text_resources: TextResources::new(
-                device,
-                queue,
-                COMPOSITION_FORMAT,
-                size,
-            ),
+            text_resources: TextResources::new(device, queue, COMPOSITION_FORMAT, size),
         }
     }
 
