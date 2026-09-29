@@ -100,6 +100,15 @@ All composition-space geometry/effect units scale consistently into output pixel
 
 Do not reinterpret project coordinates.
 
+AI-277 adds `ExportOutputResolution`: it verifies source and output
+dimensions against V1 bounds and uses integer cross multiplication to
+require exactly the same rational aspect ratio, rejecting even small
+rounding-induced stretches. Its immutable composition/output integer
+ratio scales every geometry/effect/font spatial pixel parameter consistently
+without modifying the snapshot. Alpha, color and intensity are not spatial
+quantities. The full-resolution GPU render-target allocation follows in
+the export renderer integration tasks.
+
 ## 7. Rendering worker
 
 Export job owns separate export-renderer state while reusing the same shader/semantic code.
