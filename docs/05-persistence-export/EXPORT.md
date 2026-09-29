@@ -24,6 +24,15 @@ Subsequent editor edits do not alter the running export.
 
 The editor may remain responsive; export uses its snapshot.
 
+AI-273 adds `ExportJobSnapshot::capture(&ProjectEditor)` at a committed
+editing boundary. It rejects active drag/keyframe transactions, clones and
+validates the complete semantic Project, and retains the captured revision
+for job diagnostics. Its Project accessor is read-only, and export scene
+evaluation takes the snapshot rather than the mutable editor. Later edits,
+undo/redo and additional export captures cannot change an existing job's
+creative state. Runtime media/font resolution and separate GPU resources are
+subsequent tasks and are deliberately not stored in this initial snapshot.
+
 ## 3. Time
 
 For frame index N:

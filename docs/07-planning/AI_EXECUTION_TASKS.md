@@ -310,11 +310,11 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-269** — Skip disabled effects without unnecessary pass/resource cost.
 - [x] **AI-270** — Add visual reference scenes for all five effects.
 - [x] **AI-271** — Add preview Full/Half/Quarter effect-semantic parity tests.
-- [ ] **AI-272** — Run Text Heavy and Effects Heavy performance fixtures.
+- [ ] **AI-272** — Run Text Heavy and Effects Heavy performance fixtures. **Blocked on a GPU-equipped reference machine and timing capture; automated semantic fixtures are not hardware performance results.**
 
 ## M10 — Export
 
-- [ ] **AI-273** — Add export-job immutable Project snapshot creation.
+- [x] **AI-273** — Add export-job immutable Project snapshot creation.
 - [ ] **AI-274** — Resolve and validate all required image/audio/font resources before frame 0.
 - [ ] **AI-275** — Implement exact export ProjectTimeNs from frame index and rational output FPS.
 - [ ] **AI-276** — Implement full-composition default export range.

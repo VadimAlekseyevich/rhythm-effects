@@ -3,6 +3,7 @@
 pub mod audio;
 pub mod blur;
 pub mod effect_chain;
+pub mod export_job;
 pub mod glow;
 pub mod image_decode;
 pub mod isolated_objects;
