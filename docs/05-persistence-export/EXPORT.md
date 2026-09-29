@@ -272,6 +272,17 @@ Document the concrete mapping in code/release notes once the release encoder is 
 
 Renderer performs creative linear working math.
 
+AI-280 adds an export-only cached Rgba8Unorm target with
+`RENDER_ATTACHMENT | COPY_SRC` usage, separate from the linear-premultiplied
+Rgba16Float composition. Its WGSL reuses the preview shader's exact linear to
+sRGB transfer/unpremultiplication math but writes **straight-alpha**, clipped
+SDR sRGB RGBA8 for FFmpeg/readback instead of preview's premultiplied UI
+texture. Alpha-zero RGB remains zero; HDR values above SDR are clipped at
+output. `ExportRendererState::encode_sdr_frame` encodes the conversion after
+creative compositing. There is no unnecessary texture/view recreation for
+ordinary subsequent frames. The GPU readback/mux and complete object draw
+path are separate follow-up steps.
+
 Final export conversion targets standard SDR sRGB appearance before FFmpeg YUV conversion.
 
 No HDR metadata or wide-gamut support in MVP.

@@ -7,6 +7,7 @@ pub mod export_job;
 pub mod export_renderer;
 pub mod export_resolution;
 pub mod export_resources;
+pub mod export_sdr;
 pub mod export_timeline;
 pub mod glow;
 pub mod image_decode;

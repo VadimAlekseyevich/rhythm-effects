@@ -212,7 +212,7 @@ fn validate_rgba8_payload(
     Ok(())
 }
 
-const PREVIEW_SHADER: &str = r#"
+pub(crate) const PREVIEW_SHADER: &str = r#"
 @group(0) @binding(0) var composition_texture: texture_2d<f32>;
 @group(0) @binding(1) var composition_sampler: sampler;
 
