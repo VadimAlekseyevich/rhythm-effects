@@ -1,9 +1,7 @@
 //! Aspect-preserving export output dimensions and composition pixel scaling.
 //! Creative coordinates and the stored Project remain in composition units.
 
-use rhythm_core::project::{
-    MAX_COMPOSITION_DIMENSION, MIN_COMPOSITION_DIMENSION, ProjectSettings,
-};
+use rhythm_core::project::{MAX_COMPOSITION_DIMENSION, MIN_COMPOSITION_DIMENSION, ProjectSettings};
 
 use crate::export_job::ExportJobSnapshot;
 
@@ -30,9 +28,8 @@ impl ExportOutputResolution {
         output_height: u32,
     ) -> Result<Self, ExportResolutionError> {
         let original = [settings.composition_width, settings.composition_height];
-        let valid = |value: u32| {
-            (MIN_COMPOSITION_DIMENSION..=MAX_COMPOSITION_DIMENSION).contains(&value)
-        };
+        let valid =
+            |value: u32| (MIN_COMPOSITION_DIMENSION..=MAX_COMPOSITION_DIMENSION).contains(&value);
         if !valid(original[0])
             || !valid(original[1])
             || !valid(output_width)
@@ -96,10 +93,7 @@ impl ExportOutputResolution {
 #[cfg(test)]
 mod tests {
     use super::{ExportOutputResolution, ExportResolutionError};
-    use crate::{
-        export_job::ExportJobSnapshot,
-        reference_scenes::five_effects_reference_scene,
-    };
+    use crate::{export_job::ExportJobSnapshot, reference_scenes::five_effects_reference_scene};
     use rhythm_core::{editor::ProjectEditor, project::ProjectSettings};
 
     #[test]
@@ -155,8 +149,8 @@ mod tests {
         let editor = ProjectEditor::new(project.clone()).expect("project");
         let snapshot = ExportJobSnapshot::capture(&editor).expect("snapshot");
         let native = ExportOutputResolution::native(&snapshot).expect("native");
-        let reduced = ExportOutputResolution::new(&snapshot.project().settings, 1280, 720)
-            .expect("reduced");
+        let reduced =
+            ExportOutputResolution::new(&snapshot.project().settings, 1280, 720).expect("reduced");
         assert_eq!(native.output_size(), [1920, 1080]);
         assert_eq!(reduced.output_size(), [1280, 720]);
         assert_eq!(editor.project(), &project);
