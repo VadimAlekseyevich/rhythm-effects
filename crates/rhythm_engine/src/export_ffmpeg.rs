@@ -75,7 +75,11 @@ impl FfmpegExportOptions {
             frame_rate: plan.timeline().output_fps(),
             frame_count: plan.timeline().frame_count(),
             duration_ns: plan.snapshot().project().settings.duration.get(),
-            primary_audio: plan.resources().audio.as_ref().map(|probe| probe.path.clone()),
+            primary_audio: plan
+                .resources()
+                .audio
+                .as_ref()
+                .map(|probe| probe.path.clone()),
             quality,
         }
     }
@@ -202,9 +206,7 @@ impl FfmpegExportOptions {
     /// until the bounded structured stderr collector (AI-292) is wired; do
     /// not use Stdio::piped without draining it during long encodes.
     pub fn spawn(&self) -> Result<FfmpegRawVideoProcess, FfmpegProcessError> {
-        let frame_size = self
-            .validate()
-            .map_err(FfmpegProcessError::Configuration)?;
+        let frame_size = self.validate().map_err(FfmpegProcessError::Configuration)?;
         let mut command = self.command().map_err(FfmpegProcessError::Configuration)?;
         let mut child = command
             .stdin(Stdio::piped())
@@ -325,7 +327,10 @@ impl Drop for FfmpegRawVideoProcess {
 mod tests {
     use super::{ExportQuality, FfmpegConfigurationError, FfmpegExportOptions};
     use rhythm_core::time::FrameRate;
-    use std::{ffi::{OsStr, OsString}, path::PathBuf};
+    use std::{
+        ffi::{OsStr, OsString},
+        path::PathBuf,
+    };
 
     fn options(audio: bool) -> FfmpegExportOptions {
         let directory = std::env::temp_dir().join("Rhythm Export & Test");
@@ -342,13 +347,17 @@ mod tests {
     }
 
     fn args(options: &FfmpegExportOptions) -> Vec<OsString> {
-        options.command().expect("valid options").get_args().map(OsString::from).collect()
+        options
+            .command()
+            .expect("valid options")
+            .get_args()
+            .map(OsString::from)
+            .collect()
     }
 
     fn contains_pair(args: &[OsString], flag: &str, value: &str) -> bool {
-        args.windows(2).any(|pair| {
-            pair[0] == OsString::from(flag) && pair[1] == OsString::from(value)
-        })
+        args.windows(2)
+            .any(|pair| pair[0] == OsString::from(flag) && pair[1] == OsString::from(value))
     }
 
     #[test]
@@ -380,13 +389,16 @@ mod tests {
         let args = args(&options);
         let audio = options.primary_audio.as_ref().expect("audio");
         assert!(args.windows(2).any(|pair| {
-            pair[0].as_os_str() == OsStr::new("-i")
-                && pair[1].as_os_str() == audio.as_os_str()
+            pair[0].as_os_str() == OsStr::new("-i") && pair[1].as_os_str() == audio.as_os_str()
         }));
         assert!(contains_pair(&args, "-map", "0:v:0"));
         assert!(contains_pair(&args, "-map", "1:a:0"));
         assert!(contains_pair(&args, "-c:a", "aac"));
-        assert!(contains_pair(&args, "-af", "atrim=duration=10.000000001,asetpts=PTS-STARTPTS"));
+        assert!(contains_pair(
+            &args,
+            "-af",
+            "atrim=duration=10.000000001,asetpts=PTS-STARTPTS"
+        ));
         assert!(!args.contains(&OsString::from("-shortest")));
         assert!(!args.contains(&OsString::from("-an")));
         assert_eq!(
