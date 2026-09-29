@@ -16,6 +16,32 @@ MVP:
 
 The exact FFmpeg H.264 encoder implementation is a packaging capability, not project semantics. Release packaging must provide and validate one supported encoder.
 
+AI-282–288 implement an export-worker FFmpeg child-process boundary using
+`std::process::Command` with one structured argument per path/option and
+an explicitly supplied absolute resolved/bundled FFmpeg executable. No
+`cmd.exe`, shell interpolation, or user-controlled command-line string.
+The backend currently targets a release FFmpeg with `libx264`: raw
+`rgba` at exact rational FPS and output size is supplied over `pipe:0`;
+H.264 `yuv420p` video is written as MP4 to a caller-owned unique
+`.partial.mp4` path with `-n` to prevent overwrite. The process owns a
+piped stdin and `write_frame(index, rgba)` checks sequential frame order,
+exact packed byte count, and configured frame count before writing all bytes.
+`finish` closes the video pipe and checks final process status; drop on an
+unfinished job kills/reaps the owned child.
+
+For optional primary audio, the source path comes from export resource
+preflight of the **original** primary audio asset, passed as a single `-i`
+argument and explicitly mapped to `1:a:0`. AAC uses a composition-duration
+`atrim` plus reset timestamps. Omitting `-shortest` preserves a video
+tail after shorter audio; no audio means `-an` video-only MP4. Three explicit
+`libx264` quality mappings are Fast=veryfast/CRF23,
+Balanced=medium/CRF20 and High=slow/CRF17. Tests check argument order,
+literal Unicode/spaces/shell metacharacter paths, format, FPS, AAC duration,
+video-only behavior, bounds, and presets. Encoder capability probing,
+bounded diagnostic collection, asynchronous readback/pipe coordination and
+safe final file publication remain separate tasks; these process APIs do
+not mean a fully creative end-to-end MP4 export is already available.
+
 ## 2. Snapshot
 
 At export start, create an immutable semantic Project snapshot and resolve required asset references.
