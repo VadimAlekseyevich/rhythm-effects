@@ -24,6 +24,9 @@ pub const fn status() -> &'static str {
 }
 
 #[cfg(test)]
+mod preview_effect_parity;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
