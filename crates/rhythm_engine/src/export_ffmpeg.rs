@@ -2,14 +2,71 @@
 //! interpolation, screen capture or realtime audio playback recording.
 
 use std::{
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Component, PathBuf},
-    process::{Child, ChildStdin, Command, ExitStatus, Stdio},
+    process::{Child, ChildStderr, ChildStdin, Command, ExitStatus, Stdio},
+    thread::{self, JoinHandle},
 };
 
 use rhythm_core::time::FrameRate;
 
 use crate::{export_progress::ExportCancellationToken, export_renderer::ExportRendererPlan};
+
+pub const MAX_FFMPEG_DIAGNOSTIC_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FfmpegFailureStage {
+    EncoderUnavailable,
+    PermissionDenied,
+    DiskFull,
+    InvalidAudioSource,
+    ProcessFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FfmpegDiagnostic {
+    pub stage: FfmpegFailureStage,
+    pub stderr_tail: String,
+}
+
+fn classify_diagnostic(bytes: &[u8]) -> FfmpegDiagnostic {
+    let stderr_tail = String::from_utf8_lossy(bytes).into_owned();
+    let lower = stderr_tail.to_ascii_lowercase();
+    let stage = if lower.contains("no space left on device") || lower.contains("disk full") {
+        FfmpegFailureStage::DiskFull
+    } else if lower.contains("unknown encoder")
+        || lower.contains("encoder not found")
+        || lower.contains("unknown encoder 'libx264'")
+    {
+        FfmpegFailureStage::EncoderUnavailable
+    } else if lower.contains("permission denied") || lower.contains("access is denied") {
+        FfmpegFailureStage::PermissionDenied
+    } else if lower.contains("invalid data found when processing input")
+        || lower.contains("could not find codec parameters")
+    {
+        FfmpegFailureStage::InvalidAudioSource
+    } else {
+        FfmpegFailureStage::ProcessFailed
+    };
+    FfmpegDiagnostic { stage, stderr_tail }
+}
+
+/// Always drain the entire child pipe to prevent encoder deadlock. Retain only
+/// the latest 64 KiB even if FFmpeg logs gigabytes during a long export.
+fn drain_stderr(mut stderr: impl Read) -> io::Result<Vec<u8>> {
+    let mut tail = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let count = stderr.read(&mut chunk)?;
+        if count == 0 {
+            break;
+        }
+        let remove = (tail.len() + count).saturating_sub(MAX_FFMPEG_DIAGNOSTIC_BYTES);
+        tail.drain(..remove);
+        tail.extend_from_slice(&chunk[..count]);
+    }
+    Ok(tail)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportQuality {
@@ -202,16 +259,16 @@ impl FfmpegExportOptions {
         Ok(command)
     }
 
-    /// Starts a direct child process. Stderr is inherited for diagnostics
-    /// until the bounded structured stderr collector (AI-292) is wired; do
-    /// not use Stdio::piped without draining it during long encodes.
+    /// Starts a direct child process. A dedicated reader immediately drains
+    /// piped stderr for its entire lifetime while keeping only 64 KiB; FFmpeg
+    /// cannot block indefinitely because its diagnostics pipe is full.
     pub fn spawn(&self) -> Result<FfmpegRawVideoProcess, FfmpegProcessError> {
         let frame_size = self.validate().map_err(FfmpegProcessError::Configuration)?;
         let mut command = self.command().map_err(FfmpegProcessError::Configuration)?;
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(FfmpegProcessError::Spawn)?;
         let stdin = match child.stdin.take() {
@@ -222,9 +279,29 @@ impl FfmpegExportOptions {
                 return Err(FfmpegProcessError::MissingStdin);
             }
         };
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(FfmpegProcessError::MissingStderr);
+            }
+        };
+        let stderr_reader = match thread::Builder::new()
+            .name("rhythm-ffmpeg-diagnostics".into())
+            .spawn(move || drain_stderr(stderr))
+        {
+            Ok(reader) => reader,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(FfmpegProcessError::StderrThread(error));
+            }
+        };
         Ok(FfmpegRawVideoProcess {
             child: Some(child),
             stdin: Some(stdin),
+            stderr_reader: Some(stderr_reader),
             frame_bytes: frame_size,
             next_frame: 0,
             expected_frames: self.frame_count,
@@ -237,6 +314,10 @@ pub enum FfmpegProcessError {
     Configuration(FfmpegConfigurationError),
     Spawn(io::Error),
     MissingStdin,
+    MissingStderr,
+    StderrThread(io::Error),
+    StderrRead(io::Error),
+    StderrJoin,
     Cancelled,
     OutOfOrderFrame { expected: u64, actual: u64 },
     FrameSizeMismatch { expected: usize, actual: usize },
@@ -244,13 +325,17 @@ pub enum FfmpegProcessError {
     MissingFrames { expected: u64, actual: u64 },
     Write(io::Error),
     Wait(io::Error),
-    EncoderFailed(ExitStatus),
+    EncoderFailed {
+        status: ExitStatus,
+        diagnostic: FfmpegDiagnostic,
+    },
 }
 
 #[derive(Debug)]
 pub struct FfmpegRawVideoProcess {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
+    stderr_reader: Option<JoinHandle<io::Result<Vec<u8>>>>,
     frame_bytes: usize,
     next_frame: u64,
     expected_frames: u64,
@@ -331,8 +416,18 @@ impl FfmpegRawVideoProcess {
             .wait()
             .map_err(FfmpegProcessError::Wait)?;
         self.child.take();
+        let stderr = self
+            .stderr_reader
+            .take()
+            .ok_or(FfmpegProcessError::MissingStderr)?
+            .join()
+            .map_err(|_| FfmpegProcessError::StderrJoin)?
+            .map_err(FfmpegProcessError::StderrRead)?;
         if !status.success() {
-            return Err(FfmpegProcessError::EncoderFailed(status));
+            return Err(FfmpegProcessError::EncoderFailed {
+                status,
+                diagnostic: classify_diagnostic(&stderr),
+            });
         }
         Ok(())
     }
@@ -350,6 +445,9 @@ impl Drop for FfmpegRawVideoProcess {
             // No orphan encoder when a write fails or an export job aborts.
             let _ = child.kill();
             let _ = child.wait();
+        }
+        if let Some(reader) = self.stderr_reader.take() {
+            let _ = reader.join();
         }
     }
 }
@@ -389,6 +487,31 @@ mod tests {
     fn contains_pair(args: &[OsString], flag: &str, value: &str) -> bool {
         args.windows(2)
             .any(|pair| pair[0] == OsString::from(flag) && pair[1] == OsString::from(value))
+    }
+
+    #[test]
+    fn stderr_drain_is_bounded_but_reads_the_entire_stream() {
+        let input = vec![b'x'; super::MAX_FFMPEG_DIAGNOSTIC_BYTES + 37];
+        let tail = super::drain_stderr(std::io::Cursor::new(&input)).expect("drain");
+        assert_eq!(tail.len(), super::MAX_FFMPEG_DIAGNOSTIC_BYTES);
+        assert_eq!(&tail[..], &input[37..]);
+    }
+
+    #[test]
+    fn stderr_diagnostics_map_common_encoder_and_io_failures() {
+        use super::{FfmpegFailureStage, classify_diagnostic};
+        let cases = [
+            (b"Unknown encoder 'libx264'".as_slice(), FfmpegFailureStage::EncoderUnavailable),
+            (b"Permission denied".as_slice(), FfmpegFailureStage::PermissionDenied),
+            (b"No space left on device".as_slice(), FfmpegFailureStage::DiskFull),
+            (b"Invalid data found when processing input".as_slice(), FfmpegFailureStage::InvalidAudioSource),
+            (b"the encoder exited unexpectedly".as_slice(), FfmpegFailureStage::ProcessFailed),
+        ];
+        for (stderr, expected) in cases {
+            let diagnostic = classify_diagnostic(stderr);
+            assert_eq!(diagnostic.stage, expected);
+            assert_eq!(diagnostic.stderr_tail.as_bytes(), stderr);
+        }
     }
 
     #[test]
