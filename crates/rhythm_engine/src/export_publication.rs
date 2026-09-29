@@ -241,7 +241,10 @@ mod tests {
             stage.publish_completed(),
             Err(ExportPublicationError::EmptyOutput)
         ));
-        assert_eq!(fs::read(&final_path).expect("old untouched"), b"old known good");
+        assert_eq!(
+            fs::read(&final_path).expect("old untouched"),
+            b"old known good"
+        );
 
         let blocked = root.0.join("destination-is-directory.mp4");
         fs::create_dir(&blocked).expect("directory");
