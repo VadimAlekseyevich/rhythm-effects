@@ -195,11 +195,11 @@ mod tests {
             [106, 107, 108, 109, 110]
         );
         assert!(matches!(
-            evaluated.objects[0].effects[0].kind,
+            &evaluated.objects[0].effects[0].kind,
             EvaluatedEffectKind::Blur { radius_px: 24.0 }
         ));
         assert!(matches!(
-            evaluated.objects[1].effects[0].kind,
+            &evaluated.objects[1].effects[0].kind,
             EvaluatedEffectKind::Glow {
                 radius_px: 32.0,
                 intensity: 1.5,
@@ -208,11 +208,11 @@ mod tests {
             }
         ));
         assert!(matches!(
-            evaluated.objects[2].effects[0].kind,
+            &evaluated.objects[2].effects[0].kind,
             EvaluatedEffectKind::Tint { amount: 0.4, .. }
         ));
         assert!(matches!(
-            evaluated.objects[3].effects[0].kind,
+            &evaluated.objects[3].effects[0].kind,
             EvaluatedEffectKind::Noise {
                 amount: 0.25,
                 size_px: 8.0,
@@ -221,7 +221,7 @@ mod tests {
             }
         ));
         assert!(matches!(
-            evaluated.objects[4].effects[0].kind,
+            &evaluated.objects[4].effects[0].kind,
             EvaluatedEffectKind::RgbSplit {
                 amount_px: 12.0,
                 angle_degrees: 30.0
@@ -235,7 +235,7 @@ mod tests {
             assert_eq!(isolated.effects[0].kind, stacked.kind);
         }
         for object in &evaluated.objects {
-            let EvaluatedObjectContent::Rectangle { fill, .. } = object.content else {
+            let EvaluatedObjectContent::Rectangle { fill, .. } = &object.content else {
                 panic!("fixture object must be a rectangle");
             };
             assert!(fill.a() > 0.0 && fill.a() < 1.0);
