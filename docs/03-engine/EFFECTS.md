@@ -176,8 +176,12 @@ before reweighting with the original center alpha, ensuring neighboring
 transparent pixels do not receive shifted RGB. Radius/amount is validated
 in 0..64 and the angle must be finite; zero amount returns the center
 sample exactly. The preview entry point scales amount by the resolved
-quality factor without changing creative units. Separate alpha-edge
-regression tests are AI-267, and GPU reference scenes are AI-270.
+quality factor without changing creative units. AI-267 adds targeted transparent-edge regression tests: displaced opaque
+red/blue samples cannot color a zero-alpha center; low-alpha shifted
+samples never introduce fringes; every output preserves original alpha
+and channels remain premultiplied for ordinary nonnegative colors. Shader
+contract checks assert displaced channels are reconstructed as straight
+values then weighted by center alpha. GPU reference scenes remain AI-270.
 
 Alpha behavior is stable and tested to avoid colored transparent fringes.
 
