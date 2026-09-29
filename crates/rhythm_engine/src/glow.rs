@@ -6,7 +6,7 @@ use std::num::NonZeroU64;
 use rhythm_core::domain::LinearRgba;
 
 use crate::{
-    blur::{MAX_BLUR_RADIUS_PX, SeparableBlur},
+    blur::{BlurPreviewScaleError, MAX_BLUR_RADIUS_PX, SeparableBlur, preview_blur_radius},
     temporary_textures::{TemporaryTexture, TemporaryTexturePool},
 };
 
@@ -123,6 +123,35 @@ impl GlowParameters {
         }
         Ok(self)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlowPreviewScaleError {
+    InvalidParameters(GlowError),
+    InvalidPreviewScale,
+}
+
+/// Validate original semantic values before converting composition-pixel
+/// radius to working target pixels. This never mutates the Project or history.
+pub fn preview_glow_parameters(
+    parameters: GlowParameters,
+    preview_scale: f32,
+) -> Result<GlowParameters, GlowPreviewScaleError> {
+    let validated = parameters
+        .validate()
+        .map_err(GlowPreviewScaleError::InvalidParameters)?;
+    let radius_px = preview_blur_radius(validated.radius_px, preview_scale).map_err(|error| {
+        match error {
+            BlurPreviewScaleError::InvalidRadius => {
+                GlowPreviewScaleError::InvalidParameters(GlowError::InvalidRadius)
+            }
+            BlurPreviewScaleError::InvalidPreviewScale => GlowPreviewScaleError::InvalidPreviewScale,
+        }
+    })?;
+    Ok(GlowParameters {
+        radius_px,
+        ..validated
+    })
 }
 
 /// Encodes only into caller-owned command streams; the source and destination
@@ -437,7 +466,10 @@ fn reference_additive(
 
 #[cfg(test)]
 mod tests {
-    use super::{GlowError, GlowParameters, reference_additive};
+    use super::{
+        GlowError, GlowParameters, GlowPreviewScaleError, preview_glow_parameters,
+        reference_additive,
+    };
     use rhythm_core::domain::LinearRgba;
 
     fn params() -> GlowParameters {
@@ -447,6 +479,61 @@ mod tests {
             threshold: 0.5,
             color: LinearRgba::new(0.8, 0.3, 0.1, 0.75).expect("color"),
         }
+    }
+
+    #[test]
+    fn glow_radius_has_full_half_quarter_semantics_without_changing_other_parameters() {
+        for (scale, expected_radius) in [(1.0, 16.0), (0.5, 8.0), (0.25, 4.0)] {
+            let original = params();
+            let adjusted = preview_glow_parameters(original, scale).expect("valid scale");
+            assert_eq!(adjusted.radius_px, expected_radius);
+            assert_eq!(adjusted.intensity, original.intensity);
+            assert_eq!(adjusted.threshold, original.threshold);
+            assert_eq!(adjusted.color, original.color);
+            assert_eq!(original.radius_px, 16.0);
+        }
+        assert_eq!(
+            preview_glow_parameters(
+                GlowParameters {
+                    radius_px: 0.0,
+                    ..params()
+                },
+                0.25
+            )
+            .expect("zero radius")
+            .radius_px,
+            0.0
+        );
+    }
+
+    #[test]
+    fn reject_bad_preview_scale_and_invalid_original_glow_before_encoding() {
+        for scale in [0.0, -1.0, 1.001, f32::NAN, f32::INFINITY] {
+            assert_eq!(
+                preview_glow_parameters(params(), scale),
+                Err(GlowPreviewScaleError::InvalidPreviewScale)
+            );
+        }
+        assert_eq!(
+            preview_glow_parameters(
+                GlowParameters {
+                    radius_px: 129.0,
+                    ..params()
+                },
+                0.5
+            ),
+            Err(GlowPreviewScaleError::InvalidParameters(GlowError::InvalidRadius))
+        );
+        assert_eq!(
+            preview_glow_parameters(
+                GlowParameters {
+                    intensity: 4.1,
+                    ..params()
+                },
+                0.5
+            ),
+            Err(GlowPreviewScaleError::InvalidParameters(GlowError::InvalidIntensity))
+        );
     }
 
     #[test]
