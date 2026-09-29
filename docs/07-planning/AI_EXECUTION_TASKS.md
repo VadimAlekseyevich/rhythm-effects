@@ -299,7 +299,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-258** — Implement ordered effect-chain execution.
 - [x] **AI-259** — Implement separable Blur with radius 0..128 composition pixels.
 - [x] **AI-260** — Implement preview-scale compensation for Blur radius.
-- [ ] **AI-261** — Implement Glow threshold mask, blur, color and additive intensity.
+- [x] **AI-261** — Implement Glow threshold mask, blur, color and additive intensity.
 - [ ] **AI-262** — Implement preview-scale compensation for Glow radius.
 - [ ] **AI-263** — Implement Tint color/amount shader and identity-at-zero test.
 - [ ] **AI-264** — Implement deterministic Noise from seed/evolution/pixel coordinates without mutable RNG state.

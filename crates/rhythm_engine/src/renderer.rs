@@ -10,6 +10,7 @@ use rhythm_core::ids::AssetId;
 use crate::{
     blur::{BlurPreviewScaleError, SeparableBlur, preview_blur_radius},
     effect_chain::encode_ordered_effect_chain,
+    glow::{Glow, GlowError, GlowParameters, GlowResources},
     image_decode::ImageDecodeGeneration,
     isolated_objects::IsolatedObjectCompositor,
     runtime_assets::ValidatedDecodedImage,
@@ -276,6 +277,7 @@ pub struct Renderer {
     temporary_textures: TemporaryTexturePool,
     isolated_compositor: IsolatedObjectCompositor,
     blur: SeparableBlur,
+    glow: Glow,
     text_resources: TextResources,
 }
 
@@ -411,6 +413,7 @@ impl Renderer {
             temporary_textures: TemporaryTexturePool::default(),
             isolated_compositor: IsolatedObjectCompositor::new(device, COMPOSITION_FORMAT),
             blur: SeparableBlur::new(device, COMPOSITION_FORMAT),
+            glow: Glow::new(device, COMPOSITION_FORMAT),
             text_resources: TextResources::new(
                 device,
                 queue,
@@ -564,6 +567,32 @@ impl Renderer {
         let radius_px = preview_blur_radius(composition_radius_px, preview_scale)?;
         self.encode_blur(device, queue, encoder, targets.0, targets.1, radius_px);
         Ok(())
+    }
+
+    /// Encode the object-local Glow mask, its separable blur, and the final
+    /// additive color/alpha composite between distinct checked-out targets.
+    /// Semantic validation precedes intermediate allocation and encoding.
+    pub fn encode_glow(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &TemporaryTexture,
+        output: &TemporaryTexture,
+        parameters: GlowParameters,
+    ) -> Result<(), GlowError> {
+        self.glow.encode(
+            &self.blur,
+            &mut GlowResources {
+                device,
+                queue,
+                encoder,
+                pool: &mut self.temporary_textures,
+            },
+            source,
+            output,
+            parameters,
+        )
     }
 
     /// Composite after all effects, then return the checkout to the pool.
