@@ -9,10 +9,7 @@ use std::{
 
 use rhythm_core::time::FrameRate;
 
-use crate::{
-    export_progress::ExportCancellationToken,
-    export_renderer::ExportRendererPlan,
-};
+use crate::{export_progress::ExportCancellationToken, export_renderer::ExportRendererPlan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportQuality {
