@@ -3,7 +3,7 @@
 
 use std::{
     io::{self, Write},
-    path::{Component, Path, PathBuf},
+    path::{Component, PathBuf},
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
 };
 
