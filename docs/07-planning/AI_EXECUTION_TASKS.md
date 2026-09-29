@@ -301,7 +301,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-260** — Implement preview-scale compensation for Blur radius.
 - [x] **AI-261** — Implement Glow threshold mask, blur, color and additive intensity.
 - [x] **AI-262** — Implement preview-scale compensation for Glow radius.
-- [ ] **AI-263** — Implement Tint color/amount shader and identity-at-zero test.
+- [x] **AI-263** — Implement Tint color/amount shader and identity-at-zero test.
 - [ ] **AI-264** — Implement deterministic Noise from seed/evolution/pixel coordinates without mutable RNG state.
 - [ ] **AI-265** — Implement Noise amount and size semantics.
 - [ ] **AI-266** — Implement RGB Split amount/angle channel offsets.
