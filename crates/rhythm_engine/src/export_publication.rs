@@ -10,7 +10,10 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::export_ffmpeg::{FfmpegProcessError, FfmpegRawVideoProcess};
+use crate::{
+    export_ffmpeg::{FfmpegProcessError, FfmpegRawVideoProcess},
+    export_progress::ExportCancellationToken,
+};
 
 static NEXT_EXPORT_STAGE: AtomicU64 = AtomicU64::new(0);
 const MAX_STAGE_ATTEMPTS: usize = 64;
@@ -22,6 +25,7 @@ pub enum ExportPublicationError {
     Io(io::Error),
     EmptyOutput,
     Encoder(FfmpegProcessError),
+    Cancelled,
 }
 
 /// A unique staging name is held by a separate create_new marker. FFmpeg
@@ -96,6 +100,23 @@ impl PartialExportOutput {
         process: FfmpegRawVideoProcess,
     ) -> Result<PathBuf, ExportPublicationError> {
         process.finish().map_err(ExportPublicationError::Encoder)?;
+        self.publish_completed()
+    }
+
+    /// Cancellation is tested both before finalizing FFmpeg and after it
+    /// exits but before final output replacement. The partial is removed
+    /// automatically by Drop on either canceled path.
+    pub fn finish_and_publish_checked(
+        self,
+        process: FfmpegRawVideoProcess,
+        cancellation: &ExportCancellationToken,
+    ) -> Result<PathBuf, ExportPublicationError> {
+        process
+            .finish_checked(cancellation)
+            .map_err(ExportPublicationError::Encoder)?;
+        if cancellation.is_cancelled() {
+            return Err(ExportPublicationError::Cancelled);
+        }
         self.publish_completed()
     }
 
@@ -199,7 +220,7 @@ mod tests {
         let final_path = root.0.join("final.mp4");
         fs::write(&final_path, b"old known good").expect("old");
         let stage = PartialExportOutput::reserve(&final_path).expect("reserve");
-        fs::write(stage.partial_path(), []).expect("empty");
+        fs::write(stage.partial_path(), b"").expect("empty");
         assert!(matches!(
             stage.publish_completed(),
             Err(ExportPublicationError::EmptyOutput)
