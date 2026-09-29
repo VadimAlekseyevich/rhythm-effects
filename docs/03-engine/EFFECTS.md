@@ -191,6 +191,15 @@ Blur/Glow require isolated targets.
 
 Tint/Noise/RGB Split may be single pass but still obey stack order.
 
+AI-269 enforces disabled-effect elimination at scene evaluation before
+any shader dispatch: an inactive effect is not evaluated, so even an
+animated inactive parameter does not request an unavailable tempo.
+An entirely disabled stack becomes an empty evaluated effect list;
+the AI-258 runner returns the original isolated target without invoking
+a pass callback or acquiring extra textures. Re-enabling the effect
+restores its ordinary animation/time requirements. Tests assert these
+transitions, not just visual absence.
+
 Compatible-pass fusion is only a later optimization.
 
 ## 10. Temporary resources
