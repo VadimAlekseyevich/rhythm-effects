@@ -353,6 +353,63 @@ mod tests {
     }
 
     #[test]
+    fn transparent_center_never_receives_displaced_rgb_or_alpha() {
+        let center = [0.0; 4];
+        let red_opaque = [1.0, 0.0, 0.0, 1.0];
+        let blue_opaque = [0.0, 0.0, 1.0, 1.0];
+        for amount in [0.0, 0.5, 16.0, 64.0] {
+            assert_eq!(
+                reference_split(center, red_opaque, blue_opaque, amount),
+                center
+            );
+        }
+    }
+
+    #[test]
+    fn displaced_transparent_or_nearly_transparent_samples_do_not_create_fringe() {
+        let center = [0.05, 0.15, 0.10, 0.5];
+        let transparent_red = [1.0, 0.0, 0.0, 0.0];
+        let tiny_alpha_blue = [0.0, 0.0, 0.0000001, 0.0000001];
+        assert_eq!(
+            reference_split(center, transparent_red, tiny_alpha_blue, 8.0),
+            [0.0, 0.15, 0.0, 0.5]
+        );
+        assert!(super::RGB_SPLIT_SHADER.contains("red_sample.a > 0.000001"));
+        assert!(super::RGB_SPLIT_SHADER.contains("blue_sample.a > 0.000001"));
+    }
+
+    #[test]
+    fn semi_transparent_original_alpha_controls_all_shifted_channels() {
+        let red = [0.8, 0.0, 0.0, 0.8];
+        let blue = [0.0, 0.0, 0.3, 0.6];
+        for alpha in [0.0, 0.125, 0.25, 0.5, 1.0] {
+            let center = [0.0, alpha * 0.25, 0.0, alpha];
+            let result = reference_split(center, red, blue, 12.0);
+            assert_eq!(result[3], alpha, "source alpha is never displaced");
+            assert!((result[0] - alpha).abs() < 0.00001);
+            assert!((result[1] - alpha * 0.25).abs() < 0.00001);
+            assert!((result[2] - alpha * 0.5).abs() < 0.00001);
+            for component in &result[0..3] {
+                assert!(
+                    *component >= 0.0 && *component <= alpha,
+                    "premultiplied channels must stay within original alpha"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn shader_reweights_displaced_straight_channels_by_original_alpha() {
+        let shader = super::RGB_SPLIT_SHADER;
+        assert!(shader.contains("red_sample.r / red_sample.a"));
+        assert!(shader.contains("blue_sample.b / blue_sample.a"));
+        assert!(shader.contains("red * center.a"));
+        assert!(shader.contains("blue * center.a"));
+        assert!(shader.contains("center.g"));
+        assert!(shader.contains("center.a,"));
+    }
+
+    #[test]
     fn rejects_invalid_amount_angle_and_preview_scale() {
         for amount in [-0.1, 65.0, f32::NAN, f32::INFINITY] {
             assert_eq!(params(amount, 0.0).validate(), Err(RgbSplitError::InvalidAmount));
