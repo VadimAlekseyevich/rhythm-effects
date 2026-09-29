@@ -192,6 +192,16 @@ At chosen ProjectTimeNs, semantic evaluated values are exact expected data.
 
 Pixel references supplement semantic tests.
 
+AI-270 adds `rhythm_engine::reference_scenes::five_effects_reference_scene`:
+a deterministic 1920x1080, semitransparent six-swatch Project. The first
+five swatches isolate Blur, Glow, Tint, Noise and RGB Split using fixed
+parameters; the sixth applies the same five effects in order on one object.
+The scene is validated, serialized and parsed in tests, and its exact
+EvaluatedScene IDs/order/parameters are asserted at ProjectTimeNs=0.
+Its static values also remain identical when evaluated at another timestamp.
+It is a semantic fixture for subsequent pixel/GPU visual references, **not**
+a claim that the current placeholder composition produces verified pixels.
+
 ## 13. Export tests
 
 Automated where environment has FFmpeg:
