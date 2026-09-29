@@ -52,7 +52,7 @@ fn all_five_effects_preserve_composition_semantics_at_three_preview_qualities() 
     };
     let original_tint = (*tint, *amount);
     let EvaluatedEffectKind::Noise {
-        amount,
+        amount: noise_amount,
         size_px,
         evolution,
         seed,
@@ -61,7 +61,7 @@ fn all_five_effects_preserve_composition_semantics_at_three_preview_qualities() 
         panic!("fourth is Noise");
     };
     let noise = NoiseParameters {
-        amount: *amount,
+        amount: *noise_amount,
         size_px: *size_px,
         evolution: *evolution,
         seed: *seed,
