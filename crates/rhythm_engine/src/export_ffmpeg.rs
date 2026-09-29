@@ -2,7 +2,6 @@
 //! interpolation, screen capture or realtime audio playback recording.
 
 use std::{
-    ffi::{OsStr, OsString},
     io::{self, Write},
     path::{Component, Path, PathBuf},
     process::{Child, ChildStdin, Command, ExitStatus, Stdio},
@@ -326,7 +325,7 @@ impl Drop for FfmpegRawVideoProcess {
 mod tests {
     use super::{ExportQuality, FfmpegConfigurationError, FfmpegExportOptions};
     use rhythm_core::time::FrameRate;
-    use std::{ffi::OsString, path::PathBuf};
+    use std::{ffi::{OsStr, OsString}, path::PathBuf};
 
     fn options(audio: bool) -> FfmpegExportOptions {
         let directory = std::env::temp_dir().join("Rhythm Export & Test");
@@ -380,7 +379,10 @@ mod tests {
         let options = options(true);
         let args = args(&options);
         let audio = options.primary_audio.as_ref().expect("audio");
-        assert!(args.windows(2).any(|pair| pair[0] == "-i" && pair[1] == audio.as_os_str()));
+        assert!(args.windows(2).any(|pair| {
+            pair[0].as_os_str() == OsStr::new("-i")
+                && pair[1].as_os_str() == audio.as_os_str()
+        }));
         assert!(contains_pair(&args, "-map", "0:v:0"));
         assert!(contains_pair(&args, "-map", "1:a:0"));
         assert!(contains_pair(&args, "-c:a", "aac"));
