@@ -223,7 +223,7 @@ mod tests {
     };
     use std::{
         fs,
-        path::{Path, PathBuf},
+        path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
     };
 
