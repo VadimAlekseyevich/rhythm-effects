@@ -10,6 +10,7 @@ pub mod renderer;
 pub mod runtime_assets;
 pub mod scene_eval;
 pub mod temporary_textures;
+pub mod tint;
 pub mod text;
 pub mod waveform;
 
