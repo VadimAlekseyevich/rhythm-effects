@@ -7,6 +7,9 @@ use rhythm_core::time::FrameRate;
 
 use crate::{
     export_job::ExportJobSnapshot,
+    export_readback::{
+        ExportReadbackError, ExportReadbackLayout, ExportReadbackPool, ExportReadbackTicket,
+    },
     export_resolution::{ExportOutputResolution, ExportResolutionError},
     export_resources::{ExportResourceErrors, PreparedExportResources},
     export_sdr::SdrExportConverter,
@@ -94,10 +97,14 @@ impl ExportRendererPlan {
             renderer.composition_view(),
             self.resolution.output_size(),
         );
+        let layout = ExportReadbackLayout::new(self.resolution.output_size())
+            .expect("previously validated nonzero resolution fits readback rows");
+        let readback = ExportReadbackPool::new(device, layout);
         ExportRendererState {
             plan: self,
             renderer,
             sdr,
+            readback,
         }
     }
 }
@@ -109,6 +116,7 @@ pub struct ExportRendererState {
     plan: ExportRendererPlan,
     renderer: Renderer,
     sdr: SdrExportConverter,
+    readback: ExportReadbackPool,
 }
 
 impl ExportRendererState {
@@ -135,6 +143,20 @@ impl ExportRendererState {
     /// conversion into a distinct straight-alpha RGBA8 COPY_SRC target.
     pub fn encode_sdr_frame(&self, encoder: &mut wgpu::CommandEncoder) {
         self.sdr.encode(encoder);
+    }
+
+    /// Encode only after the SDR conversion pass in the same command stream.
+    /// When all three slots are busy, apply backpressure rather than allocate.
+    pub fn encode_readback(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame_index: u64,
+    ) -> Result<ExportReadbackTicket, ExportReadbackError> {
+        self.readback.encode_copy(encoder, &self.sdr, frame_index)
+    }
+
+    pub fn readback_pool(&mut self) -> &mut ExportReadbackPool {
+        &mut self.readback
     }
 
     pub fn evaluate_frame(&self, index: u64) -> Result<EvaluatedScene, ExportFrameError> {

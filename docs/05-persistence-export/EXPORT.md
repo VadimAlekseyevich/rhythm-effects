@@ -151,6 +151,18 @@ MVP uses raw video through FFmpeg stdin/pipe.
 
 A bounded pool of at most 3 readback/frame buffers prevents memory growing with export length.
 
+AI-281 creates three GPU `COPY_DST | MAP_READ` buffers once per
+resolution-specific export renderer. An exclusive generation-tagged ticket
+reserves one slot per encoded SDR RGBA8 texture-to-buffer copy; when all
+three remain in flight the producer receives explicit backpressure rather
+than allocating more. wgpu's required 256-byte row pitch is computed by
+checked integer arithmetic, and the packing helper strips per-row padding
+into tightly packed RGBA8 for the FFmpeg rawvideo pipe. A ticket is returned
+only after the consumer finishes async mapping, copying and unmapping;
+stale/double release is rejected. Pure tests cover 3×2 padded rows,
+aligned rows, stale tokens, slot reuse and the three-buffer cap.
+Actual async mapping/pipe integration is part of subsequent export tasks.
+
 Zero-copy hardware encoding is post-MVP.
 
 ## 10. Audio
