@@ -5,6 +5,7 @@ pub mod blur;
 pub mod effect_chain;
 pub mod glow;
 pub mod image_decode;
+pub mod noise_hash;
 pub mod isolated_objects;
 pub mod renderer;
 pub mod runtime_assets;
