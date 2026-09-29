@@ -85,11 +85,7 @@ impl ExportRendererPlan {
 
     /// Allocate new GPU textures, independent image/text/effect caches and
     /// the very same creative shader pipelines used by the preview Renderer.
-    pub fn initialize_gpu(
-        self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> ExportRendererState {
+    pub fn initialize_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> ExportRendererState {
         let renderer =
             Renderer::new_with_composition_size(device, queue, self.resolution.output_size());
         ExportRendererState {
@@ -131,8 +127,7 @@ impl ExportRendererState {
 mod tests {
     use super::{ExportPreparationError, ExportRendererPlan};
     use crate::{
-        export_job::ExportJobSnapshot,
-        export_resolution::ExportResolutionError,
+        export_job::ExportJobSnapshot, export_resolution::ExportResolutionError,
         reference_scenes::five_effects_reference_scene,
     };
     use rhythm_core::{
@@ -158,7 +153,9 @@ mod tests {
         assert!(plan.resources().audio.is_none());
         assert_eq!(
             plan.evaluate_frame(0).expect("start scene"),
-            plan.snapshot().evaluate_at(ProjectTimeNs::new(0)).expect("same evaluator")
+            plan.snapshot()
+                .evaluate_at(ProjectTimeNs::new(0))
+                .expect("same evaluator")
         );
         assert_eq!(editor.project(), &reference.project);
         assert_eq!(plan.snapshot().project(), &reference.project);
