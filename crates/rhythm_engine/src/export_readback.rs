@@ -221,7 +221,10 @@ impl ExportReadbackPool {
 
     /// Valid until the reservation is released; the export worker controls
     /// its asynchronous map/copy/unmap lifecycle, not the editor UI thread.
-    pub fn buffer(&self, ticket: ExportReadbackTicket) -> Result<&wgpu::Buffer, ExportReadbackError> {
+    pub fn buffer(
+        &self,
+        ticket: ExportReadbackTicket,
+    ) -> Result<&wgpu::Buffer, ExportReadbackError> {
         if !self.reservations.valid(ticket) {
             return Err(ExportReadbackError::StaleTicket);
         }
