@@ -91,6 +91,19 @@ source
 -> additive composite over source
 ~~~
 
+AI-261 exposes `Renderer::encode_glow`: the threshold shader measures
+straight, linear-light luminance (guarding zero alpha) and writes a
+premultiplied alpha-weighted bright-region mask. The existing separable Blur
+filters that mask in two axes using pooled intermediate Rgba16Float textures.
+The final shader adds `color.rgb * blurred_coverage * color.a * intensity`
+to the unmodified source's linear-premultiplied RGB, retaining HDR working
+headroom; output alpha uses clamped coverage-over-original union. With zero
+intensity or transparent mask, the blend is identity. Radius is 0..128,
+threshold 0..1 and intensity 0..4, all validated before texture allocation.
+No scene composition is sampled and intermediate checkouts are released only
+after their final encoded uses. GPU visual reference work is tracked later;
+the current main window still uses placeholder composition.
+
 ## 6. Tint
 
 ~~~text
