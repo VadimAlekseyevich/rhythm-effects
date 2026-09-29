@@ -5,6 +5,7 @@ pub mod blur;
 pub mod effect_chain;
 pub mod export_job;
 pub mod export_resources;
+pub mod export_timeline;
 pub mod glow;
 pub mod image_decode;
 pub mod isolated_objects;
