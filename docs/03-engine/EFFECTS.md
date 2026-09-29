@@ -138,6 +138,15 @@ seed: u32
 
 Noise is deterministic and depends only on semantic inputs, never wall clock or mutable RNG state.
 
+AI-264 adds one shared stateless integer avalanche hash with reference Rust
+and embeddable WGSL implementations. Its only inputs are `seed`, the exact
+`evolution` f32 bit pattern and integer pixel/grid x/y coordinates.
+32-bit arithmetic wraps; only the low 24 bits map to [0,1]. Stable
+reference vectors, repeatability across traversal orders and source code
+checks protect this contract. Evolution changes are intentionally a
+deterministic new pattern, not an FPS-dependent feedback process. AI-265
+uses this function to implement amount and pixel-size rendering semantics.
+
 ## 8. RGB Split
 
 ~~~text
