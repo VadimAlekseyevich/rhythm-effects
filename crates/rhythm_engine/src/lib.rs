@@ -8,6 +8,7 @@ pub mod image_decode;
 pub mod isolated_objects;
 pub mod noise;
 pub mod noise_hash;
+pub mod reference_scenes;
 pub mod renderer;
 pub mod rgb_split;
 pub mod runtime_assets;
