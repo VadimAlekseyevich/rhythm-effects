@@ -3,10 +3,10 @@
 
 use std::num::NonZeroU64;
 
-use crate::{
-    noise_hash::{NOISE_HASH_WGSL, deterministic_noise},
-    temporary_textures::TemporaryTexture,
-};
+use crate::{noise_hash::NOISE_HASH_WGSL, temporary_textures::TemporaryTexture};
+
+#[cfg(test)]
+use crate::noise_hash::deterministic_noise;
 
 const NOISE_SHADER: &str = r#"
 @group(0) @binding(0) var source_texture: texture_2d<f32>;
@@ -171,9 +171,7 @@ impl Noise {
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Rhythm Effects stateless Noise shader"),
-            source: wgpu::ShaderSource::Wgsl(
-                format!("{NOISE_HASH_WGSL}\n{NOISE_SHADER}").into(),
-            ),
+            source: wgpu::ShaderSource::Wgsl(format!("{NOISE_HASH_WGSL}\n{NOISE_SHADER}").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Rhythm Effects Noise pipeline layout"),
@@ -300,7 +298,9 @@ fn reference_noise(source: [f32; 4], cell: (u32, u32), p: NoiseParameters) -> [f
 
 #[cfg(test)]
 mod tests {
-    use super::{NoiseError, NoiseParameters, noise_cell, preview_noise_parameters, reference_noise};
+    use super::{
+        NoiseError, NoiseParameters, noise_cell, preview_noise_parameters, reference_noise,
+    };
 
     fn parameters() -> NoiseParameters {
         NoiseParameters {
@@ -335,8 +335,16 @@ mod tests {
         assert_eq!(noise_cell(8, 7, 8.0), Ok((1, 0)));
         assert_eq!(noise_cell(7, 8, 8.0), Ok((0, 1)));
         assert_eq!(
-            reference_noise([0.2, 0.2, 0.2, 0.5], noise_cell(0, 0, 8.0).expect("cell"), parameters()),
-            reference_noise([0.2, 0.2, 0.2, 0.5], noise_cell(7, 7, 8.0).expect("cell"), parameters())
+            reference_noise(
+                [0.2, 0.2, 0.2, 0.5],
+                noise_cell(0, 0, 8.0).expect("cell"),
+                parameters()
+            ),
+            reference_noise(
+                [0.2, 0.2, 0.2, 0.5],
+                noise_cell(7, 7, 8.0).expect("cell"),
+                parameters()
+            )
         );
     }
 
@@ -355,15 +363,33 @@ mod tests {
         assert_eq!(half[3], input[3]);
         assert_eq!(full[3], input[3]);
         for channel in 0..3 {
-            assert!((full[channel] - input[channel] - 2.0 * (half[channel] - input[channel])).abs() < 0.000001);
+            assert!(
+                (full[channel] - input[channel] - 2.0 * (half[channel] - input[channel])).abs()
+                    < 0.000001
+            );
         }
     }
 
     #[test]
     fn preview_size_tracks_composition_pixels_with_one_pixel_floor() {
-        assert_eq!(preview_noise_parameters(parameters(), 1.0).expect("full").size_px, 8.0);
-        assert_eq!(preview_noise_parameters(parameters(), 0.5).expect("half").size_px, 4.0);
-        assert_eq!(preview_noise_parameters(parameters(), 0.25).expect("quarter").size_px, 2.0);
+        assert_eq!(
+            preview_noise_parameters(parameters(), 1.0)
+                .expect("full")
+                .size_px,
+            8.0
+        );
+        assert_eq!(
+            preview_noise_parameters(parameters(), 0.5)
+                .expect("half")
+                .size_px,
+            4.0
+        );
+        assert_eq!(
+            preview_noise_parameters(parameters(), 0.25)
+                .expect("quarter")
+                .size_px,
+            2.0
+        );
         assert_eq!(
             preview_noise_parameters(
                 NoiseParameters {
