@@ -347,10 +347,11 @@ mod tests {
     use rhythm_core::{
         animation::{Animated, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
-        ids::{KeyframeId, ObjectId},
+        ids::{EffectId, KeyframeId, ObjectId},
         project::{
-            BlurEffect, EffectKind, GlowEffect, NoiseEffect, Object, ObjectContent, Project,
-            ProjectSettings, RectangleObject, RgbSplitEffect, TintEffect, TransformAnimation,
+            BlurEffect, Effect, EffectKind, GlowEffect, NoiseEffect, Object, ObjectContent,
+            Project, ProjectSettings, RectangleObject, RgbSplitEffect, TintEffect,
+            TransformAnimation,
         },
         time::{BpmMicros, GridOffsetNs, MusicalTick, ProjectTimeNs, TempoMap, TimeSignature},
     };
@@ -363,6 +364,67 @@ mod tests {
             Animated::new_static(Vec2::new(0.5, 0.5).expect("finite anchor")),
             Animated::new_static(1.0),
         )
+    }
+
+    #[test]
+    fn disabled_effects_skip_evaluation_even_with_unavailable_tempo() {
+        let mut project = Project::new(
+            "disabled effects",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let enabled_id = EffectId::new(4).expect("effect id");
+        project.composition.objects.push(Object {
+            id: ObjectId::new(1).expect("object id"),
+            name: "shape".into(),
+            visible: true,
+            locked: false,
+            transform: transform(Animated::new_static(
+                Vec2::new(0.0, 0.0).expect("position"),
+            )),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(32.0, 32.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: vec![
+                Effect {
+                    id: EffectId::new(2).expect("effect id"),
+                    enabled: false,
+                    kind: EffectKind::Blur(BlurEffect {
+                        radius_px: animated_scalar(500, 0.0, 128.0),
+                    }),
+                },
+                Effect {
+                    id: enabled_id,
+                    enabled: true,
+                    kind: EffectKind::Tint(TintEffect {
+                        color: Animated::new_static(LinearRgba::black_opaque()),
+                        amount: Animated::new_static(0.5),
+                    }),
+                },
+            ],
+        });
+
+        let time = ProjectTimeNs::new(0);
+        let evaluated = evaluate_scene(&project, time).expect("skip disabled animation");
+        assert_eq!(evaluated.objects[0].effects.len(), 1);
+        assert_eq!(evaluated.objects[0].effects[0].id, enabled_id);
+        assert!(matches!(
+            evaluated.objects[0].effects[0].kind,
+            EvaluatedEffectKind::Tint { .. }
+        ));
+
+        project.composition.objects[0].effects[1].enabled = false;
+        let no_effects = evaluate_scene(&project, time).expect("skip all effects");
+        assert!(no_effects.objects[0].effects.is_empty());
+
+        project.composition.objects[0].effects[0].enabled = true;
+        assert_eq!(
+            evaluate_scene(&project, time),
+            Err(SceneEvaluationError::TempoUnavailable),
+            "enabling a keyed effect must restore its normal time requirements"
+        );
     }
 
     #[test]
