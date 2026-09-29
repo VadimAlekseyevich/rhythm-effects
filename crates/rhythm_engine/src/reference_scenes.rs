@@ -246,9 +246,11 @@ mod tests {
     fn static_reference_values_do_not_depend_on_editor_playback_clock() {
         let scene = five_effects_reference_scene();
         let at_zero = evaluate_scene(&scene.project, scene.evaluation_time).expect("initial");
-        let at_second =
-            evaluate_scene(&scene.project, rhythm_core::time::ProjectTimeNs::new(1_000_000_000))
-                .expect("later");
+        let at_second = evaluate_scene(
+            &scene.project,
+            rhythm_core::time::ProjectTimeNs::new(1_000_000_000),
+        )
+        .expect("later");
         assert_eq!(at_zero, at_second);
     }
 }
