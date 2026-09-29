@@ -135,9 +135,11 @@ mod tests {
 
     #[test]
     fn arbitrary_4_3_compositions_can_be_scaled_without_16_9_assumptions() {
-        let mut settings = ProjectSettings::default();
-        settings.composition_width = 1024;
-        settings.composition_height = 768;
+        let settings = ProjectSettings {
+            composition_width: 1024,
+            composition_height: 768,
+            ..ProjectSettings::default()
+        };
         let resolution = ExportOutputResolution::new(&settings, 640, 480).expect("4:3 scale");
         assert_eq!(resolution.scale_ratio(), (640, 1024));
         assert_eq!(resolution.spatial_pixels(256.0), Ok(160.0));
