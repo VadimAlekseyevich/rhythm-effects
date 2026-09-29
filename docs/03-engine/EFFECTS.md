@@ -101,7 +101,12 @@ headroom; output alpha uses clamped coverage-over-original union. With zero
 intensity or transparent mask, the blend is identity. Radius is 0..128,
 threshold 0..1 and intensity 0..4, all validated before texture allocation.
 No scene composition is sampled and intermediate checkouts are released only
-after their final encoded uses. GPU visual reference work is tracked later;
+after their final encoded uses. AI-262 provides `preview_glow_parameters`
+and the renderer's `encode_preview_glow` entry point, scaling only Glow
+radius by the resolved preview factor (Full 1, Half 0.5, Quarter 0.25)
+after validating original bounds. Color, intensity and threshold are
+unchanged; export uses composition-pixel radius at scale 1. Invalid input
+is rejected before GPU encoding. GPU visual reference work is tracked later;
 the current main window still uses placeholder composition.
 
 ## 6. Tint

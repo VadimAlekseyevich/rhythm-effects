@@ -10,7 +10,10 @@ use rhythm_core::ids::AssetId;
 use crate::{
     blur::{BlurPreviewScaleError, SeparableBlur, preview_blur_radius},
     effect_chain::encode_ordered_effect_chain,
-    glow::{Glow, GlowError, GlowParameters, GlowResources},
+    glow::{
+        Glow, GlowError, GlowParameters, GlowPreviewScaleError, GlowResources,
+        preview_glow_parameters,
+    },
     image_decode::ImageDecodeGeneration,
     isolated_objects::IsolatedObjectCompositor,
     runtime_assets::ValidatedDecodedImage,
@@ -593,6 +596,23 @@ impl Renderer {
             output,
             parameters,
         )
+    }
+
+    /// Convert the semantic Glow radius using the resolved preview scale
+    /// before encoding. Reject invalid source parameters/scale without
+    /// allocating GPU intermediates or changing the creative project.
+    pub fn encode_preview_glow(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        targets: (&TemporaryTexture, &TemporaryTexture),
+        parameters: GlowParameters,
+        preview_scale: f32,
+    ) -> Result<(), GlowPreviewScaleError> {
+        let working = preview_glow_parameters(parameters, preview_scale)?;
+        self.encode_glow(device, queue, encoder, targets.0, targets.1, working)
+            .map_err(GlowPreviewScaleError::InvalidParameters)
     }
 
     /// Composite after all effects, then return the checkout to the pool.
