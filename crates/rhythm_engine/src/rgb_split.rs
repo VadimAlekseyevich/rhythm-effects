@@ -105,7 +105,9 @@ impl RgbSplitParameters {
 
 /// Positive angles rotate clockwise in top-left-origin composition space;
 /// red samples the positive displacement, blue the equal opposite.
-pub fn channel_offsets(parameters: RgbSplitParameters) -> Result<([f32; 2], [f32; 2]), RgbSplitError> {
+pub fn channel_offsets(
+    parameters: RgbSplitParameters,
+) -> Result<([f32; 2], [f32; 2]), RgbSplitError> {
     let params = parameters.validate()?;
     let radians = params.angle_degrees.to_radians();
     let x = radians.cos() * params.amount_px;
@@ -333,7 +335,10 @@ mod tests {
         assert!(red[0].abs() < 0.00001);
         assert!((red[1] - 4.0).abs() < 0.00001);
         assert_eq!(blue, [-red[0], -red[1]]);
-        assert_eq!(channel_offsets(params(0.0, 90.0)), Ok(([0.0, 0.0], [-0.0, -0.0])));
+        assert_eq!(
+            channel_offsets(params(0.0, 90.0)),
+            Ok(([0.0, 0.0], [-0.0, -0.0]))
+        );
     }
 
     #[test]
@@ -342,7 +347,10 @@ mod tests {
         let red = [0.5, 0.0, 0.0, 0.5];
         let blue = [0.0, 0.0, 0.5, 0.5];
         assert_eq!(reference_split(center, red, blue, 0.0), center);
-        assert_eq!(reference_split(center, red, blue, 4.0), [0.5, 0.2, 0.5, 0.5]);
+        assert_eq!(
+            reference_split(center, red, blue, 4.0),
+            [0.5, 0.2, 0.5, 0.5]
+        );
         for (scale, expected) in [(1.0, 64.0), (0.5, 32.0), (0.25, 16.0)] {
             let original = params(64.0, 45.0);
             let scaled = preview_rgb_split_parameters(original, scale).expect("preview");
@@ -412,9 +420,15 @@ mod tests {
     #[test]
     fn rejects_invalid_amount_angle_and_preview_scale() {
         for amount in [-0.1, 65.0, f32::NAN, f32::INFINITY] {
-            assert_eq!(params(amount, 0.0).validate(), Err(RgbSplitError::InvalidAmount));
+            assert_eq!(
+                params(amount, 0.0).validate(),
+                Err(RgbSplitError::InvalidAmount)
+            );
         }
-        assert_eq!(params(2.0, f32::NAN).validate(), Err(RgbSplitError::InvalidAngle));
+        assert_eq!(
+            params(2.0, f32::NAN).validate(),
+            Err(RgbSplitError::InvalidAngle)
+        );
         for scale in [0.0, -1.0, 1.01, f32::NAN] {
             assert_eq!(
                 preview_rgb_split_parameters(params(4.0, 30.0), scale),
