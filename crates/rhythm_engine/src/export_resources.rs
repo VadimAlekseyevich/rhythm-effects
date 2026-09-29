@@ -20,11 +20,27 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportResourceIssue {
-    InvalidSourcePath { asset_id: AssetId, reason: &'static str },
-    MissingAssetRecord { asset_id: AssetId },
-    WrongAssetKind { asset_id: AssetId, expected: AssetKind },
-    Image { asset_id: AssetId, path: PathBuf, error: ImageDecodeError },
-    Audio { asset_id: AssetId, path: PathBuf, diagnostic: String },
+    InvalidSourcePath {
+        asset_id: AssetId,
+        reason: &'static str,
+    },
+    MissingAssetRecord {
+        asset_id: AssetId,
+    },
+    WrongAssetKind {
+        asset_id: AssetId,
+        expected: AssetKind,
+    },
+    Image {
+        asset_id: AssetId,
+        path: PathBuf,
+        error: ImageDecodeError,
+    },
+    Audio {
+        asset_id: AssetId,
+        path: PathBuf,
+        diagnostic: String,
+    },
     MissingFontGlyphs {
         object_id: ObjectId,
         resolved_family: String,
@@ -87,7 +103,9 @@ fn resolve_source_path(
         {
             return Err("canonical project path must be normalized and absolute");
         }
-        let parent = project.parent().ok_or("project path has no parent directory")?;
+        let parent = project
+            .parent()
+            .ok_or("project path has no parent directory")?;
         Ok(parent.join(stored))
     } else if stored.is_absolute() {
         Ok(stored.to_path_buf())
@@ -147,10 +165,7 @@ fn prepare_project_resources(
                     error,
                 }),
             },
-            Err(reason) => issues.push(ExportResourceIssue::InvalidSourcePath {
-                asset_id,
-                reason,
-            }),
+            Err(reason) => issues.push(ExportResourceIssue::InvalidSourcePath { asset_id, reason }),
         }
     }
 
@@ -173,10 +188,9 @@ fn prepare_project_resources(
                             diagnostic: format!("{error:?}"),
                         }),
                     },
-                    Err(reason) => issues.push(ExportResourceIssue::InvalidSourcePath {
-                        asset_id,
-                        reason,
-                    }),
+                    Err(reason) => {
+                        issues.push(ExportResourceIssue::InvalidSourcePath { asset_id, reason })
+                    }
                 }
             }
         } else {
@@ -185,13 +199,16 @@ fn prepare_project_resources(
     }
 
     let fonts = preflight_export_fonts(project);
-    issues.extend(fonts.iter().filter(|font| font.missing_glyphs > 0).map(|font| {
-        ExportResourceIssue::MissingFontGlyphs {
-            object_id: font.object_id,
-            resolved_family: font.resolved_family.clone(),
-            count: font.missing_glyphs,
-        }
-    }));
+    issues.extend(
+        fonts
+            .iter()
+            .filter(|font| font.missing_glyphs > 0)
+            .map(|font| ExportResourceIssue::MissingFontGlyphs {
+                object_id: font.object_id,
+                resolved_family: font.resolved_family.clone(),
+                count: font.missing_glyphs,
+            }),
+    );
 
     if issues.is_empty() {
         Ok(PreparedExportResources {
@@ -215,9 +232,9 @@ mod tests {
         editor::ProjectEditor,
         ids::{AssetId, ObjectId},
         project::{
-            AssetKind, AssetRecord, AssetSource, AudioTrack, FontReference, FontStyle,
-            FontWeight, ImageObject, Object, ObjectContent, Project, ProjectSettings,
-            TextAlignment, TextObject, TransformAnimation,
+            AssetKind, AssetRecord, AssetSource, AudioTrack, FontReference, FontStyle, FontWeight,
+            ImageObject, Object, ObjectContent, Project, ProjectSettings, TextAlignment,
+            TextObject, TransformAnimation,
         },
         time::{GridOffsetNs, TempoMap},
     };
@@ -305,16 +322,21 @@ mod tests {
         assert!(resolve_source_path(&source, None).is_err());
         assert_eq!(
             resolve_source_path(&source, Some(&project)).expect("relative source"),
-            project.parent().expect("project directory").join("media/image.png")
+            project
+                .parent()
+                .expect("project directory")
+                .join("media/image.png")
         );
-        assert!(resolve_source_path(
-            &AssetSource::File {
-                path: "../outside.png".into(),
-                relative_to_project: true
-            },
-            Some(&project)
-        )
-        .is_err());
+        assert!(
+            resolve_source_path(
+                &AssetSource::File {
+                    path: "../outside.png".into(),
+                    relative_to_project: true
+                },
+                Some(&project)
+            )
+            .is_err()
+        );
         assert_eq!(
             resolve_source_path(
                 &AssetSource::File {
@@ -342,7 +364,9 @@ mod tests {
         };
         let job = capture(image_project(source));
         let project_path = root.join("saved.rhfx");
-        let prepared = job.prepare_resources(Some(&project_path)).expect("preflight");
+        let prepared = job
+            .prepare_resources(Some(&project_path))
+            .expect("preflight");
         let decoded = &prepared.images[&AssetId::new(1).expect("id")].decoded;
         assert_eq!((decoded.width, decoded.height), (1, 1));
         assert_eq!(&decoded.rgba8, &[255, 128, 0, 192]);
@@ -371,8 +395,14 @@ mod tests {
             .prepare_resources(Some(&root.join("saved.rhfx")))
             .expect_err("unready assets block export");
         assert_eq!(errors.issues.len(), 2);
-        assert!(matches!(errors.issues[0], ExportResourceIssue::Image { .. }));
-        assert!(matches!(errors.issues[1], ExportResourceIssue::Audio { .. }));
+        assert!(matches!(
+            errors.issues[0],
+            ExportResourceIssue::Image { .. }
+        ));
+        assert!(matches!(
+            errors.issues[1],
+            ExportResourceIssue::Audio { .. }
+        ));
     }
 
     #[test]
@@ -382,7 +412,9 @@ mod tests {
             relative_to_project: true,
         });
         project.composition.objects[0].visible = false;
-        let resources = capture(project).prepare_resources(None).expect("unused media skipped");
+        let resources = capture(project)
+            .prepare_resources(None)
+            .expect("unused media skipped");
         assert!(resources.images.is_empty());
         assert!(resources.fonts.is_empty());
     }
@@ -410,7 +442,9 @@ mod tests {
             effects: Vec::new(),
         });
         project.next_entity_id = 2;
-        let prepared = capture(project).prepare_resources(None).expect("bundled font fallback");
+        let prepared = capture(project)
+            .prepare_resources(None)
+            .expect("bundled font fallback");
         assert_eq!(prepared.fonts.len(), 1);
         assert!(prepared.fonts[0].fallback_used);
         assert_eq!(prepared.fonts[0].resolved_family, "Inter");
