@@ -502,11 +502,7 @@ mod tests {
         LinearRgba::new(r, g, b, a).expect("finite color")
     }
 
-    fn animated_color(
-        id: u64,
-        start: LinearRgba,
-        end: LinearRgba,
-    ) -> Animated<LinearRgba> {
+    fn animated_color(id: u64, start: LinearRgba, end: LinearRgba) -> Animated<LinearRgba> {
         Animated::with_keyframes(
             start,
             vec![
@@ -661,6 +657,4 @@ mod tests {
             ),
             Err(SceneEvaluationError::TempoUnavailable)
         );
-    }
-
-}
+    }}
