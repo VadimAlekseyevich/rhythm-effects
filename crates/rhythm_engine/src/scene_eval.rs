@@ -379,9 +379,7 @@ mod tests {
             name: "shape".into(),
             visible: true,
             locked: false,
-            transform: transform(Animated::new_static(
-                Vec2::new(0.0, 0.0).expect("position"),
-            )),
+            transform: transform(Animated::new_static(Vec2::new(0.0, 0.0).expect("position"))),
             content: ObjectContent::Rectangle(RectangleObject {
                 size: Animated::new_static(Vec2::new(32.0, 32.0).expect("size")),
                 fill: Animated::new_static(LinearRgba::black_opaque()),
@@ -564,11 +562,7 @@ mod tests {
         LinearRgba::new(r, g, b, a).expect("finite color")
     }
 
-    fn animated_color(
-        id: u64,
-        start: LinearRgba,
-        end: LinearRgba,
-    ) -> Animated<LinearRgba> {
+    fn animated_color(id: u64, start: LinearRgba, end: LinearRgba) -> Animated<LinearRgba> {
         Animated::with_keyframes(
             start,
             vec![
@@ -724,5 +718,4 @@ mod tests {
             Err(SceneEvaluationError::TempoUnavailable)
         );
     }
-
 }
