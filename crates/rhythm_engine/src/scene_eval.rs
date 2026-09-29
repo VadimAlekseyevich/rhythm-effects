@@ -657,5 +657,5 @@ mod tests {
             ),
             Err(SceneEvaluationError::TempoUnavailable)
         );
-    
+     }
 }
