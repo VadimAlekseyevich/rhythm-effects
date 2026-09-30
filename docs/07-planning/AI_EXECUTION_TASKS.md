@@ -341,13 +341,13 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 
 ## M11 — Quality
 
-- [ ] **AI-297** — Create Empty benchmark fixture.
-- [ ] **AI-298** — Create Basic Rhythm benchmark fixture.
-- [ ] **AI-299** — Create Medium Motion benchmark fixture with 100 objects and 1,000 keyframes.
-- [ ] **AI-300** — Create Text Heavy benchmark fixture.
-- [ ] **AI-301** — Create Effects Heavy benchmark fixture.
-- [ ] **AI-302** — Create Timeline Stress fixture with 500 objects and 10,000+ keyframes.
-- [ ] **AI-303** — Create Long Audio generated fixture.
+- [x] **AI-297** — Create Empty benchmark fixture.
+- [x] **AI-298** — Create Basic Rhythm benchmark fixture.
+- [x] **AI-299** — Create Medium Motion benchmark fixture with 100 objects and 1,000 keyframes.
+- [x] **AI-300** — Create Text Heavy benchmark fixture.
+- [x] **AI-301** — Create Effects Heavy benchmark fixture.
+- [x] **AI-302** — Create Timeline Stress fixture with 500 objects and 10,000+ keyframes.
+- [x] **AI-303** — Create Long Audio generated fixture.
 - [ ] **AI-304** — Implement diagnostics overlay p50/p95 frame timing.
 - [ ] **AI-305** — Add UI/timeline CPU timing instrumentation.
 - [ ] **AI-306** — Add animation evaluation timing instrumentation.
