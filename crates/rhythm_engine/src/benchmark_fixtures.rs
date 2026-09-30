@@ -17,13 +17,11 @@ use rhythm_core::{
     ids::{AssetId, EffectId, KeyframeId, ObjectId},
     project::{
         AssetKind, AssetRecord, AssetSource, AudioTrack, BlurEffect, Effect, EffectKind,
-        EllipseObject, GlowEffect, ImageObject, NoiseEffect, Object, ObjectContent, Project,
-        ProjectSettings, RectangleObject, RgbSplitEffect, TextAlignment, TextObject, TintEffect,
-        TransformAnimation, FontReference, FontStyle, FontWeight,
+        EllipseObject, FontReference, FontStyle, FontWeight, GlowEffect, ImageObject, NoiseEffect,
+        Object, ObjectContent, Project, ProjectSettings, RectangleObject, RgbSplitEffect,
+        TextAlignment, TextObject, TintEffect, TransformAnimation,
     },
-    time::{
-        BpmMicros, DurationNs, GridOffsetNs, MusicalTick, SampleRate, TempoMap, TimeSignature,
-    },
+    time::{BpmMicros, DurationNs, GridOffsetNs, MusicalTick, SampleRate, TempoMap, TimeSignature},
 };
 
 pub const BENCHMARK_IMAGE_FILE: &str = "benchmark-checker.png";
@@ -65,12 +63,7 @@ impl GeneratedImageFixture {
         }
         let mut encoded = Vec::new();
         PngEncoder::new(&mut encoded)
-            .write_image(
-                &rgba,
-                self.width,
-                self.height,
-                ExtendedColorType::Rgba8,
-            )
+            .write_image(&rgba, self.width, self.height, ExtendedColorType::Rgba8)
             .expect("generated benchmark image is valid RGBA8");
         encoded
     }
@@ -270,14 +263,15 @@ fn animated_position(ids: &mut FixtureIds, object_index: usize, count: usize) ->
             )
         })
         .collect();
-    Animated::with_keyframes(
-        Vec2::new(base_x, base_y).expect("base position"),
-        keyframes,
-    )
-    .expect("unique benchmark position ticks")
+    Animated::with_keyframes(Vec2::new(base_x, base_y).expect("base position"), keyframes)
+        .expect("unique benchmark position ticks")
 }
 
-fn transform(ids: &mut FixtureIds, object_index: usize, position_keys: usize) -> TransformAnimation {
+fn transform(
+    ids: &mut FixtureIds,
+    object_index: usize,
+    position_keys: usize,
+) -> TransformAnimation {
     TransformAnimation::new(
         animated_position(ids, object_index, position_keys),
         Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
@@ -375,7 +369,12 @@ fn text_object(
     }
 }
 
-fn image_object(ids: &mut FixtureIds, index: usize, position_keys: usize, asset: AssetId) -> Object {
+fn image_object(
+    ids: &mut FixtureIds,
+    index: usize,
+    position_keys: usize,
+    asset: AssetId,
+) -> Object {
     Object {
         id: ids.object(),
         name: format!("Image {index:03}"),
@@ -473,7 +472,10 @@ fn add_audio(
     fixture
 }
 
-fn add_checker_asset(project: &mut Project, ids: &mut FixtureIds) -> (AssetId, GeneratedImageFixture) {
+fn add_checker_asset(
+    project: &mut Project,
+    ids: &mut FixtureIds,
+) -> (AssetId, GeneratedImageFixture) {
     let asset = ids.asset();
     project.assets.push(AssetRecord {
         id: asset,
@@ -527,7 +529,9 @@ pub fn basic_rhythm_benchmark_fixture() -> BenchmarkFixture {
     for index in 0..10 {
         let mut object = rectangle(&mut ids, index, 10);
         if index.is_multiple_of(2) {
-            object.effects.push(one_representative_effect(&mut ids, index));
+            object
+                .effects
+                .push(one_representative_effect(&mut ids, index));
         }
         project.composition.objects.push(object);
     }
@@ -557,7 +561,9 @@ pub fn medium_motion_benchmark_fixture() -> BenchmarkFixture {
             2 => text_object(&mut ids, index, 10, 0),
             _ => image_object(&mut ids, index, 10, image_asset),
         };
-        object.effects.push(one_representative_effect(&mut ids, index));
+        object
+            .effects
+            .push(one_representative_effect(&mut ids, index));
         project.composition.objects.push(object);
     }
     project.next_entity_id = ids.next;
@@ -602,10 +608,8 @@ pub fn effects_heavy_benchmark_fixture() -> BenchmarkFixture {
     );
     for index in 0..30 {
         let mut object = rectangle(&mut ids, index, 4);
-        object.effects = full_effect_stack(
-            &mut ids,
-            u32::try_from(index).expect("benchmark index") + 1,
-        );
+        object.effects =
+            full_effect_stack(&mut ids, u32::try_from(index).expect("benchmark index") + 1);
         project.composition.objects.push(object);
     }
     project.next_entity_id = ids.next;
@@ -695,8 +699,7 @@ pub fn project_keyframe_count(project: &Project) -> usize {
                             + animated_count(&value.evolution)
                     }
                     EffectKind::RgbSplit(value) => {
-                        animated_count(&value.amount_px)
-                            + animated_count(&value.angle_degrees)
+                        animated_count(&value.amount_px) + animated_count(&value.angle_degrees)
                     }
                 })
                 .sum();
@@ -708,10 +711,10 @@ pub fn project_keyframe_count(project: &Project) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        BENCHMARK_AUDIO_SAMPLE_RATE, LONG_AUDIO_DURATION_NS, BenchmarkKind, GeneratedAudioFixture,
-        basic_rhythm_benchmark_fixture, effects_heavy_benchmark_fixture,
-        empty_benchmark_fixture, long_audio_fixture, medium_motion_benchmark_fixture,
-        text_heavy_benchmark_fixture, timeline_stress_benchmark_fixture,
+        BENCHMARK_AUDIO_SAMPLE_RATE, BenchmarkKind, GeneratedAudioFixture, LONG_AUDIO_DURATION_NS,
+        basic_rhythm_benchmark_fixture, effects_heavy_benchmark_fixture, empty_benchmark_fixture,
+        long_audio_fixture, medium_motion_benchmark_fixture, text_heavy_benchmark_fixture,
+        timeline_stress_benchmark_fixture,
     };
     use rhythm_core::time::SampleRate;
 
@@ -729,7 +732,10 @@ mod tests {
         assert_eq!(basic.keyframe_count(), 100);
         assert_eq!(basic.project.settings.composition_width, 1920);
         assert_eq!(basic.project.settings.composition_height, 1080);
-        assert_eq!(basic.audio.as_ref().expect("audio").duration_ns, 180_000_000_000);
+        assert_eq!(
+            basic.audio.as_ref().expect("audio").duration_ns,
+            180_000_000_000
+        );
     }
 
     #[test]
@@ -748,17 +754,34 @@ mod tests {
             .composition
             .objects
             .iter()
-            .filter(|object| matches!(&object.content, rhythm_core::project::ObjectContent::Text(_)))
+            .filter(|object| {
+                matches!(
+                    &object.content,
+                    rhythm_core::project::ObjectContent::Text(_)
+                )
+            })
             .count();
         let images = medium
             .project
             .composition
             .objects
             .iter()
-            .filter(|object| matches!(&object.content, rhythm_core::project::ObjectContent::Image(_)))
+            .filter(|object| {
+                matches!(
+                    &object.content,
+                    rhythm_core::project::ObjectContent::Image(_)
+                )
+            })
             .count();
         assert!(text > 0 && images > 0);
-        assert!(medium.project.composition.objects.iter().all(|object| !object.effects.is_empty()));
+        assert!(
+            medium
+                .project
+                .composition
+                .objects
+                .iter()
+                .all(|object| !object.effects.is_empty())
+        );
     }
 
     #[test]
@@ -768,7 +791,10 @@ mod tests {
         assert_eq!(text.object_count(), 50);
         assert_eq!(text.keyframe_count(), 200);
         assert!(text.project.composition.objects.iter().all(|object| {
-            matches!(&object.content, rhythm_core::project::ObjectContent::Text(_))
+            matches!(
+                &object.content,
+                rhythm_core::project::ObjectContent::Text(_)
+            )
         }));
 
         let effects = effects_heavy_benchmark_fixture();
@@ -813,7 +839,10 @@ mod tests {
         assert_eq!(&header[0..4], b"RIFF");
         assert_eq!(&header[8..12], b"WAVE");
         assert_eq!(&header[36..40], b"data");
-        assert_eq!(u32::from_le_bytes(header[40..44].try_into().expect("data size")), 96_000);
+        assert_eq!(
+            u32::from_le_bytes(header[40..44].try_into().expect("data size")),
+            96_000
+        );
     }
 
     #[test]
