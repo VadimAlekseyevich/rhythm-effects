@@ -99,6 +99,25 @@ impl<T> FreeSlots<T> {
     fn len(&self) -> usize {
         self.entries.len()
     }
+
+    fn estimated_bytes(&self) -> u64 {
+        self.entries
+            .iter()
+            .map(|(key, _)| {
+                let bytes_per_pixel = match key.format {
+                    TextureFormat::Rgba16Float => 8_u64,
+                    TextureFormat::Rgba8Unorm
+                    | TextureFormat::Rgba8UnormSrgb
+                    | TextureFormat::Bgra8Unorm
+                    | TextureFormat::Bgra8UnormSrgb => 4_u64,
+                    _ => 0_u64,
+                };
+                u64::from(key.width)
+                    .saturating_mul(u64::from(key.height))
+                    .saturating_mul(bytes_per_pixel)
+            })
+            .sum()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +125,7 @@ pub struct TemporaryTexturePoolStats {
     pub free: usize,
     pub allocations: usize,
     pub reuses: usize,
+    pub free_estimated_bytes: u64,
 }
 
 #[derive(Debug, Default)]
@@ -156,6 +176,7 @@ impl TemporaryTexturePool {
             free: self.free.len(),
             allocations: self.allocations,
             reuses: self.reuses,
+            free_estimated_bytes: self.free.estimated_bytes(),
         }
     }
 
