@@ -748,14 +748,14 @@ mod tests {
             .composition
             .objects
             .iter()
-            .filter(|object| matches!(object.content, rhythm_core::project::ObjectContent::Text(_)))
+            .filter(|object| matches!(&object.content, rhythm_core::project::ObjectContent::Text(_)))
             .count();
         let images = medium
             .project
             .composition
             .objects
             .iter()
-            .filter(|object| matches!(object.content, rhythm_core::project::ObjectContent::Image(_)))
+            .filter(|object| matches!(&object.content, rhythm_core::project::ObjectContent::Image(_)))
             .count();
         assert!(text > 0 && images > 0);
         assert!(medium.project.composition.objects.iter().all(|object| !object.effects.is_empty()));
@@ -768,7 +768,7 @@ mod tests {
         assert_eq!(text.object_count(), 50);
         assert_eq!(text.keyframe_count(), 200);
         assert!(text.project.composition.objects.iter().all(|object| {
-            matches!(object.content, rhythm_core::project::ObjectContent::Text(_))
+            matches!(&object.content, rhythm_core::project::ObjectContent::Text(_))
         }));
 
         let effects = effects_heavy_benchmark_fixture();
