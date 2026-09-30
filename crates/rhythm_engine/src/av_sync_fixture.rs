@@ -3,7 +3,10 @@
 //! The fixture has no checked-in binary media. One deterministic schedule
 //! drives both a PCM WAV click onset and an opacity flash keyframe.
 
-use std::{fs, io, path::{Path, PathBuf}};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use rhythm_core::{
     animation::{Animated, Interpolation, Keyframe},
@@ -14,8 +17,8 @@ use rhythm_core::{
         ProjectSettings, RectangleObject, TransformAnimation,
     },
     time::{
-        BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs, TempoMap, TimeSignature,
-        PPQ,
+        BpmMicros, DurationNs, GridOffsetNs, MusicalTick, PPQ, ProjectTimeNs, TempoMap,
+        TimeSignature,
     },
 };
 
@@ -136,9 +139,7 @@ pub fn generated_av_sync_fixture() -> GeneratedAvSyncFixture {
             project_time: ProjectTimeNs::new(
                 i64::try_from(second * 1_000_000_000).expect("fixture time"),
             ),
-            musical_tick: MusicalTick::new(
-                i64::try_from(second).expect("fixture second") * PPQ,
-            ),
+            musical_tick: MusicalTick::new(i64::try_from(second).expect("fixture second") * PPQ),
             audio_frame: second * u64::from(AV_SYNC_SAMPLE_RATE),
         })
         .collect();
@@ -176,9 +177,7 @@ pub fn generated_av_sync_fixture() -> GeneratedAvSyncFixture {
         transform: transform(opacity),
         content: ObjectContent::Rectangle(RectangleObject {
             size: Animated::new_static(Vec2::new(400.0, 400.0).expect("size")),
-            fill: Animated::new_static(
-                LinearRgba::new(1.0, 1.0, 1.0, 1.0).expect("opaque white"),
-            ),
+            fill: Animated::new_static(LinearRgba::new(1.0, 1.0, 1.0, 1.0).expect("opaque white")),
             corner_radius: Animated::new_static(0.0),
         }),
         effects: Vec::new(),
@@ -242,7 +241,10 @@ mod tests {
                 event.project_time.get(),
                 i64::try_from(second * 1_000_000_000).expect("event time")
             );
-            assert_eq!(event.musical_tick.get(), i64::try_from(second).expect("second") * 960);
+            assert_eq!(
+                event.musical_tick.get(),
+                i64::try_from(second).expect("second") * 960
+            );
             assert_eq!(event.audio_frame, second * u64::from(AV_SYNC_SAMPLE_RATE));
             assert_ne!(sample_at(&fixture.audio_wav, event.audio_frame), 0);
             assert_eq!(sample_at(&fixture.audio_wav, event.audio_frame - 1), 0);
@@ -263,7 +265,9 @@ mod tests {
         let fixture = generated_av_sync_fixture();
         let root = TestDir::new();
         let project_path = root.0.join("sync.rhfx");
-        let audio = fixture.materialize_audio(&project_path).expect("write generated WAV");
+        let audio = fixture
+            .materialize_audio(&project_path)
+            .expect("write generated WAV");
         assert_eq!(audio, root.0.join(AV_SYNC_AUDIO_FILE));
         let probe = probe_audio_file(&audio).expect("probe generated PCM WAV");
         assert_eq!(probe.sample_rate, AV_SYNC_SAMPLE_RATE);
