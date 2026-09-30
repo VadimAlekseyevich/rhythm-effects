@@ -65,6 +65,12 @@ impl ExportReadbackLayout {
         self.total_bytes
     }
 
+    #[must_use]
+    pub const fn bounded_pool_bytes(self) -> u64 {
+        self.total_bytes
+            .saturating_mul(MAX_EXPORT_READBACK_BUFFERS as u64)
+    }
+
     /// Strip wgpu 256-byte copy-row alignment from a completed mapped buffer
     /// before piping tightly packed RGBA8 bytes into FFmpeg. Nothing is read
     /// beyond the provided mapped range and no padding reaches the encoder.
