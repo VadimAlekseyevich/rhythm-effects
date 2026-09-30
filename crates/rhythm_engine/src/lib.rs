@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audio;
+pub mod av_sync_fixture;
 pub mod blur;
 pub mod effect_chain;
 pub mod export_ffmpeg;
