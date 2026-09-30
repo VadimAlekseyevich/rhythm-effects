@@ -99,8 +99,10 @@ fn percentile_nearest_rank(sorted: &[f32], percentile: usize) -> f32 {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MemoryBucketEstimates {
     pub project_semantic_bytes: u64,
+    pub audio_playback_bytes: u64,
     pub waveform_bytes: u64,
     pub renderer_working_gpu_bytes: u64,
+    pub export_readback_bytes: u64,
 }
 
 fn animated_heap_bytes<T>(animated: &Animated<T>) -> usize {
