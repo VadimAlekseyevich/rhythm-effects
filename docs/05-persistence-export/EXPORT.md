@@ -114,6 +114,14 @@ Supported common FPS presets include 24, 25, 30, 50, 60.
 
 Rational internals remain supported.
 
+AI-295 adds release-variant acceptance tests spanning native 1920x1080@60,
+1280x720@60, and 1920x1080@30. Each case crosses the immutable export plan
+and structured FFmpeg command boundary: output size, rational FPS, exact
+10-second frame count, packed RGBA byte size, rawvideo input, and yuv420p
+output must agree. The tests also prove that resolution/FPS overrides do not
+rewrite the captured Project settings. These tests are hardware-free; final
+bitstream/GPU acceptance remains release validation.
+
 ## 6. Resolution scaling
 
 When output resolution differs but keeps aspect ratio:
@@ -319,8 +327,17 @@ the partial is empty, or OS publication fails, Drop removes only the
 owned partial/marker and leaves the previous final file intact. Tests cover
 replacing an older known-good output, two concurrent unique stages, an
 abandoned/cancelled stage, empty file, blocked publication and rejected
-relative destination. This prepares safe publication independently from
-the unfinished full creative render/async readback job runner.
+relative destination.
+
+AI-296 additionally injects cancellation after complete-looking bytes already
+exist in the sibling partial but before publication. The checked publication
+refuses the rename, its owned partial/lock are removed, and a previous
+known-good destination remains byte-for-byte unchanged. Together with the
+empty/blocked/abandoned tests, cancelled or failed exports cannot leave a
+successful-looking final replacement.
+
+This prepares safe publication independently from the unfinished full creative
+render/async readback job runner.
 
 ## 17. FFmpeg diagnostics
 
