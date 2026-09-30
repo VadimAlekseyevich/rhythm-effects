@@ -48,9 +48,27 @@ mod tests {
     #[test]
     fn release_variants_keep_resolution_fps_frame_count_and_rawvideo_contract_aligned() {
         let variants = [
-            ([1920, 1080], FrameRate::new(60, 1).expect("60"), 600_u64, "1920x1080", "60/1"),
-            ([1280, 720], FrameRate::new(60, 1).expect("60"), 600_u64, "1280x720", "60/1"),
-            ([1920, 1080], FrameRate::new(30, 1).expect("30"), 300_u64, "1920x1080", "30/1"),
+            (
+                [1920, 1080],
+                FrameRate::new(60, 1).expect("60"),
+                600_u64,
+                "1920x1080",
+                "60/1",
+            ),
+            (
+                [1280, 720],
+                FrameRate::new(60, 1).expect("60"),
+                600_u64,
+                "1280x720",
+                "60/1",
+            ),
+            (
+                [1920, 1080],
+                FrameRate::new(30, 1).expect("30"),
+                300_u64,
+                "1920x1080",
+                "30/1",
+            ),
         ];
 
         for (size, fps, frames, video_size, frame_rate) in variants {
