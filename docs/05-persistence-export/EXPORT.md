@@ -261,6 +261,13 @@ Show:
 
 ETA may be shown only when enough throughput history exists and is labelled approximate.
 
+AI-289 introduces `ExportProgress`: only frames actually delivered to the
+encoder count toward completed/total and percentage, monotonically; elapsed
+time comes from the job's start Instant and never feeds into creative
+timestamps. Invalid backward/out-of-bounds updates are rejected without
+changing the last valid count. ETA is deliberately not fabricated from a
+single sample.
+
 ## 15. Cancellation
 
 Atomic/cooperative cancellation:
@@ -270,6 +277,13 @@ Atomic/cooperative cancellation:
 - release readback/resources;
 - delete incomplete temp output;
 - Project remains unchanged.
+
+AI-290 provides a cloneable atomic cancellation signal, checked at the
+export worker's frame-delivery and process-finalization boundaries. Dropping
+or explicitly cancelling its owned FFmpeg process closes stdin, kills an
+unfinished child and reaps it on the export worker. A second token check
+after encoder success prevents publication of a newly cancelled job.
+No editor/audio realtime callback blocks on encoder process I/O.
 
 ## 16. Output publication
 
@@ -283,6 +297,19 @@ destination.partial/temp
 ~~~
 
 Failed/cancelled export is never reported as success.
+
+AI-291 introduces `PartialExportOutput`: a unique same-directory partial
+MP4 pathname reserved by an exclusive create_new marker, with no
+overwrite of the final path during encoding. Finalization closes FFmpeg
+stdin and checks its exit status, opens the partial, verifies it is a
+nonempty regular file, flushes/synchronizes it and closes the handle
+before same-directory rename/replace. If FFmpeg fails, cancellation arrives,
+the partial is empty, or OS publication fails, Drop removes only the
+owned partial/marker and leaves the previous final file intact. Tests cover
+replacing an older known-good output, two concurrent unique stages, an
+abandoned/cancelled stage, empty file, blocked publication and rejected
+relative destination. This prepares safe publication independently from
+the unfinished full creative render/async readback job runner.
 
 ## 17. FFmpeg diagnostics
 

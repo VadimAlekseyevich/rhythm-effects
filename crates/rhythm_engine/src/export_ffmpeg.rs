@@ -9,7 +9,7 @@ use std::{
 
 use rhythm_core::time::FrameRate;
 
-use crate::export_renderer::ExportRendererPlan;
+use crate::{export_progress::ExportCancellationToken, export_renderer::ExportRendererPlan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportQuality {
@@ -237,6 +237,7 @@ pub enum FfmpegProcessError {
     Configuration(FfmpegConfigurationError),
     Spawn(io::Error),
     MissingStdin,
+    Cancelled,
     OutOfOrderFrame { expected: u64, actual: u64 },
     FrameSizeMismatch { expected: usize, actual: usize },
     TooManyFrames,
@@ -256,6 +257,36 @@ pub struct FfmpegRawVideoProcess {
 }
 
 impl FfmpegRawVideoProcess {
+    /// Before sending each video frame, honor cooperative cancellation. The
+    /// owning export worker drops or explicitly cancels this child on error.
+    pub fn write_frame_checked(
+        &mut self,
+        cancellation: &ExportCancellationToken,
+        frame_index: u64,
+        rgba: &[u8],
+    ) -> Result<(), FfmpegProcessError> {
+        if cancellation.is_cancelled() {
+            return Err(FfmpegProcessError::Cancelled);
+        }
+        self.write_frame(frame_index, rgba)
+    }
+
+    pub fn finish_checked(
+        self,
+        cancellation: &ExportCancellationToken,
+    ) -> Result<(), FfmpegProcessError> {
+        if cancellation.is_cancelled() {
+            return Err(FfmpegProcessError::Cancelled);
+        }
+        self.finish()
+    }
+
+    /// Explicitly release resources on a canceled job; Drop kills and reaps
+    /// any encoder still running without touching the user's final output.
+    pub fn cancel(self) {
+        drop(self);
+    }
+
     /// FFmpeg stdin is the rawvideo pipe; an export worker feeds completed,
     /// tightly packed RGBA8 frames after GPU readback and row unpadding.
     pub fn write_frame(&mut self, frame_index: u64, rgba: &[u8]) -> Result<(), FfmpegProcessError> {

@@ -5,6 +5,8 @@ pub mod blur;
 pub mod effect_chain;
 pub mod export_ffmpeg;
 pub mod export_job;
+pub mod export_progress;
+pub mod export_publication;
 pub mod export_readback;
 pub mod export_renderer;
 pub mod export_resolution;
