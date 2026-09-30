@@ -1,3 +1,8 @@
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
+
 use rhythm_core::{
     animation::{
         Animated, Interpolation, evaluate_bezier_easing, interpolate_linear_f32,
@@ -107,7 +112,50 @@ pub enum EvaluatedEffectKind {
     },
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SceneEvaluationTiming {
+    pub calls: u64,
+    pub total: Duration,
+}
+
+thread_local! {
+    static SCENE_EVALUATION_TIMING: Cell<SceneEvaluationTiming> =
+        const { Cell::new(SceneEvaluationTiming { calls: 0, total: Duration::ZERO }) };
+}
+
+fn record_scene_evaluation(duration: Duration) {
+    SCENE_EVALUATION_TIMING.with(|metrics| {
+        let current = metrics.get();
+        metrics.set(SceneEvaluationTiming {
+            calls: current.calls.saturating_add(1),
+            total: current.total.saturating_add(duration),
+        });
+    });
+}
+
+/// Drain timing accumulated on the current thread. Export-worker evaluation
+/// therefore cannot contaminate the editor UI thread's diagnostics overlay.
+#[must_use]
+pub fn take_scene_evaluation_timing() -> SceneEvaluationTiming {
+    SCENE_EVALUATION_TIMING.with(|metrics| {
+        metrics.replace(SceneEvaluationTiming {
+            calls: 0,
+            total: Duration::ZERO,
+        })
+    })
+}
+
 pub fn evaluate_scene(
+    project: &Project,
+    project_time: ProjectTimeNs,
+) -> Result<EvaluatedScene, SceneEvaluationError> {
+    let started = Instant::now();
+    let result = evaluate_scene_inner(project, project_time);
+    record_scene_evaluation(started.elapsed());
+    result
+}
+
+fn evaluate_scene_inner(
     project: &Project,
     project_time: ProjectTimeNs,
 ) -> Result<EvaluatedScene, SceneEvaluationError> {
