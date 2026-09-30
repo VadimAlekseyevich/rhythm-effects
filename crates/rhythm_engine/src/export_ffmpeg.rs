@@ -319,10 +319,19 @@ pub enum FfmpegProcessError {
     StderrRead(io::Error),
     StderrJoin,
     Cancelled,
-    OutOfOrderFrame { expected: u64, actual: u64 },
-    FrameSizeMismatch { expected: usize, actual: usize },
+    OutOfOrderFrame {
+        expected: u64,
+        actual: u64,
+    },
+    FrameSizeMismatch {
+        expected: usize,
+        actual: usize,
+    },
     TooManyFrames,
-    MissingFrames { expected: u64, actual: u64 },
+    MissingFrames {
+        expected: u64,
+        actual: u64,
+    },
     Write(io::Error),
     Wait(io::Error),
     EncoderFailed {
@@ -485,8 +494,9 @@ mod tests {
     }
 
     fn contains_pair(args: &[OsString], flag: &str, value: &str) -> bool {
-        args.windows(2)
-            .any(|pair| pair[0].as_os_str() == OsStr::new(flag) && pair[1].as_os_str() == OsStr::new(value))
+        args.windows(2).any(|pair| {
+            pair[0].as_os_str() == OsStr::new(flag) && pair[1].as_os_str() == OsStr::new(value)
+        })
     }
 
     #[test]
@@ -501,11 +511,26 @@ mod tests {
     fn stderr_diagnostics_map_common_encoder_and_io_failures() {
         use super::{FfmpegFailureStage, classify_diagnostic};
         let cases = [
-            (b"Unknown encoder 'libx264'".as_slice(), FfmpegFailureStage::EncoderUnavailable),
-            (b"Permission denied".as_slice(), FfmpegFailureStage::PermissionDenied),
-            (b"No space left on device".as_slice(), FfmpegFailureStage::DiskFull),
-            (b"Invalid data found when processing input".as_slice(), FfmpegFailureStage::InvalidAudioSource),
-            (b"the encoder exited unexpectedly".as_slice(), FfmpegFailureStage::ProcessFailed),
+            (
+                b"Unknown encoder 'libx264'".as_slice(),
+                FfmpegFailureStage::EncoderUnavailable,
+            ),
+            (
+                b"Permission denied".as_slice(),
+                FfmpegFailureStage::PermissionDenied,
+            ),
+            (
+                b"No space left on device".as_slice(),
+                FfmpegFailureStage::DiskFull,
+            ),
+            (
+                b"Invalid data found when processing input".as_slice(),
+                FfmpegFailureStage::InvalidAudioSource,
+            ),
+            (
+                b"the encoder exited unexpectedly".as_slice(),
+                FfmpegFailureStage::ProcessFailed,
+            ),
         ];
         for (stderr, expected) in cases {
             let diagnostic = classify_diagnostic(stderr);
