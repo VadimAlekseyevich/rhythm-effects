@@ -573,10 +573,14 @@ impl Renderer {
     ) -> Result<ImageTextureUpload, ImageTextureUploadError> {
         let started = Instant::now();
         let result = self.image_textures.upload(device, queue, decoded);
-        let uploads = u64::from(matches!(
+        let uploads = if matches!(
             result,
             Ok(ImageTextureUpload::Inserted | ImageTextureUpload::Replaced)
-        ));
+        ) {
+            1
+        } else {
+            0
+        };
         self.record_diagnostics(started, 0, 0, 0, uploads);
         result
     }
@@ -759,7 +763,13 @@ impl Renderer {
     ) -> Result<(), TintError> {
         let started = Instant::now();
         let result = self.tint.encode(device, queue, encoder, targets, parameters);
-        self.record_diagnostics(started, u64::from(result.is_ok()), u64::from(result.is_ok()), 0, 0);
+        self.record_diagnostics(
+            started,
+            if result.is_ok() { 1 } else { 0 },
+            if result.is_ok() { 1 } else { 0 },
+            0,
+            0,
+        );
         result
     }
 
@@ -775,7 +785,13 @@ impl Renderer {
     ) -> Result<(), NoiseError> {
         let started = Instant::now();
         let result = self.noise.encode(device, queue, encoder, targets, parameters);
-        self.record_diagnostics(started, u64::from(result.is_ok()), u64::from(result.is_ok()), 0, 0);
+        self.record_diagnostics(
+            started,
+            if result.is_ok() { 1 } else { 0 },
+            if result.is_ok() { 1 } else { 0 },
+            0,
+            0,
+        );
         result
     }
 
@@ -808,7 +824,13 @@ impl Renderer {
         let result = self
             .rgb_split
             .encode(device, queue, encoder, targets, parameters);
-        self.record_diagnostics(started, u64::from(result.is_ok()), u64::from(result.is_ok()), 0, 0);
+        self.record_diagnostics(
+            started,
+            if result.is_ok() { 1 } else { 0 },
+            if result.is_ok() { 1 } else { 0 },
+            0,
+            0,
+        );
         result
     }
 
