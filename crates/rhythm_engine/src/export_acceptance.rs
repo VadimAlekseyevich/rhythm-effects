@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::{OsStr, OsString}, path::PathBuf};
+    use std::ffi::{OsStr, OsString};
 
     use crate::{
         export_ffmpeg::{ExportQuality, FfmpegExportOptions},
@@ -64,11 +64,7 @@ mod tests {
             );
 
             let command = options.command().expect("structured FFmpeg command");
-            let args: Vec<PathBuf> = command.get_args().map(PathBuf::from).collect();
-            let args: Vec<OsString> = args
-                .into_iter()
-                .map(|arg| arg.into_os_string())
-                .collect();
+            let args: Vec<OsString> = command.get_args().map(OsString::from).collect();
             assert!(contains_pair(&args, "-video_size", video_size));
             assert!(contains_pair(&args, "-framerate", frame_rate));
             assert!(contains_pair(&args, "-frames:v", &frames.to_string()));
