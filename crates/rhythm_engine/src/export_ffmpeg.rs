@@ -356,8 +356,9 @@ mod tests {
     }
 
     fn contains_pair(args: &[OsString], flag: &str, value: &str) -> bool {
-        args.windows(2)
-            .any(|pair| pair[0].as_os_str() == OsStr::new(flag) && pair[1].as_os_str() == OsStr::new(value))
+        args.windows(2).any(|pair| {
+            pair[0].as_os_str() == OsStr::new(flag) && pair[1].as_os_str() == OsStr::new(value)
+        })
     }
 
     #[test]
