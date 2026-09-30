@@ -3,7 +3,11 @@
 //! This module owns renderer/backend concerns inside `rhythm_engine`.
 //! `rhythm_core` stays independent from wgpu and other graphics APIs.
 
-use std::collections::HashMap;
+use std::{
+    cell::Cell,
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use rhythm_core::ids::AssetId;
 
@@ -98,6 +102,17 @@ impl ImageTextureCache {
 
     fn remove(&mut self, asset_id: AssetId) -> bool {
         self.entries.remove(&asset_id).is_some()
+    }
+
+    fn estimated_bytes(&self) -> u64 {
+        self.entries
+            .values()
+            .map(|image| {
+                u64::from(image.size[0])
+                    .saturating_mul(u64::from(image.size[1]))
+                    .saturating_mul(4)
+            })
+            .sum()
     }
 
     fn upload(
@@ -270,6 +285,28 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct RendererCpuCounters {
+    cpu_nanos: u64,
+    render_passes: u64,
+    draw_calls: u64,
+    isolated_objects: u64,
+    texture_uploads: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RendererFrameDiagnostics {
+    pub cpu_time: Duration,
+    pub render_passes: u64,
+    /// Renderer-owned fullscreen draws. Object-content callback draws are
+    /// deliberately not guessed and should be reported by the scene drawer.
+    pub draw_calls: u64,
+    pub isolated_objects: u64,
+    pub texture_uploads: u64,
+    pub temporary_textures: TemporaryTexturePoolStats,
+    pub gpu_estimated_bytes: u64,
+}
+
 #[derive(Debug)]
 pub struct Renderer {
     _composition_texture: wgpu::Texture,
@@ -288,6 +325,7 @@ pub struct Renderer {
     rgb_split: RgbSplit,
     tint: Tint,
     text_resources: TextResources,
+    diagnostics: Cell<RendererCpuCounters>,
 }
 
 impl Renderer {
@@ -442,6 +480,54 @@ impl Renderer {
             rgb_split: RgbSplit::new(device, COMPOSITION_FORMAT),
             tint: Tint::new(device, COMPOSITION_FORMAT),
             text_resources: TextResources::new(device, queue, COMPOSITION_FORMAT, size),
+            diagnostics: Cell::new(RendererCpuCounters::default()),
+        }
+    }
+
+    fn record_diagnostics(
+        &self,
+        started: Instant,
+        render_passes: u64,
+        draw_calls: u64,
+        isolated_objects: u64,
+        texture_uploads: u64,
+    ) {
+        let current = self.diagnostics.get();
+        let elapsed = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.diagnostics.set(RendererCpuCounters {
+            cpu_nanos: current.cpu_nanos.saturating_add(elapsed),
+            render_passes: current.render_passes.saturating_add(render_passes),
+            draw_calls: current.draw_calls.saturating_add(draw_calls),
+            isolated_objects: current.isolated_objects.saturating_add(isolated_objects),
+            texture_uploads: current.texture_uploads.saturating_add(texture_uploads),
+        });
+    }
+
+    /// Drain renderer-owned CPU/pass/draw counters for the current UI frame.
+    /// Temporary pool allocation/reuse totals remain cumulative and bounded.
+    #[must_use]
+    pub fn take_frame_diagnostics(&self) -> RendererFrameDiagnostics {
+        let counters = self.diagnostics.replace(RendererCpuCounters::default());
+        let temporary_textures = self.temporary_textures.stats();
+        let [width, height] = self.composition_size;
+        let composition_bytes = u64::from(width)
+            .saturating_mul(u64::from(height))
+            .saturating_mul(8);
+        let preview_bytes = u64::from(width)
+            .saturating_mul(u64::from(height))
+            .saturating_mul(4);
+        let gpu_estimated_bytes = composition_bytes
+            .saturating_add(preview_bytes)
+            .saturating_add(self.image_textures.estimated_bytes())
+            .saturating_add(temporary_textures.free_estimated_bytes);
+        RendererFrameDiagnostics {
+            cpu_time: Duration::from_nanos(counters.cpu_nanos),
+            render_passes: counters.render_passes,
+            draw_calls: counters.draw_calls,
+            isolated_objects: counters.isolated_objects,
+            texture_uploads: counters.texture_uploads,
+            temporary_textures,
+            gpu_estimated_bytes,
         }
     }
 
