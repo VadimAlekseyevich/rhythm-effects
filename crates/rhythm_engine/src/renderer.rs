@@ -571,7 +571,14 @@ impl Renderer {
         queue: &wgpu::Queue,
         decoded: ValidatedDecodedImage,
     ) -> Result<ImageTextureUpload, ImageTextureUploadError> {
-        self.image_textures.upload(device, queue, decoded)
+        let started = Instant::now();
+        let result = self.image_textures.upload(device, queue, decoded);
+        let uploads = u64::from(matches!(
+            result,
+            Ok(ImageTextureUpload::Inserted | ImageTextureUpload::Replaced)
+        ));
+        self.record_diagnostics(started, 0, 0, 0, uploads);
+        result
     }
 
     pub fn remove_image_texture(&mut self, asset_id: AssetId) -> bool {
@@ -607,13 +614,16 @@ impl Renderer {
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         )
         .expect("composition size and usage are valid");
-        self.isolated_compositor.encode_object(
+        let started = Instant::now();
+        let target = self.isolated_compositor.encode_object(
             device,
             encoder,
             &mut self.temporary_textures,
             key,
             draw,
-        )
+        );
+        self.record_diagnostics(started, 1, 0, 1, 0);
+        target
     }
 
     /// Run evaluated effects in their ordered stack using distinct pooled
@@ -633,14 +643,17 @@ impl Renderer {
             &mut TemporaryTexturePool,
         ),
     ) -> TemporaryTexture {
-        encode_ordered_effect_chain(
+        let started = Instant::now();
+        let target = encode_ordered_effect_chain(
             device,
             encoder,
             &mut self.temporary_textures,
             source,
             effects,
             encode_effect,
-        )
+        );
+        self.record_diagnostics(started, 0, 0, 0, 0);
+        target
     }
 
     /// Encode a horizontal/vertical blur between two distinct pooled targets.
@@ -655,6 +668,7 @@ impl Renderer {
         output: &TemporaryTexture,
         radius_px: f32,
     ) {
+        let started = Instant::now();
         self.blur.encode(
             device,
             queue,
@@ -663,6 +677,7 @@ impl Renderer {
             (source, output),
             radius_px,
         );
+        self.record_diagnostics(started, 2, 2, 0, 0);
     }
 
     /// Apply composition-pixel blur semantics at the active preview scale.
@@ -694,7 +709,8 @@ impl Renderer {
         output: &TemporaryTexture,
         parameters: GlowParameters,
     ) -> Result<(), GlowError> {
-        self.glow.encode(
+        let started = Instant::now();
+        let result = self.glow.encode(
             &self.blur,
             &mut GlowResources {
                 device,
@@ -705,7 +721,13 @@ impl Renderer {
             source,
             output,
             parameters,
-        )
+        );
+        if result.is_ok() {
+            self.record_diagnostics(started, 4, 4, 0, 0);
+        } else {
+            self.record_diagnostics(started, 0, 0, 0, 0);
+        }
+        result
     }
 
     /// Convert the semantic Glow radius using the resolved preview scale
@@ -735,8 +757,10 @@ impl Renderer {
         targets: (&TemporaryTexture, &TemporaryTexture),
         parameters: TintParameters,
     ) -> Result<(), TintError> {
-        self.tint
-            .encode(device, queue, encoder, targets, parameters)
+        let started = Instant::now();
+        let result = self.tint.encode(device, queue, encoder, targets, parameters);
+        self.record_diagnostics(started, u64::from(result.is_ok()), u64::from(result.is_ok()), 0, 0);
+        result
     }
 
     /// Encode deterministic, alpha-preserving monochrome Noise. The semantic
@@ -749,8 +773,10 @@ impl Renderer {
         targets: (&TemporaryTexture, &TemporaryTexture),
         parameters: NoiseParameters,
     ) -> Result<(), NoiseError> {
-        self.noise
-            .encode(device, queue, encoder, targets, parameters)
+        let started = Instant::now();
+        let result = self.noise.encode(device, queue, encoder, targets, parameters);
+        self.record_diagnostics(started, u64::from(result.is_ok()), u64::from(result.is_ok()), 0, 0);
+        result
     }
 
     /// Convert composition pixel-block size to the resolved preview scale,
@@ -765,7 +791,7 @@ impl Renderer {
         preview_scale: f32,
     ) -> Result<(), NoiseError> {
         let working = preview_noise_parameters(parameters, preview_scale)?;
-        self.noise.encode(device, queue, encoder, targets, working)
+        self.encode_noise(device, queue, encoder, targets, working)
     }
 
     /// Red and blue sample equal/opposite signed composition-pixel offsets
@@ -778,8 +804,12 @@ impl Renderer {
         targets: (&TemporaryTexture, &TemporaryTexture),
         parameters: RgbSplitParameters,
     ) -> Result<(), RgbSplitError> {
-        self.rgb_split
-            .encode(device, queue, encoder, targets, parameters)
+        let started = Instant::now();
+        let result = self
+            .rgb_split
+            .encode(device, queue, encoder, targets, parameters);
+        self.record_diagnostics(started, u64::from(result.is_ok()), u64::from(result.is_ok()), 0, 0);
+        result
     }
 
     /// Convert displacement into working preview pixels without rewriting
@@ -794,8 +824,7 @@ impl Renderer {
         preview_scale: f32,
     ) -> Result<(), RgbSplitError> {
         let working = preview_rgb_split_parameters(parameters, preview_scale)?;
-        self.rgb_split
-            .encode(device, queue, encoder, targets, working)
+        self.encode_rgb_split(device, queue, encoder, targets, working)
     }
 
     /// Composite after all effects, then return the checkout to the pool.
@@ -806,12 +835,15 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         target: TemporaryTexture,
     ) {
+        let started = Instant::now();
         self.isolated_compositor
             .encode_composite(device, encoder, &target, &self.composition_view);
         self.temporary_textures.release(target);
+        self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
     pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let started = Instant::now();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Rhythm Effects composition clear encoder"),
         });
@@ -841,9 +873,11 @@ impl Renderer {
         }
 
         queue.submit([encoder.finish()]);
+        self.record_diagnostics(started, 1, 0, 0, 0);
     }
 
     pub fn refresh_preview_display(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let started = Instant::now();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Rhythm Effects preview conversion encoder"),
         });
@@ -871,6 +905,7 @@ impl Renderer {
         }
 
         queue.submit([encoder.finish()]);
+        self.record_diagnostics(started, 1, 1, 0, 0);
     }
 }
 
