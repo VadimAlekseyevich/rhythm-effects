@@ -118,6 +118,13 @@ impl PartialExportOutput {
         process
             .finish_checked(cancellation)
             .map_err(ExportPublicationError::Encoder)?;
+        self.publish_completed_checked(cancellation)
+    }
+
+    fn publish_completed_checked(
+        self,
+        cancellation: &ExportCancellationToken,
+    ) -> Result<PathBuf, ExportPublicationError> {
         if cancellation.is_cancelled() {
             return Err(ExportPublicationError::Cancelled);
         }
@@ -157,6 +164,7 @@ impl Drop for PartialExportOutput {
 #[cfg(test)]
 mod tests {
     use super::{ExportPublicationError, PartialExportOutput};
+    use crate::export_progress::ExportCancellationToken;
     use std::{
         fs,
         path::PathBuf,
@@ -257,6 +265,29 @@ mod tests {
         ));
         assert!(blocked.is_dir());
         assert!(!temp.exists());
+    }
+
+    #[test]
+    fn cancellation_after_encoder_stage_removes_partial_and_preserves_known_good_output() {
+        let root = TestDir::new();
+        let final_path = root.0.join("final.mp4");
+        fs::write(&final_path, b"old known good").expect("old");
+        let stage = PartialExportOutput::reserve(&final_path).expect("reserve");
+        let partial = stage.partial_path().to_path_buf();
+        fs::write(&partial, b"complete-looking but unpublished bytes").expect("partial");
+
+        let cancellation = ExportCancellationToken::default();
+        cancellation.cancel();
+        assert!(matches!(
+            stage.publish_completed_checked(&cancellation),
+            Err(ExportPublicationError::Cancelled)
+        ));
+        assert!(!partial.exists());
+        assert_eq!(
+            fs::read(&final_path).expect("known good retained"),
+            b"old known good"
+        );
+        assert_eq!(fs::read_dir(&root.0).expect("list").count(), 1);
     }
 
     #[test]
