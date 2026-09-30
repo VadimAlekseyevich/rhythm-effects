@@ -9,7 +9,6 @@ use std::{
 
 use rhythm_core::{
     animation::{Animated, Keyframe},
-    domain::{LinearRgba, Vec2},
     project::{EffectKind, ObjectContent, Project},
 };
 
