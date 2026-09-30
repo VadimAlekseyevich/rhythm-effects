@@ -35,6 +35,9 @@ pub const fn status() -> &'static str {
 }
 
 #[cfg(test)]
+mod export_acceptance;
+
+#[cfg(test)]
 mod preview_effect_parity;
 
 #[cfg(test)]
