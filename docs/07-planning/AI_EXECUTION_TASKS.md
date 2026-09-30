@@ -336,8 +336,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-292** — Capture bounded FFmpeg stderr and map common failures to structured ExportError stages.
 - [x] **AI-293** — Create generated click/flash A/V sync fixture.
 - [ ] **AI-294** — Validate short, 1-minute, 5-minute and 10-minute export sync.
-- [ ] **AI-295** — Test 1080p60, 720p and 30 FPS output variants.
-- [ ] **AI-296** — Test cancelled/failed export leaves no successful-looking partial output.
+- [x] **AI-295** — Test 1080p60, 720p and 30 FPS output variants.
+- [x] **AI-296** — Test cancelled/failed export leaves no successful-looking partial output.
 
 ## M11 — Quality
 
