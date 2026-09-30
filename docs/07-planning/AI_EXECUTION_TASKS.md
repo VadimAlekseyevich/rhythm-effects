@@ -348,12 +348,12 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-301** — Create Effects Heavy benchmark fixture.
 - [x] **AI-302** — Create Timeline Stress fixture with 500 objects and 10,000+ keyframes.
 - [x] **AI-303** — Create Long Audio generated fixture.
-- [ ] **AI-304** — Implement diagnostics overlay p50/p95 frame timing.
-- [ ] **AI-305** — Add UI/timeline CPU timing instrumentation.
-- [ ] **AI-306** — Add animation evaluation timing instrumentation.
-- [ ] **AI-307** — Add renderer CPU timing/pass/draw/temporary-target counters.
-- [ ] **AI-308** — Add background worker queue/job counters.
-- [ ] **AI-309** — Add major memory-bucket estimates.
+- [x] **AI-304** — Implement diagnostics overlay p50/p95 frame timing.
+- [x] **AI-305** — Add UI/timeline CPU timing instrumentation.
+- [x] **AI-306** — Add animation evaluation timing instrumentation.
+- [x] **AI-307** — Add renderer CPU timing/pass/draw/temporary-target counters.
+- [x] **AI-308** — Add background worker queue/job counters.
+- [x] **AI-309** — Add major memory-bucket estimates.
 - [ ] **AI-310** — Measure Medium fixture p95/p99 against PERFORMANCE.md gates.
 - [ ] **AI-311** — Run 30-minute audio playback stress under Medium editor interaction.
 - [ ] **AI-312** — Measure warm/cold startup on the recorded reference machine.
