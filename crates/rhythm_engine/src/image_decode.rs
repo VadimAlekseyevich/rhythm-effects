@@ -1,7 +1,9 @@
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc::{
-        Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError, sync_channel,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError, sync_channel},
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -71,9 +73,18 @@ pub enum ImageDecodeSubmitError {
     Disconnected(ImageDecodeRequest),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImageDecodeWorkerStats {
+    pub queued_or_running: usize,
+    pub completed_unread: usize,
+    pub queue_capacity: usize,
+}
+
 pub struct ImageDecodeWorker {
     request_tx: SyncSender<ImageDecodeRequest>,
     result_rx: Receiver<ImageDecodeResult>,
+    queued_or_running: Arc<AtomicUsize>,
+    completed_unread: Arc<AtomicUsize>,
     _thread: JoinHandle<()>,
 }
 
@@ -82,6 +93,10 @@ impl ImageDecodeWorker {
         let (request_tx, request_rx) =
             sync_channel::<ImageDecodeRequest>(IMAGE_DECODE_QUEUE_CAPACITY);
         let (result_tx, result_rx) = sync_channel::<ImageDecodeResult>(IMAGE_DECODE_QUEUE_CAPACITY);
+        let queued_or_running = Arc::new(AtomicUsize::new(0));
+        let completed_unread = Arc::new(AtomicUsize::new(0));
+        let worker_pending = Arc::clone(&queued_or_running);
+        let worker_completed = Arc::clone(&completed_unread);
 
         let thread = thread::Builder::new()
             .name("rhythm-image-decode".to_owned())
@@ -94,7 +109,10 @@ impl ImageDecodeWorker {
                         path: request.path,
                         result,
                     };
+                    worker_pending.fetch_sub(1, Ordering::Relaxed);
+                    worker_completed.fetch_add(1, Ordering::Relaxed);
                     if result_tx.send(response).is_err() {
+                        worker_completed.fetch_sub(1, Ordering::Relaxed);
                         break;
                     }
                 }
@@ -103,6 +121,8 @@ impl ImageDecodeWorker {
         Ok(Self {
             request_tx,
             result_rx,
+            queued_or_running,
+            completed_unread,
             _thread: thread,
         })
     }
@@ -110,6 +130,9 @@ impl ImageDecodeWorker {
     pub fn try_submit(&self, request: ImageDecodeRequest) -> Result<(), ImageDecodeSubmitError> {
         self.request_tx
             .try_send(request)
+            .map(|()| {
+                self.queued_or_running.fetch_add(1, Ordering::Relaxed);
+            })
             .map_err(|error| match error {
                 TrySendError::Full(request) => ImageDecodeSubmitError::QueueFull(request),
                 TrySendError::Disconnected(request) => {
@@ -120,14 +143,28 @@ impl ImageDecodeWorker {
 
     pub fn try_recv(&self) -> Result<Option<ImageDecodeResult>, TryRecvError> {
         match self.result_rx.try_recv() {
-            Ok(result) => Ok(Some(result)),
+            Ok(result) => {
+                self.completed_unread.fetch_sub(1, Ordering::Relaxed);
+                Ok(Some(result))
+            }
             Err(TryRecvError::Empty) => Ok(None),
             Err(error @ TryRecvError::Disconnected) => Err(error),
         }
     }
 
     pub fn recv_timeout(&self, timeout: Duration) -> Result<ImageDecodeResult, RecvTimeoutError> {
-        self.result_rx.recv_timeout(timeout)
+        let result = self.result_rx.recv_timeout(timeout)?;
+        self.completed_unread.fetch_sub(1, Ordering::Relaxed);
+        Ok(result)
+    }
+
+    #[must_use]
+    pub fn stats(&self) -> ImageDecodeWorkerStats {
+        ImageDecodeWorkerStats {
+            queued_or_running: self.queued_or_running.load(Ordering::Relaxed),
+            completed_unread: self.completed_unread.load(Ordering::Relaxed),
+            queue_capacity: IMAGE_DECODE_QUEUE_CAPACITY,
+        }
     }
 }
 
