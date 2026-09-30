@@ -128,17 +128,19 @@ impl ImageDecodeWorker {
     }
 
     pub fn try_submit(&self, request: ImageDecodeRequest) -> Result<(), ImageDecodeSubmitError> {
-        self.request_tx
-            .try_send(request)
-            .map(|()| {
-                self.queued_or_running.fetch_add(1, Ordering::Relaxed);
-            })
-            .map_err(|error| match error {
-                TrySendError::Full(request) => ImageDecodeSubmitError::QueueFull(request),
-                TrySendError::Disconnected(request) => {
-                    ImageDecodeSubmitError::Disconnected(request)
-                }
-            })
+        self.queued_or_running.fetch_add(1, Ordering::Relaxed);
+        match self.request_tx.try_send(request) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.queued_or_running.fetch_sub(1, Ordering::Relaxed);
+                Err(match error {
+                    TrySendError::Full(request) => ImageDecodeSubmitError::QueueFull(request),
+                    TrySendError::Disconnected(request) => {
+                        ImageDecodeSubmitError::Disconnected(request)
+                    }
+                })
+            }
+        }
     }
 
     pub fn try_recv(&self) -> Result<Option<ImageDecodeResult>, TryRecvError> {
