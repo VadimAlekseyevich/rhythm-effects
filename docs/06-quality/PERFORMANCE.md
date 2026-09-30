@@ -307,6 +307,23 @@ Version-controlled generated/redistributable fixtures:
 - Timeline Stress;
 - Long Audio.
 
+AI-297–303 implement these as deterministic code-generated fixtures in
+`rhythm_engine::benchmark_fixtures`. Empty has no objects or keys. Basic
+Rhythm has exactly 10 objects/100 keyframes and generated 3-minute mono audio.
+Medium Motion has exactly 100 objects/1,000 keyframes at 1080p, mixed
+rectangle/ellipse/text/generated-image content, representative effects and
+the generated 10-minute audio track. Text Heavy has 50 Latin/Cyrillic
+TextObjects with multiple requested font families and animated transforms/
+colors. Effects Heavy has 30 objects carrying all five MVP effects.
+Timeline Stress uses 500 objects, 10,500 keyframes and a 4K composition.
+Long Audio is a deterministic 48 kHz mono 10-minute PCM WAV generator.
+
+Generated image bytes and WAV files can be materialized beside a benchmark
+project on demand. Long WAV generation streams bounded 8,192-frame chunks
+directly to disk rather than retaining another full PCM buffer. CI validates
+Project invariants, exact fixture counts, deterministic regeneration and WAV
+metadata; hardware timing measurements remain the separate AI-310+ tasks.
+
 No copyrighted test media is required.
 
 ## 23. Regression policy
