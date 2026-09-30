@@ -213,6 +213,17 @@ Release-critical.
 
 Use generated fixture with audio clicks and visual flashes at known ProjectTimeNs.
 
+AI-293 adds a binary-free generated fixture. A single event schedule at exact
+1/2/3/4-second ProjectTimeNs drives both mono 48 kHz PCM16 WAV click onsets
+and Hold-interpolated opacity flashes in a five-second Project. The Project
+uses an ordinary relative audio AssetSource and 60 BPM tempo, so each event
+also lands exactly on a known PPQ tick. Tests verify the sample immediately
+before every click is silent, the click onset sample is nonzero, scene
+evaluation is dark immediately before the event and fully visible at the
+event, the generated WAV probes through the production audio backend, and
+the entire Project/media payload is deterministic. Longer-duration encoded
+sync validation is AI-294.
+
 No cumulative sync drift is allowed.
 
 Export timing does not depend on realtime audio clock.
