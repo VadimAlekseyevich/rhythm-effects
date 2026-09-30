@@ -987,6 +987,26 @@ pub struct DiagnosticsView {
     pub backend: String,
     pub window_size: [u32; 2],
     pub frame_time_ms: f32,
+    pub frame_p50_ms: f32,
+    pub frame_p95_ms: f32,
+    pub frame_samples: usize,
+    pub ui_cpu_ms: f32,
+    pub timeline_cpu_ms: f32,
+    pub animation_eval_ms: f32,
+    pub animation_eval_calls: u64,
+    pub renderer_cpu_ms: f32,
+    pub render_passes: u64,
+    pub draw_calls: u64,
+    pub isolated_objects: u64,
+    pub texture_uploads: u64,
+    pub temporary_free: usize,
+    pub temporary_allocations: usize,
+    pub temporary_reuses: usize,
+    pub background_in_flight: usize,
+    pub background_queued: usize,
+    pub project_memory_bytes: u64,
+    pub waveform_memory_bytes: u64,
+    pub gpu_memory_bytes: u64,
 }
 
 pub fn configure_theme(context: &egui::Context) {
@@ -1464,7 +1484,44 @@ pub fn draw_editor_shell(
                 "Window: {} × {}",
                 diagnostics.window_size[0], diagnostics.window_size[1]
             ));
-            ui.label(format!("Frame: {:.2} ms", diagnostics.frame_time_ms));
+            ui.label(format!(
+                "Frame: {:.2} ms | p50 {:.2} | p95 {:.2} (n={})",
+                diagnostics.frame_time_ms,
+                diagnostics.frame_p50_ms,
+                diagnostics.frame_p95_ms,
+                diagnostics.frame_samples
+            ));
+            ui.label(format!(
+                "CPU: UI {:.2} ms | timeline {:.2} ms | animation {:.2} ms ({} evals) | renderer {:.2} ms",
+                diagnostics.ui_cpu_ms,
+                diagnostics.timeline_cpu_ms,
+                diagnostics.animation_eval_ms,
+                diagnostics.animation_eval_calls,
+                diagnostics.renderer_cpu_ms
+            ));
+            ui.label(format!(
+                "Renderer: {} passes | {} owned draws | {} isolated | {} uploads",
+                diagnostics.render_passes,
+                diagnostics.draw_calls,
+                diagnostics.isolated_objects,
+                diagnostics.texture_uploads
+            ));
+            ui.label(format!(
+                "Temp targets: {} free | {} allocations | {} reuses",
+                diagnostics.temporary_free,
+                diagnostics.temporary_allocations,
+                diagnostics.temporary_reuses
+            ));
+            ui.label(format!(
+                "Background: {} running | {} queued",
+                diagnostics.background_in_flight, diagnostics.background_queued
+            ));
+            ui.label(format!(
+                "Memory est.: Project {:.1} MiB | waveform {:.1} MiB | renderer GPU {:.1} MiB",
+                diagnostics.project_memory_bytes as f64 / (1024.0 * 1024.0),
+                diagnostics.waveform_memory_bytes as f64 / (1024.0 * 1024.0),
+                diagnostics.gpu_memory_bytes as f64 / (1024.0 * 1024.0)
+            ));
             ui.take_available_space();
         });
 
