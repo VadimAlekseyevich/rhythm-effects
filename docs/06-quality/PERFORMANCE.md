@@ -293,6 +293,26 @@ Debug build includes an opt-in diagnostics overlay showing at least:
 - audio errors/clock state;
 - approximate major memory buckets.
 
+AI-304–309 establish the measurement plumbing without turning diagnostics
+itself into a frame hitch. Frame timing uses a bounded 240-sample window with
+nearest-rank p50/p95 and O(1) recording. The app separately measures full
+egui CPU and timeline draw CPU. Every scene-evaluation call records elapsed
+animation/object/effect evaluation in thread-local counters, so export-worker
+timing cannot contaminate the editor UI thread. Renderer-owned operations
+record CPU encode time, render passes, fullscreen draws, isolated objects,
+texture uploads and cumulative temporary-target allocation/reuse counts.
+
+Background diagnostics expose recovery in-flight/queued work in the overlay;
+the image decode worker independently exposes queued/running and completed-
+unread counts for its bounded channel. Approximate memory buckets cover the
+semantic Project, waveform pyramids, renderer composition/preview/image/free
+temporary GPU allocations, existing audio playback-buffer byte reporting,
+and the fixed three-buffer export readback allocation. Expensive Project/
+waveform estimates refresh at most once per second rather than each frame.
+Renderer draw counts deliberately include only renderer-owned fullscreen
+draws; object-content callback draws must be added by the future scene draw
+path instead of being guessed.
+
 Use tracing for subsystem spans/events.
 
 ## 22. Benchmark fixtures
