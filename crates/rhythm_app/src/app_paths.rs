@@ -64,12 +64,7 @@ impl AppPaths {
         // Create the app root first, then every owned subdirectory. Existing
         // files at any expected directory cause an error; nothing is removed.
         fs::create_dir_all(&paths.root)?;
-        for directory in [
-            &paths.settings,
-            &paths.logs,
-            &paths.recovery,
-            &paths.cache,
-        ] {
+        for directory in [&paths.settings, &paths.logs, &paths.recovery, &paths.cache] {
             fs::create_dir_all(directory)?;
         }
         Ok(paths)
