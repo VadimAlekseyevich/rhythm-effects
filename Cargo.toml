@@ -34,3 +34,18 @@ glyphon = "=0.12.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+
+# Explicit MVP release profile. These values match Cargo's release defaults;
+# performance tuning (LTO/codegen/panic strategy) requires measured evidence.
+[profile.release]
+opt-level = 3
+debug = false
+strip = "none"
+debug-assertions = false
+overflow-checks = false
+lto = false
+panic = "unwind"
+incremental = false
+codegen-units = 16
+rpath = false

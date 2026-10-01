@@ -49,6 +49,16 @@ AI-332 remains the clean-machine execution proof.
 
 Use an explicit Cargo release profile.
 
+AI-323 makes the MVP release profile explicit in Cargo.toml while preserving
+Cargo's documented release defaults: opt-level=3, no debug info/stripping,
+debug assertions and overflow checks off, LTO off, unwind panics,
+incremental off, 16 codegen units and rpath off. Platform-specific
+split-debuginfo remains intentionally unspecified. Because these values are
+identical to the prior implicit Cargo release profile, the configuration
+introduces no compiler/linker build-time delta by construction; it also
+avoids claiming an unmeasured runtime gain. Absolute clean release build time
+on the recorded reference machine remains the AI-315 baseline measurement.
+
 Do not enable maximal LTO/codegen settings automatically if release-build cost becomes unreasonable without measured runtime benefit.
 
 Record final profile in Cargo.toml and PERFORMANCE baseline.
