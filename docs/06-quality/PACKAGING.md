@@ -92,6 +92,17 @@ Package includes required notices/licenses for:
 
 Maintain provenance/version information for bundled binaries/assets.
 
+AI-330 records the human-readable release provenance in
+packaging/THIRD_PARTY_PROVENANCE.md and a machine-readable component list in
+packaging/third-party-manifest.json. The record identifies the exact pinned
+FFmpeg artifact/checksum/license boundary, both redistributed Inter font
+files and their OFL/upstream source commits, and explicitly distinguishes
+project-authored generated fixtures from user-owned imported media. Cargo.lock
+remains the exact Rust package version/checksum record; AI-340 owns final
+reachable-dependency/advisory review. Package assembly must copy the Inter
+OFL and applicable FFmpeg/GPL/source notices rather than relying on links
+that may disappear.
+
 ## 6. App data
 
 Use appropriate Windows per-user local data directories.
