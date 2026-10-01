@@ -25,6 +25,35 @@ pub enum FfmpegBundleError {
     MissingRequiredEncoder(&'static str),
 }
 
+impl FfmpegBundleError {
+    /// Stable short copy suitable for an export dialog. Technical details
+    /// (path, exit status, OS error) remain available in the structured error
+    /// for logs and diagnostics.
+    #[must_use]
+    pub const fn user_message(&self) -> &'static str {
+        match self {
+            Self::InvalidApplicationExecutable => {
+                "Rhythm Effects could not determine its portable package location."
+            }
+            Self::MissingBundledExecutable(_) => {
+                "Bundled FFmpeg is missing. Re-extract the complete Rhythm Effects package."
+            }
+            Self::ProbeSpawn(_) | Self::EncoderProbeSpawn(_) => {
+                "Bundled FFmpeg could not start. It may be blocked or quarantined by Windows security software."
+            }
+            Self::ProbeFailed(_) | Self::EncoderProbeFailed(_) => {
+                "Bundled FFmpeg started but its self-check failed. Re-extract the release package."
+            }
+            Self::MissingVersionBanner | Self::UnexpectedVersion { .. } => {
+                "The bundled FFmpeg version does not match this Rhythm Effects release."
+            }
+            Self::MissingRequiredEncoder(_) => {
+                "Bundled FFmpeg is missing a required H.264 or AAC encoder."
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FfmpegBundleVersion {
     pub executable: PathBuf,
@@ -227,6 +256,58 @@ mod tests {
         let deceptive = b"Encoders:\n V....D libx264rgb H.264 RGB\n A..... aac_latm LATM AAC\n";
         assert!(!encoder_list_contains(deceptive, REQUIRED_H264_ENCODER));
         assert!(!encoder_list_contains(deceptive, REQUIRED_AAC_ENCODER));
+    }
+
+    #[test]
+    fn missing_bundle_has_actionable_user_message() {
+        let missing = std::env::temp_dir().join("rhythm-missing-ffmpeg.exe");
+        let error = super::check_bundled_ffmpeg_version(&missing).expect_err("missing");
+        assert_eq!(
+            error.user_message(),
+            "Bundled FFmpeg is missing. Re-extract the complete Rhythm Effects package."
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn invalid_or_quarantined_executable_has_actionable_user_message() {
+        use std::{
+            fs,
+            path::PathBuf,
+            sync::atomic::{AtomicU64, Ordering},
+        };
+
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root: PathBuf = std::env::temp_dir().join(format!(
+            "rhythm-blocked-ffmpeg-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("create isolated temp directory");
+        let fake = root.join("ffmpeg.exe");
+        fs::write(&fake, b"not a Windows executable").expect("write fake executable");
+
+        let error = super::check_bundled_ffmpeg_version(&fake).expect_err("must not execute");
+        assert!(matches!(error, FfmpegBundleError::ProbeSpawn(_)));
+        assert_eq!(
+            error.user_message(),
+            "Bundled FFmpeg could not start. It may be blocked or quarantined by Windows security software."
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn wrong_version_and_missing_codec_have_distinct_user_messages() {
+        let wrong = parse_version_banner(b"ffmpeg version 8.0-other").expect_err("wrong");
+        assert_eq!(
+            wrong.user_message(),
+            "The bundled FFmpeg version does not match this Rhythm Effects release."
+        );
+        let missing = FfmpegBundleError::MissingRequiredEncoder(REQUIRED_H264_ENCODER);
+        assert_eq!(
+            missing.user_message(),
+            "Bundled FFmpeg is missing a required H.264 or AAC encoder."
+        );
     }
 
     #[test]
