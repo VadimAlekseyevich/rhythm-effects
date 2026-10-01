@@ -56,7 +56,14 @@ must carry the applicable FFmpeg/x264 notices and corresponding-source
 provenance; AI-330 owns that packaging documentation. This project note is
 an implementation/compliance record, not legal advice.
 
-The app resolves the bundled executable path directly.
+AI-325 resolves exactly `<package>/ffmpeg/ffmpeg.exe` relative to the
+absolute normalized running application executable. It never invokes a bare
+`ffmpeg` name and never falls back to PATH. The version probe executes only
+that resolved file with structured arguments and requires the pinned
+`9.0.2-essentials_build-www.gyan.dev` banner before export may rely on it.
+Missing files, unsafe/relative paths, process failures and version mismatch
+are separate structured errors. Unit tests keep this runtime contract aligned
+with the pinned packaging manifest.
 
 At startup or first export, verify:
 
