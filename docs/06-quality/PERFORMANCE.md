@@ -262,6 +262,12 @@ Therefore the first successful scaffold build establishes a version-controlled b
 
 Before that first measurement, architecture uses these guardrails:
 
+AI-323 explicitly records Cargo's existing release-default compiler settings
+in Cargo.toml rather than changing optimizer/linker behavior. Therefore its
+relative build-time impact versus the previously implicit release profile is
+zero by configuration; no hardware timing is inferred from that fact.
+Absolute clean debug/release and incremental timings remain AI-315.
+
 - no new heavyweight dependency without justification;
 - avoid default feature bloat;
 - only three main crates initially;
