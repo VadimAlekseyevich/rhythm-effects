@@ -8,7 +8,7 @@ use std::{
 };
 
 use rhythm_core::{
-    animation::{Animated, Keyframe},
+    animation::Animated,
     project::{EffectKind, ObjectContent, Project},
 };
 
@@ -109,7 +109,7 @@ pub struct MemoryBucketEstimates {
 }
 
 fn animated_heap_bytes<T>(animated: &Animated<T>) -> usize {
-    animated.keyframes().len() * size_of::<Keyframe<T>>()
+    size_of_val(animated.keyframes())
 }
 
 fn transform_key_bytes(object: &rhythm_core::project::Object) -> usize {
