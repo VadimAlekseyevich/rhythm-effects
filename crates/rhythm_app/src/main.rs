@@ -11,6 +11,7 @@ mod recovery_autosave;
 mod recovery_discovery;
 mod recovery_root;
 mod recovery_session;
+#[cfg(any(test, not(debug_assertions)))]
 mod release_logs;
 mod shortcuts;
 mod timeline;
