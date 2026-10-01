@@ -131,7 +131,18 @@ impl PartialExportOutput {
         self.publish_completed()
     }
 
-    fn publish_completed(mut self) -> Result<PathBuf, ExportPublicationError> {
+    fn publish_completed(self) -> Result<PathBuf, ExportPublicationError> {
+        self.publish_completed_with(
+            |staged| staged.sync_all(),
+            |partial, destination| fs::rename(partial, destination),
+        )
+    }
+
+    fn publish_completed_with(
+        mut self,
+        sync: impl FnOnce(&std::fs::File) -> io::Result<()>,
+        publish: impl FnOnce(&Path, &Path) -> io::Result<()>,
+    ) -> Result<PathBuf, ExportPublicationError> {
         let staged = OpenOptions::new()
             .read(true)
             .write(true)
@@ -141,10 +152,10 @@ impl PartialExportOutput {
         if !metadata.is_file() || metadata.len() == 0 {
             return Err(ExportPublicationError::EmptyOutput);
         }
-        staged.sync_all().map_err(ExportPublicationError::Io)?;
+        sync(&staged).map_err(ExportPublicationError::Io)?;
         drop(staged); // close before Windows rename/replace
 
-        fs::rename(&self.partial, &self.destination).map_err(ExportPublicationError::Io)?;
+        publish(&self.partial, &self.destination).map_err(ExportPublicationError::Io)?;
         self.partial = PathBuf::new();
         Ok(std::mem::take(&mut self.destination))
     }
@@ -265,6 +276,68 @@ mod tests {
         ));
         assert!(blocked.is_dir());
         assert!(!temp.exists());
+    }
+
+    #[test]
+    fn simulated_disk_full_during_sync_removes_partial_and_preserves_known_good_output() {
+        let root = TestDir::new();
+        let final_path = root.0.join("final.mp4");
+        fs::write(&final_path, b"old known good").expect("old");
+        let stage = PartialExportOutput::reserve(&final_path).expect("reserve");
+        let partial = stage.partial_path().to_path_buf();
+        fs::write(&partial, b"encoded bytes waiting for durable sync").expect("partial");
+
+        let error = stage.publish_completed_with(
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::StorageFull,
+                    "simulated disk full",
+                ))
+            },
+            |source, destination| fs::rename(source, destination),
+        );
+        assert!(matches!(
+            error,
+            Err(ExportPublicationError::Io(ref io_error))
+                if io_error.kind() == std::io::ErrorKind::StorageFull
+        ));
+        assert!(!partial.exists());
+        assert_eq!(
+            fs::read(&final_path).expect("old retained"),
+            b"old known good"
+        );
+        assert_eq!(fs::read_dir(&root.0).expect("list").count(), 1);
+    }
+
+    #[test]
+    fn simulated_read_only_destination_removes_partial_and_preserves_known_good_output() {
+        let root = TestDir::new();
+        let final_path = root.0.join("final.mp4");
+        fs::write(&final_path, b"old known good").expect("old");
+        let stage = PartialExportOutput::reserve(&final_path).expect("reserve");
+        let partial = stage.partial_path().to_path_buf();
+        fs::write(&partial, b"fully encoded bytes").expect("partial");
+
+        let error = stage.publish_completed_with(
+            |staged| staged.sync_all(),
+            |_, _| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "simulated read-only destination",
+                ))
+            },
+        );
+        assert!(matches!(
+            error,
+            Err(ExportPublicationError::Io(ref io_error))
+                if io_error.kind() == std::io::ErrorKind::PermissionDenied
+        ));
+        assert!(!partial.exists());
+        assert_eq!(
+            fs::read(&final_path).expect("old retained"),
+            b"old known good"
+        );
+        assert_eq!(fs::read_dir(&root.0).expect("list").count(), 1);
     }
 
     #[test]

@@ -383,7 +383,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-333** — Run project paths containing spaces.
 - [x] **AI-334** — Run Cyrillic/non-ASCII user/project path smoke tests.
 - [x] **AI-335** — Run missing/quarantined FFmpeg error UX test.
-- [ ] **AI-336** — Run low-disk/read-only export/save error tests.
+- [x] **AI-336** — Run low-disk/read-only export/save error tests.
 - [ ] **AI-337** — Run Windows 10 clean-machine smoke test.
 - [ ] **AI-338** — Run Windows 11 clean-machine smoke test.
 - [ ] **AI-339** — Run full release scenario from audio import through external playback of exported MP4.

@@ -572,6 +572,31 @@ mod tests {
     }
 
     #[test]
+    fn disk_full_or_permission_denied_during_save_keeps_known_good_document() {
+        use std::io;
+
+        let root = TestDir::new();
+        let destination = root.join("creative.rhfx");
+        fs::write(&destination, b"known-good").expect("existing document");
+
+        for kind in [io::ErrorKind::StorageFull, io::ErrorKind::PermissionDenied] {
+            let staged = stage_project_file_save(&project(), &destination).expect("stage");
+            let temporary = staged.temp_path().to_path_buf();
+            let result = staged.finish_with(|_| Err(io::Error::new(kind, "injected I/O failure")));
+            assert!(matches!(
+                result,
+                Err(ProjectSaveStageError::Io(ref error)) if error.kind() == kind
+            ));
+            assert!(!temporary.exists(), "failed stage must be removed");
+            assert_eq!(
+                fs::read(&destination).expect("known good retained"),
+                b"known-good"
+            );
+            assert_eq!(fs::read_dir(&root.0).expect("list").count(), 1);
+        }
+    }
+
+    #[test]
     fn failure_during_flush_or_sync_removes_temp_and_preserves_canonical() {
         use std::io::{self, Write};
 
