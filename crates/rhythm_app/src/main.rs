@@ -10,6 +10,7 @@ mod recovery_actions;
 mod recovery_autosave;
 mod recovery_discovery;
 mod recovery_root;
+mod release_logs;
 mod recovery_session;
 mod shortcuts;
 mod timeline;
@@ -1350,17 +1351,33 @@ impl ApplicationHandler for RhythmApp {
     }
 }
 
-fn init_tracing() {
+fn init_tracing() -> Result<(), Box<dyn std::error::Error>> {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    #[cfg(debug_assertions)]
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
         .compact()
         .init();
+
+    #[cfg(not(debug_assertions))]
+    {
+        let paths = app_paths::AppPaths::ensure()?;
+        let writer = release_logs::RotatingLogWriter::release(paths.logs())?;
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .compact()
+            .with_writer(writer)
+            .init();
+    }
+
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    init_tracing();
+    init_tracing()?;
 
     info!(app = APP_NAME, "starting application");
 
