@@ -2,8 +2,7 @@
 //! Normal release behavior never falls back to PATH.
 
 use std::{
-    fs,
-    io,
+    fs, io,
     path::{Component, Path, PathBuf},
     process::{Command, ExitStatus},
 };
