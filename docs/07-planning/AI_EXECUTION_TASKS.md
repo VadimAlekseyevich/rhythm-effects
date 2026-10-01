@@ -375,7 +375,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [ ] **AI-325** — Implement bundled FFmpeg path resolution and capability/version check.
 - [ ] **AI-326** — Verify bundled FFmpeg exposes the required H.264 encoder and AAC support.
 - [x] **AI-327** — Create Windows LocalAppData paths for settings/logs/recovery/cache.
-- [ ] **AI-328** — Implement bounded rotating release logs.
+- [x] **AI-328** — Implement bounded rotating release logs.
 - [ ] **AI-329** — Include app version, OS, GPU and relevant audio configuration in diagnostics logs.
 - [ ] **AI-330** — Add dependency/license provenance documentation for FFmpeg, Inter and redistributed assets.
 - [ ] **AI-331** — Create the portable Windows x86_64 ZIP layout.
