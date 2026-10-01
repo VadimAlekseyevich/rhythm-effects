@@ -377,7 +377,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-327** — Create Windows LocalAppData paths for settings/logs/recovery/cache.
 - [x] **AI-328** — Implement bounded rotating release logs.
 - [x] **AI-329** — Include app version, OS, GPU and relevant audio configuration in diagnostics logs.
-- [ ] **AI-330** — Add dependency/license provenance documentation for FFmpeg, Inter and redistributed assets.
+- [x] **AI-330** — Add dependency/license provenance documentation for FFmpeg, Inter and redistributed assets.
 - [ ] **AI-331** — Create the portable Windows x86_64 ZIP layout.
 - [ ] **AI-332** — Verify the package works without Rust, Visual Studio developer shell or FFmpeg on PATH.
 - [ ] **AI-333** — Run project paths containing spaces.
