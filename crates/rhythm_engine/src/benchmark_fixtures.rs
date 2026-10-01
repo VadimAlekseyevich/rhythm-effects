@@ -638,7 +638,9 @@ pub fn timeline_stress_benchmark_fixture() -> BenchmarkFixture {
             rectangle(&mut ids, index, 21)
         };
         if index.is_multiple_of(4) {
-            object.effects.push(one_representative_effect(&mut ids, index));
+            object
+                .effects
+                .push(one_representative_effect(&mut ids, index));
         }
         project.composition.objects.push(object);
     }
