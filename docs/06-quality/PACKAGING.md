@@ -208,6 +208,15 @@ Also test paths containing:
 - spaces;
 - Cyrillic/non-ASCII user/project names.
 
+AI-333/334 add an automated Windows filesystem smoke test that creates nested
+user/project-like directories containing spaces, Cyrillic and an additional
+non-ASCII character, performs first Save As, parses the published .rhfx,
+edits the project, then republishes over the same destination. The test runs
+in the ordinary Windows CI suite, so both first-file creation and replacement
+semantics are exercised on a real Windows filesystem path rather than only
+checking string handling. Clean-machine package launch remains a separate
+AI-332/337/338 gate.
+
 ## 14. Package failures
 
 Test:

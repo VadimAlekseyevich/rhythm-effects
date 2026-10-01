@@ -380,8 +380,8 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-330** — Add dependency/license provenance documentation for FFmpeg, Inter and redistributed assets.
 - [x] **AI-331** — Create the portable Windows x86_64 ZIP layout.
 - [ ] **AI-332** — Verify the package works without Rust, Visual Studio developer shell or FFmpeg on PATH.
-- [ ] **AI-333** — Run project paths containing spaces.
-- [ ] **AI-334** — Run Cyrillic/non-ASCII user/project path smoke tests.
+- [x] **AI-333** — Run project paths containing spaces.
+- [x] **AI-334** — Run Cyrillic/non-ASCII user/project path smoke tests.
 - [ ] **AI-335** — Run missing/quarantined FFmpeg error UX test.
 - [ ] **AI-336** — Run low-disk/read-only export/save error tests.
 - [ ] **AI-337** — Run Windows 10 clean-machine smoke test.
