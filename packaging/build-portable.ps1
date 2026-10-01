@@ -120,7 +120,14 @@ try {
     }
 
     Compress-Archive -LiteralPath $stageRoot -DestinationPath $zipPath -CompressionLevel Optimal
+
+    $zipSha = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumPath = "$zipPath.sha256"
+    "$zipSha  $([IO.Path]::GetFileName($zipPath))" |
+        Set-Content -LiteralPath $checksumPath -Encoding ascii -NoNewline
+
     Write-Output $zipPath
+    Write-Output $checksumPath
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {
