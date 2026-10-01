@@ -144,3 +144,14 @@ The application creates the complete layout idempotently after confirming
 `LOCALAPPDATA` is absolute. Missing/relative roots or blocker files are
 reported as errors and are never silently replaced. Recovery now delegates
 to this shared path contract rather than maintaining a second resolver.
+
+
+## Release logs
+
+Release builds write tracing output to `%LOCALAPPDATA%\\RhythmEffects\\logs`.
+The active `rhythm-effects.log` is limited to 2 MiB and keeps at most four
+rotated archives (five files total under normal operation). Rotation closes
+and flushes the active handle before Windows rename operations. Individual
+tracing events are buffered and committed under one mutex so concurrent
+worker threads do not interleave fragments. Debug builds keep console logging
+for developer workflows.
