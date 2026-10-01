@@ -133,3 +133,14 @@ Do not install solely for the current scaffold:
 - audio SDKs.
 
 Add tools only when the corresponding accepted implementation task requires them.
+
+
+## Runtime per-user data layout
+
+Release/runtime state never falls back to the working directory. On Windows,
+`%LOCALAPPDATA%\\RhythmEffects` is the single validated application root,
+with owned subdirectories `settings`, `logs`, `recovery`, and `cache`.
+The application creates the complete layout idempotently after confirming
+`LOCALAPPDATA` is absolute. Missing/relative roots or blocker files are
+reported as errors and are never silently replaced. Recovery now delegates
+to this shared path contract rather than maintaining a second resolver.
