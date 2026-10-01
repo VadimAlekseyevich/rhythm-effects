@@ -8,8 +8,7 @@ use std::{
     process::{Command, ExitStatus},
 };
 
-pub const PINNED_FFMPEG_VERSION_PREFIX: &str =
-    "ffmpeg version 9.0.2-essentials_build-www.gyan.dev";
+pub const PINNED_FFMPEG_VERSION_PREFIX: &str = "ffmpeg version 9.0.2-essentials_build-www.gyan.dev";
 
 #[derive(Debug)]
 pub enum FfmpegBundleError {
@@ -56,8 +55,7 @@ fn normalized_absolute(path: &Path) -> bool {
 pub fn bundled_ffmpeg_path_from_application(
     application_executable: &Path,
 ) -> Result<PathBuf, FfmpegBundleError> {
-    if !normalized_absolute(application_executable)
-        || application_executable.file_name().is_none()
+    if !normalized_absolute(application_executable) || application_executable.file_name().is_none()
     {
         return Err(FfmpegBundleError::InvalidApplicationExecutable);
     }
@@ -69,8 +67,7 @@ pub fn bundled_ffmpeg_path_from_application(
 }
 
 pub fn resolve_bundled_ffmpeg_path() -> Result<PathBuf, FfmpegBundleError> {
-    let application =
-        std::env::current_exe().map_err(FfmpegBundleError::ProbeSpawn)?;
+    let application = std::env::current_exe().map_err(FfmpegBundleError::ProbeSpawn)?;
     let path = bundled_ffmpeg_path_from_application(&application)?;
     if !path.is_file() {
         return Err(FfmpegBundleError::MissingBundledExecutable(path));
@@ -221,14 +218,14 @@ mod tests {
 
     #[test]
     fn encoder_list_requires_exact_h264_and_aac_names() {
-        let output = b"Encoders:\n V....D libx264 H.264 / AVC\n A..... aac AAC (Advanced Audio Coding)\n";
+        let output =
+            b"Encoders:\n V....D libx264 H.264 / AVC\n A..... aac AAC (Advanced Audio Coding)\n";
         assert!(encoder_list_contains(output, REQUIRED_H264_ENCODER));
         assert!(encoder_list_contains(output, REQUIRED_AAC_ENCODER));
         assert!(!encoder_list_contains(output, "h264"));
         assert!(!encoder_list_contains(output, "libx265"));
 
-        let deceptive =
-            b"Encoders:\n V....D libx264rgb H.264 RGB\n A..... aac_latm LATM AAC\n";
+        let deceptive = b"Encoders:\n V....D libx264rgb H.264 RGB\n A..... aac_latm LATM AAC\n";
         assert!(!encoder_list_contains(deceptive, REQUIRED_H264_ENCODER));
         assert!(!encoder_list_contains(deceptive, REQUIRED_AAC_ENCODER));
     }
