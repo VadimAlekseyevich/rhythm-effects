@@ -16,6 +16,7 @@ pub mod export_resolution;
 pub mod export_resources;
 pub mod export_sdr;
 pub mod export_timeline;
+pub mod ffmpeg_bundle;
 pub mod glow;
 pub mod image_decode;
 pub mod isolated_objects;
