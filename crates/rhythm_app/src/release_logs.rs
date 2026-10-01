@@ -220,6 +220,21 @@ mod tests {
     }
 
     #[test]
+    fn release_constructor_uses_bounded_production_policy() {
+        let root = TestDir::new();
+        let writer = RotatingLogWriter::release(&root.0).expect("release writer");
+        let mut event = writer.make_writer();
+        write!(event, "release-policy-smoke").expect("write");
+        event.flush().expect("flush");
+        assert!(
+            fs::metadata(root.0.join(RELEASE_LOG_FILE))
+                .expect("active release log")
+                .len()
+                > 0
+        );
+    }
+
+    #[test]
     fn rotation_is_bounded_and_each_file_respects_byte_limit() {
         let root = TestDir::new();
         let writer = RotatingLogWriter::new(&root.0, 64, 2).expect("logger");
