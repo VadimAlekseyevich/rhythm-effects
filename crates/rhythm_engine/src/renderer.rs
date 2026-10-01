@@ -762,7 +762,9 @@ impl Renderer {
         parameters: TintParameters,
     ) -> Result<(), TintError> {
         let started = Instant::now();
-        let result = self.tint.encode(device, queue, encoder, targets, parameters);
+        let result = self
+            .tint
+            .encode(device, queue, encoder, targets, parameters);
         self.record_diagnostics(
             started,
             if result.is_ok() { 1 } else { 0 },
@@ -784,7 +786,9 @@ impl Renderer {
         parameters: NoiseParameters,
     ) -> Result<(), NoiseError> {
         let started = Instant::now();
-        let result = self.noise.encode(device, queue, encoder, targets, parameters);
+        let result = self
+            .noise
+            .encode(device, queue, encoder, targets, parameters);
         self.record_diagnostics(
             started,
             if result.is_ok() { 1 } else { 0 },
