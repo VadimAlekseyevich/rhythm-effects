@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "provider": "Gyan Doshi / gyan.dev",
+  "provider_project": "GyanD/codexffmpeg",
+  "ffmpeg_version": "9.0.2",
+  "release_tag": "9.0.2",
+  "upstream_ffmpeg_commit": "946fcce07b",
+  "artifact": "ffmpeg-9.0.2-essentials_build.zip",
+  "artifact_size_bytes": 114768076,
+  "download_url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip",
+  "sha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+  "archive_root": "ffmpeg-9.0.2-essentials_build",
+  "bundled_executable_relative_path": "ffmpeg/ffmpeg.exe",
+  "source_executable_relative_path": "ffmpeg-9.0.2-essentials_build/bin/ffmpeg.exe",
+  "expected_version_prefix": "ffmpeg version 9.0.2-essentials_build-www.gyan.dev",
+  "required_encoders": [
+    "libx264",
+    "aac"
+  ],
+  "provider_declared_license": "GPL-3.0-or-later"
+}
