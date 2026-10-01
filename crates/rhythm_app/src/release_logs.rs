@@ -54,8 +54,7 @@ impl RotatingLogState {
     }
 
     fn archive_path(&self, index: usize) -> PathBuf {
-        self.directory
-            .join(format!("rhythm-effects.{index}.log"))
+        self.directory.join(format!("rhythm-effects.{index}.log"))
     }
 
     fn rotate(&mut self) -> io::Result<()> {
@@ -136,11 +135,7 @@ pub struct RotatingLogWriter {
 
 impl RotatingLogWriter {
     pub fn release(directory: &Path) -> io::Result<Self> {
-        Self::new(
-            directory,
-            RELEASE_LOG_MAX_BYTES,
-            RELEASE_LOG_ARCHIVES,
-        )
+        Self::new(directory, RELEASE_LOG_MAX_BYTES, RELEASE_LOG_ARCHIVES)
     }
 
     fn new(directory: &Path, max_bytes: u64, archives: usize) -> io::Result<Self> {
@@ -259,7 +254,12 @@ mod tests {
             write!(event, "fresh").expect("event");
         }
         assert_eq!(fs::read(&active).expect("active"), b"fresh");
-        assert_eq!(fs::metadata(root.0.join("rhythm-effects.1.log")).expect("archive").len(), 80);
+        assert_eq!(
+            fs::metadata(root.0.join("rhythm-effects.1.log"))
+                .expect("archive")
+                .len(),
+            80
+        );
     }
 
     #[test]
