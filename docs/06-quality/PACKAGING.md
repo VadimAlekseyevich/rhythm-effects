@@ -44,6 +44,18 @@ Record final profile in Cargo.toml and PERFORMANCE baseline.
 
 Bundle a pinned known FFmpeg Windows build compatible with the project's distribution/licensing choice.
 
+AI-324 pins **Gyan FFmpeg 9.0.2 Essentials x86_64** from the provider's
+versioned GitHub release asset. The exact archive URL, byte size, SHA-256,
+archive root, source executable location, expected version banner, required
+encoders and provider-declared GPL-3.0-or-later license are machine-readable
+in `packaging/ffmpeg/manifest.json`. This is deliberately a release tag,
+not a moving "latest" download. The Essentials build contains libx264 and is
+distributed by its provider as a GPLv3 static Windows build; Rhythm Effects
+uses it only across the accepted child-process boundary. Release packaging
+must carry the applicable FFmpeg/x264 notices and corresponding-source
+provenance; AI-330 owns that packaging documentation. This project note is
+an implementation/compliance record, not legal advice.
+
 The app resolves the bundled executable path directly.
 
 At startup or first export, verify:

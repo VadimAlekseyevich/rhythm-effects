@@ -371,7 +371,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 ## M12 — Package/release
 
 - [ ] **AI-323** — Create the Windows release Cargo profile and record its build-time impact.
-- [ ] **AI-324** — Choose and pin the distributable FFmpeg Windows build that satisfies project licensing requirements.
+- [x] **AI-324** — Choose and pin the distributable FFmpeg Windows build that satisfies project licensing requirements.
 - [ ] **AI-325** — Implement bundled FFmpeg path resolution and capability/version check.
 - [ ] **AI-326** — Verify bundled FFmpeg exposes the required H.264 encoder and AAC support.
 - [x] **AI-327** — Create Windows LocalAppData paths for settings/logs/recovery/cache.
