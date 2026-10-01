@@ -234,6 +234,15 @@ Test:
 - bundled FFmpeg missing/quarantined;
 - read-only output folder;
 - low disk space;
+
+AI-335 makes the missing/quarantined FFmpeg failure contract executable:
+missing package files instruct the user to re-extract the complete portable
+package; an executable that exists but cannot be started reports that Windows
+security software may have blocked/quarantined it; wrong-version and
+missing-codec cases remain distinct. Windows CI creates a fake `ffmpeg.exe`
+and proves the blocked-start path without consulting PATH. Structured paths,
+OS errors and statuses remain available for diagnostic logs while the short
+dialog copy avoids leaking raw process text.
 - non-ASCII paths;
 - cache/recovery directory unavailable;
 - antivirus warning behavior where observable.
