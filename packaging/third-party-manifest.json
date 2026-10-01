@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "name": "FFmpeg",
+      "kind": "bundled_executable",
+      "version": "9.0.2-essentials_build",
+      "provider": "Gyan Doshi / gyan.dev",
+      "license": "GPL-3.0-or-later",
+      "pin_manifest": "packaging/ffmpeg/manifest.json",
+      "package_path": "ffmpeg/ffmpeg.exe"
+    },
+    {
+      "name": "Inter Variable",
+      "kind": "bundled_font",
+      "version": "4.1-google-fonts",
+      "license": "OFL-1.1",
+      "source_commit": "66647c0bbbe41a850d79d9c76fb13add3378940f",
+      "repository_paths": [
+        "crates/rhythm_engine/assets/fonts/inter/InterVariable.ttf",
+        "crates/rhythm_engine/assets/fonts/inter/InterVariable-Italic.ttf"
+      ],
+      "license_path": "crates/rhythm_engine/assets/fonts/inter/OFL.txt",
+      "package_directory": "assets/fonts/inter"
+    }
+  ],
+  "project_authored_asset_policy": "Generated fixtures and embedded WGSL are project-authored; no third-party creative sample media is redistributed.",
+  "user_content_policy": "User projects and imported media are never release-package assets."
+}
