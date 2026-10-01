@@ -313,6 +313,50 @@ mod tests {
     }
 
     #[test]
+    fn windows_project_paths_with_spaces_cyrillic_and_non_ascii_round_trip() {
+        let root = TestDir::new();
+        let user_like = root.join("Пользователь с пробелом");
+        let project_directory = user_like.join("Проекты").join("Ритм ✨");
+        fs::create_dir_all(&project_directory).expect("unicode project directory");
+        let destination = project_directory.join("мой проект.rhfx");
+        let mut editor = dirty_editor();
+        let expected = editor.project().clone();
+        let mut canonical_path = None;
+
+        save_project_as(&mut editor, &mut canonical_path, &destination)
+            .expect("save project through Unicode/space path");
+
+        assert_eq!(canonical_path.as_deref(), Some(destination.as_path()));
+        assert!(destination.is_file());
+        let bytes = fs::read(&destination).expect("read Unicode/space project path");
+        let loaded = parse_project_file_v1(&bytes).expect("parse saved project");
+        assert_eq!(loaded.project, expected);
+        assert!(!editor.is_dirty());
+
+        // A second publication exercises replacement at the same non-ASCII
+        // destination rather than only first-file creation.
+        editor
+            .execute(EditCommand::AddAsset {
+                kind: AssetKind::Image,
+                source: AssetSource::File {
+                    path: "ещё один файл.png".into(),
+                    relative_to_project: true,
+                },
+            })
+            .expect("edit through Unicode path session");
+        save_project_as(&mut editor, &mut canonical_path, &destination)
+            .expect("replace project at Unicode/space path");
+        assert_eq!(
+            parse_project_file_v1(&fs::read(&destination).expect("re-read"))
+                .expect("re-parse")
+                .project,
+            editor.project().clone()
+        );
+        assert!(!editor.is_dirty());
+        assert_eq!(fs::read_dir(&project_directory).expect("list").count(), 1);
+    }
+
+    #[test]
     fn failed_first_save_as_does_not_assign_canonical_path() {
         let root = TestDir::new();
         let blocker = root.join("not-a-directory");
