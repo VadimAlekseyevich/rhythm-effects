@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "package_name_pattern": "RhythmEffects-<version>-windows-x86_64",
+  "required_files": [
+    "RhythmEffects.exe",
+    "ffmpeg/ffmpeg.exe",
+    "README.txt",
+    "licenses/THIRD_PARTY_PROVENANCE.md",
+    "licenses/third-party-manifest.json",
+    "licenses/ffmpeg-manifest.json",
+    "licenses/Inter-OFL-1.1.txt"
+  ],
+  "embedded_runtime_assets": [
+    "InterVariable.ttf",
+    "InterVariable-Italic.ttf",
+    "WGSL shaders"
+  ],
+  "forbidden_requirements": [
+    "Rust toolchain",
+    "Visual Studio developer shell",
+    "FFmpeg on PATH"
+  ]
+}
