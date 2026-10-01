@@ -629,7 +629,7 @@ pub fn timeline_stress_benchmark_fixture() -> BenchmarkFixture {
         settings(120_000_000_000, [3840, 2160]),
         benchmark_tempo(),
     );
-    for index in 0..500 {
+    for index in 0_usize..500 {
         let mut object = if index.is_multiple_of(5) {
             text_object(&mut ids, index, 21, 0)
         } else if index.is_multiple_of(2) {
