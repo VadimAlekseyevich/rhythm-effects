@@ -234,6 +234,9 @@ Test:
 - bundled FFmpeg missing/quarantined;
 - read-only output folder;
 - low disk space;
+- non-ASCII paths;
+- cache/recovery directory unavailable;
+- antivirus warning behavior where observable.
 
 AI-335 makes the missing/quarantined FFmpeg failure contract executable:
 missing package files instruct the user to re-extract the complete portable
@@ -243,9 +246,14 @@ missing-codec cases remain distinct. Windows CI creates a fake `ffmpeg.exe`
 and proves the blocked-start path without consulting PATH. Structured paths,
 OS errors and statuses remain available for diagnostic logs while the short
 dialog copy avoids leaking raw process text.
-- non-ASCII paths;
-- cache/recovery directory unavailable;
-- antivirus warning behavior where observable.
+
+AI-336 uses deterministic I/O fault injection rather than consuming CI disk
+space or relying on machine-specific directory ACLs. Project Save injects
+`StorageFull` and `PermissionDenied` before the staged file can become
+canonical; export injects the same classes at durable sync/publication
+boundaries after nonempty partial bytes exist. In every case the owned
+temporary file/lock is removed and an existing known-good project/MP4 remains
+byte-for-byte unchanged.
 
 Errors must be actionable.
 
