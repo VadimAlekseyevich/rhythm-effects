@@ -72,6 +72,13 @@ At startup or first export, verify:
 - H.264 encoder required by the release build is available;
 - AAC encoding is available.
 
+AI-326 extends the pinned version probe with an exact encoder-list check.
+`ffmpeg -hide_banner -encoders` must contain the standalone encoder tokens
+`libx264` and `aac`; similarly named encoders such as `libx264rgb` or
+`aac_latm` do not satisfy the release contract. Missing H.264/AAC support,
+encoder-list process failure, and version failure remain distinct structured
+errors, so export can stop before opening a destination or rendering frames.
+
 Do not silently fall back to arbitrary PATH FFmpeg in normal release behavior.
 
 ## 5. Licenses
