@@ -32,6 +32,19 @@ The app must not require:
 - Visual Studio developer environment;
 - FFmpeg on PATH.
 
+AI-331 defines the exact portable tree in packaging/portable-layout.json and
+builds it with packaging/build-portable.ps1. The builder takes the Cargo
+release rhythm_app.exe, publishes it as RhythmEffects.exe, verifies the pinned
+FFmpeg archive filename/byte-size/SHA-256 before extraction, copies only the
+pinned ffmpeg.exe into ffmpeg/, includes release README plus provenance and
+license records, and then creates RhythmEffects-<version>-windows-x86_64.zip.
+A missing/mismatched FFmpeg archive or missing license material fails package
+creation rather than producing an incomplete ZIP. Inter font bytes and WGSL
+shaders are already embedded into RhythmEffects.exe at compile time, so they
+are recorded as embedded runtime assets rather than duplicated as loose
+runtime files. CI parses the PowerShell script to prevent syntax regressions;
+AI-332 remains the clean-machine execution proof.
+
 ## 3. Release profile
 
 Use an explicit Cargo release profile.

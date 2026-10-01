@@ -22,6 +22,21 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
 
+      - name: Packaging script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "packaging/build-portable.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | Format-List | Out-String | Write-Error
+            exit 1
+          }
+
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
