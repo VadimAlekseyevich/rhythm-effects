@@ -121,6 +121,8 @@ struct RhythmApp {
     waveform: Option<rhythm_engine::waveform::WaveformData>,
     modifiers: ModifiersState,
     last_frame_instant: Option<Instant>,
+    frame_timings: rhythm_engine::diagnostics::TimingWindow,
+    last_memory_sample: Option<Instant>,
 }
 
 impl Default for RhythmApp {
@@ -155,6 +157,8 @@ impl Default for RhythmApp {
             waveform: None,
             modifiers: ModifiersState::default(),
             last_frame_instant: None,
+            frame_timings: rhythm_engine::diagnostics::TimingWindow::default(),
+            last_memory_sample: None,
         }
     }
 }
@@ -284,6 +288,26 @@ impl ApplicationHandler for RhythmApp {
                             backend: adapter.backend.clone(),
                             window_size: [window_size.width, window_size.height],
                             frame_time_ms: 0.0,
+                            frame_p50_ms: 0.0,
+                            frame_p95_ms: 0.0,
+                            frame_samples: 0,
+                            ui_cpu_ms: 0.0,
+                            timeline_cpu_ms: 0.0,
+                            animation_eval_ms: 0.0,
+                            animation_eval_calls: 0,
+                            renderer_cpu_ms: 0.0,
+                            render_passes: 0,
+                            draw_calls: 0,
+                            isolated_objects: 0,
+                            texture_uploads: 0,
+                            temporary_free: 0,
+                            temporary_allocations: 0,
+                            temporary_reuses: 0,
+                            background_in_flight: 0,
+                            background_queued: 0,
+                            project_memory_bytes: 0,
+                            waveform_memory_bytes: 0,
+                            gpu_memory_bytes: 0,
                         };
                         let composition_size = renderer.composition_size();
                         let composition_format = renderer.composition_format();
@@ -721,17 +745,18 @@ impl ApplicationHandler for RhythmApp {
                     self.egui_renderer.as_mut(),
                 ) {
                     let now = Instant::now();
-                    let frame_time_ms = self
-                        .last_frame_instant
-                        .replace(now)
-                        .map_or(0.0, |previous| {
-                            now.duration_since(previous).as_secs_f32() * 1000.0
-                        });
+                    if let Some(previous) = self.last_frame_instant.replace(now) {
+                        self.frame_timings.record(now.duration_since(previous));
+                    }
+                    let frame_timing = self.frame_timings.summary();
 
                     if let Some(diagnostics) = self.diagnostics.as_mut() {
                         let size = window.inner_size();
                         diagnostics.window_size = [size.width, size.height];
-                        diagnostics.frame_time_ms = frame_time_ms;
+                        diagnostics.frame_time_ms = frame_timing.latest_ms;
+                        diagnostics.frame_p50_ms = frame_timing.p50_ms;
+                        diagnostics.frame_p95_ms = frame_timing.p95_ms;
+                        diagnostics.frame_samples = frame_timing.samples;
                     }
 
                     let raw_input = egui_state.take_egui_input(window);
@@ -742,6 +767,7 @@ impl ApplicationHandler for RhythmApp {
                     let mut recovery_action: Option<(usize, bool)> = None;
                     let mut confirmation_change: Option<Option<usize>> = None;
                     let mut close_decision: Option<CloseDecision> = None;
+                    let ui_started = Instant::now();
                     let full_output = egui_context.run_ui(raw_input, |root_ui| {
                         if let Some(diagnostics) = self.diagnostics.as_ref() {
                             editor_ui::draw_editor_shell(
@@ -826,6 +852,59 @@ impl ApplicationHandler for RhythmApp {
                                 });
                         }
                     });
+                    let ui_cpu_ms = ui_started.elapsed().as_secs_f32() * 1000.0;
+                    let timeline_timing = timeline::take_timeline_timing();
+                    let evaluation_timing =
+                        rhythm_engine::scene_eval::take_scene_evaluation_timing();
+                    let renderer_timing = self
+                        .renderer
+                        .as_ref()
+                        .map(rhythm_engine::renderer::Renderer::take_frame_diagnostics);
+                    let recovery_stats = self
+                        .recovery_autosave
+                        .as_ref()
+                        .map(RecoveryAutosave::stats)
+                        .unwrap_or_default();
+                    let refresh_memory = self
+                        .last_memory_sample
+                        .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(1));
+
+                    if let Some(diagnostics) = self.diagnostics.as_mut() {
+                        diagnostics.ui_cpu_ms = ui_cpu_ms;
+                        diagnostics.timeline_cpu_ms = timeline_timing.total.as_secs_f32() * 1000.0;
+                        diagnostics.animation_eval_ms =
+                            evaluation_timing.total.as_secs_f32() * 1000.0;
+                        diagnostics.animation_eval_calls = evaluation_timing.calls;
+                        diagnostics.background_in_flight = recovery_stats.in_flight;
+                        diagnostics.background_queued = recovery_stats.queued;
+
+                        if let Some(renderer) = renderer_timing {
+                            diagnostics.renderer_cpu_ms = renderer.cpu_time.as_secs_f32() * 1000.0;
+                            diagnostics.render_passes = renderer.render_passes;
+                            diagnostics.draw_calls = renderer.draw_calls;
+                            diagnostics.isolated_objects = renderer.isolated_objects;
+                            diagnostics.texture_uploads = renderer.texture_uploads;
+                            diagnostics.temporary_free = renderer.temporary_textures.free;
+                            diagnostics.temporary_allocations =
+                                renderer.temporary_textures.allocations;
+                            diagnostics.temporary_reuses = renderer.temporary_textures.reuses;
+                            diagnostics.gpu_memory_bytes = renderer.gpu_estimated_bytes;
+                        }
+
+                        if refresh_memory {
+                            diagnostics.project_memory_bytes =
+                                rhythm_engine::diagnostics::estimate_project_semantic_bytes(
+                                    self.project_editor.project(),
+                                );
+                            diagnostics.waveform_memory_bytes =
+                                rhythm_engine::diagnostics::estimate_waveform_bytes(
+                                    self.waveform.as_ref(),
+                                );
+                        }
+                    }
+                    if refresh_memory {
+                        self.last_memory_sample = Some(now);
+                    }
 
                     if let Some(decision) = close_decision {
                         match decision {

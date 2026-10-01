@@ -4,6 +4,7 @@ pub mod audio;
 pub mod av_sync_fixture;
 pub mod benchmark_fixtures;
 pub mod blur;
+pub mod diagnostics;
 pub mod effect_chain;
 pub mod export_ffmpeg;
 pub mod export_job;

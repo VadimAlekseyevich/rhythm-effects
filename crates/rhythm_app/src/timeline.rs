@@ -1,3 +1,8 @@
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
+
 use crate::editor_session::{
     CurveEditorHandle, EditorSession, KeyframeDragMember, KeyframeInterpolationPreset,
 };
@@ -954,7 +959,45 @@ fn draw_curve_editor(
     painter.circle_filled(end, 3.0, foreground);
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TimelineTiming {
+    pub calls: u64,
+    pub total: Duration,
+}
+
+thread_local! {
+    static TIMELINE_TIMING: Cell<TimelineTiming> =
+        const { Cell::new(TimelineTiming { calls: 0, total: Duration::ZERO }) };
+}
+
+#[must_use]
+pub fn take_timeline_timing() -> TimelineTiming {
+    TIMELINE_TIMING.with(|metrics| {
+        metrics.replace(TimelineTiming {
+            calls: 0,
+            total: Duration::ZERO,
+        })
+    })
+}
+
 pub fn draw_timeline(
+    ui: &mut egui::Ui,
+    session: &mut EditorSession,
+    project: &Project,
+    waveform: Option<&WaveformData>,
+) {
+    let started = Instant::now();
+    draw_timeline_inner(ui, session, project, waveform);
+    TIMELINE_TIMING.with(|metrics| {
+        let current = metrics.get();
+        metrics.set(TimelineTiming {
+            calls: current.calls.saturating_add(1),
+            total: current.total.saturating_add(started.elapsed()),
+        });
+    });
+}
+
+fn draw_timeline_inner(
     ui: &mut egui::Ui,
     session: &mut EditorSession,
     project: &Project,

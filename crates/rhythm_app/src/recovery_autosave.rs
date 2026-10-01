@@ -78,6 +78,12 @@ struct RecoveryResult {
 
 /// Poll on the app event loop. It only clones a committed project on a due
 /// write/new revision and never synchronously performs recovery disk I/O.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RecoveryAutosaveStats {
+    pub in_flight: usize,
+    pub queued: usize,
+}
+
 pub struct RecoveryAutosave {
     directory: PathBuf,
     schedule: RecoverySchedule,
@@ -100,6 +106,14 @@ impl RecoveryAutosave {
             in_flight: None,
             queued: None,
             pending_clean: false,
+        }
+    }
+
+    #[must_use]
+    pub fn stats(&self) -> RecoveryAutosaveStats {
+        RecoveryAutosaveStats {
+            in_flight: usize::from(self.in_flight.is_some()),
+            queued: usize::from(self.queued.is_some()),
         }
     }
 

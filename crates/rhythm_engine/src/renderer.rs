@@ -3,7 +3,11 @@
 //! This module owns renderer/backend concerns inside `rhythm_engine`.
 //! `rhythm_core` stays independent from wgpu and other graphics APIs.
 
-use std::collections::HashMap;
+use std::{
+    cell::Cell,
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use rhythm_core::ids::AssetId;
 
@@ -98,6 +102,17 @@ impl ImageTextureCache {
 
     fn remove(&mut self, asset_id: AssetId) -> bool {
         self.entries.remove(&asset_id).is_some()
+    }
+
+    fn estimated_bytes(&self) -> u64 {
+        self.entries
+            .values()
+            .map(|image| {
+                u64::from(image.size[0])
+                    .saturating_mul(u64::from(image.size[1]))
+                    .saturating_mul(4)
+            })
+            .sum()
     }
 
     fn upload(
@@ -270,6 +285,28 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct RendererCpuCounters {
+    cpu_nanos: u64,
+    render_passes: u64,
+    draw_calls: u64,
+    isolated_objects: u64,
+    texture_uploads: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RendererFrameDiagnostics {
+    pub cpu_time: Duration,
+    pub render_passes: u64,
+    /// Renderer-owned fullscreen draws. Object-content callback draws are
+    /// deliberately not guessed and should be reported by the scene drawer.
+    pub draw_calls: u64,
+    pub isolated_objects: u64,
+    pub texture_uploads: u64,
+    pub temporary_textures: TemporaryTexturePoolStats,
+    pub gpu_estimated_bytes: u64,
+}
+
 #[derive(Debug)]
 pub struct Renderer {
     _composition_texture: wgpu::Texture,
@@ -288,6 +325,7 @@ pub struct Renderer {
     rgb_split: RgbSplit,
     tint: Tint,
     text_resources: TextResources,
+    diagnostics: Cell<RendererCpuCounters>,
 }
 
 impl Renderer {
@@ -442,6 +480,54 @@ impl Renderer {
             rgb_split: RgbSplit::new(device, COMPOSITION_FORMAT),
             tint: Tint::new(device, COMPOSITION_FORMAT),
             text_resources: TextResources::new(device, queue, COMPOSITION_FORMAT, size),
+            diagnostics: Cell::new(RendererCpuCounters::default()),
+        }
+    }
+
+    fn record_diagnostics(
+        &self,
+        started: Instant,
+        render_passes: u64,
+        draw_calls: u64,
+        isolated_objects: u64,
+        texture_uploads: u64,
+    ) {
+        let current = self.diagnostics.get();
+        let elapsed = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.diagnostics.set(RendererCpuCounters {
+            cpu_nanos: current.cpu_nanos.saturating_add(elapsed),
+            render_passes: current.render_passes.saturating_add(render_passes),
+            draw_calls: current.draw_calls.saturating_add(draw_calls),
+            isolated_objects: current.isolated_objects.saturating_add(isolated_objects),
+            texture_uploads: current.texture_uploads.saturating_add(texture_uploads),
+        });
+    }
+
+    /// Drain renderer-owned CPU/pass/draw counters for the current UI frame.
+    /// Temporary pool allocation/reuse totals remain cumulative and bounded.
+    #[must_use]
+    pub fn take_frame_diagnostics(&self) -> RendererFrameDiagnostics {
+        let counters = self.diagnostics.replace(RendererCpuCounters::default());
+        let temporary_textures = self.temporary_textures.stats();
+        let [width, height] = self.composition_size;
+        let composition_bytes = u64::from(width)
+            .saturating_mul(u64::from(height))
+            .saturating_mul(8);
+        let preview_bytes = u64::from(width)
+            .saturating_mul(u64::from(height))
+            .saturating_mul(4);
+        let gpu_estimated_bytes = composition_bytes
+            .saturating_add(preview_bytes)
+            .saturating_add(self.image_textures.estimated_bytes())
+            .saturating_add(temporary_textures.free_estimated_bytes);
+        RendererFrameDiagnostics {
+            cpu_time: Duration::from_nanos(counters.cpu_nanos),
+            render_passes: counters.render_passes,
+            draw_calls: counters.draw_calls,
+            isolated_objects: counters.isolated_objects,
+            texture_uploads: counters.texture_uploads,
+            temporary_textures,
+            gpu_estimated_bytes,
         }
     }
 
@@ -485,7 +571,18 @@ impl Renderer {
         queue: &wgpu::Queue,
         decoded: ValidatedDecodedImage,
     ) -> Result<ImageTextureUpload, ImageTextureUploadError> {
-        self.image_textures.upload(device, queue, decoded)
+        let started = Instant::now();
+        let result = self.image_textures.upload(device, queue, decoded);
+        let uploads = if matches!(
+            result,
+            Ok(ImageTextureUpload::Inserted | ImageTextureUpload::Replaced)
+        ) {
+            1
+        } else {
+            0
+        };
+        self.record_diagnostics(started, 0, 0, 0, uploads);
+        result
     }
 
     pub fn remove_image_texture(&mut self, asset_id: AssetId) -> bool {
@@ -521,13 +618,16 @@ impl Renderer {
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         )
         .expect("composition size and usage are valid");
-        self.isolated_compositor.encode_object(
+        let started = Instant::now();
+        let target = self.isolated_compositor.encode_object(
             device,
             encoder,
             &mut self.temporary_textures,
             key,
             draw,
-        )
+        );
+        self.record_diagnostics(started, 1, 0, 1, 0);
+        target
     }
 
     /// Run evaluated effects in their ordered stack using distinct pooled
@@ -547,14 +647,17 @@ impl Renderer {
             &mut TemporaryTexturePool,
         ),
     ) -> TemporaryTexture {
-        encode_ordered_effect_chain(
+        let started = Instant::now();
+        let target = encode_ordered_effect_chain(
             device,
             encoder,
             &mut self.temporary_textures,
             source,
             effects,
             encode_effect,
-        )
+        );
+        self.record_diagnostics(started, 0, 0, 0, 0);
+        target
     }
 
     /// Encode a horizontal/vertical blur between two distinct pooled targets.
@@ -569,6 +672,7 @@ impl Renderer {
         output: &TemporaryTexture,
         radius_px: f32,
     ) {
+        let started = Instant::now();
         self.blur.encode(
             device,
             queue,
@@ -577,6 +681,7 @@ impl Renderer {
             (source, output),
             radius_px,
         );
+        self.record_diagnostics(started, 2, 2, 0, 0);
     }
 
     /// Apply composition-pixel blur semantics at the active preview scale.
@@ -608,7 +713,8 @@ impl Renderer {
         output: &TemporaryTexture,
         parameters: GlowParameters,
     ) -> Result<(), GlowError> {
-        self.glow.encode(
+        let started = Instant::now();
+        let result = self.glow.encode(
             &self.blur,
             &mut GlowResources {
                 device,
@@ -619,7 +725,13 @@ impl Renderer {
             source,
             output,
             parameters,
-        )
+        );
+        if result.is_ok() {
+            self.record_diagnostics(started, 4, 4, 0, 0);
+        } else {
+            self.record_diagnostics(started, 0, 0, 0, 0);
+        }
+        result
     }
 
     /// Convert the semantic Glow radius using the resolved preview scale
@@ -649,8 +761,18 @@ impl Renderer {
         targets: (&TemporaryTexture, &TemporaryTexture),
         parameters: TintParameters,
     ) -> Result<(), TintError> {
-        self.tint
-            .encode(device, queue, encoder, targets, parameters)
+        let started = Instant::now();
+        let result = self
+            .tint
+            .encode(device, queue, encoder, targets, parameters);
+        self.record_diagnostics(
+            started,
+            if result.is_ok() { 1 } else { 0 },
+            if result.is_ok() { 1 } else { 0 },
+            0,
+            0,
+        );
+        result
     }
 
     /// Encode deterministic, alpha-preserving monochrome Noise. The semantic
@@ -663,8 +785,18 @@ impl Renderer {
         targets: (&TemporaryTexture, &TemporaryTexture),
         parameters: NoiseParameters,
     ) -> Result<(), NoiseError> {
-        self.noise
-            .encode(device, queue, encoder, targets, parameters)
+        let started = Instant::now();
+        let result = self
+            .noise
+            .encode(device, queue, encoder, targets, parameters);
+        self.record_diagnostics(
+            started,
+            if result.is_ok() { 1 } else { 0 },
+            if result.is_ok() { 1 } else { 0 },
+            0,
+            0,
+        );
+        result
     }
 
     /// Convert composition pixel-block size to the resolved preview scale,
@@ -679,7 +811,7 @@ impl Renderer {
         preview_scale: f32,
     ) -> Result<(), NoiseError> {
         let working = preview_noise_parameters(parameters, preview_scale)?;
-        self.noise.encode(device, queue, encoder, targets, working)
+        self.encode_noise(device, queue, encoder, targets, working)
     }
 
     /// Red and blue sample equal/opposite signed composition-pixel offsets
@@ -692,8 +824,18 @@ impl Renderer {
         targets: (&TemporaryTexture, &TemporaryTexture),
         parameters: RgbSplitParameters,
     ) -> Result<(), RgbSplitError> {
-        self.rgb_split
-            .encode(device, queue, encoder, targets, parameters)
+        let started = Instant::now();
+        let result = self
+            .rgb_split
+            .encode(device, queue, encoder, targets, parameters);
+        self.record_diagnostics(
+            started,
+            if result.is_ok() { 1 } else { 0 },
+            if result.is_ok() { 1 } else { 0 },
+            0,
+            0,
+        );
+        result
     }
 
     /// Convert displacement into working preview pixels without rewriting
@@ -708,8 +850,7 @@ impl Renderer {
         preview_scale: f32,
     ) -> Result<(), RgbSplitError> {
         let working = preview_rgb_split_parameters(parameters, preview_scale)?;
-        self.rgb_split
-            .encode(device, queue, encoder, targets, working)
+        self.encode_rgb_split(device, queue, encoder, targets, working)
     }
 
     /// Composite after all effects, then return the checkout to the pool.
@@ -720,12 +861,15 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         target: TemporaryTexture,
     ) {
+        let started = Instant::now();
         self.isolated_compositor
             .encode_composite(device, encoder, &target, &self.composition_view);
         self.temporary_textures.release(target);
+        self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
     pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let started = Instant::now();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Rhythm Effects composition clear encoder"),
         });
@@ -755,9 +899,11 @@ impl Renderer {
         }
 
         queue.submit([encoder.finish()]);
+        self.record_diagnostics(started, 1, 0, 0, 0);
     }
 
     pub fn refresh_preview_display(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let started = Instant::now();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Rhythm Effects preview conversion encoder"),
         });
@@ -785,6 +931,7 @@ impl Renderer {
         }
 
         queue.submit([encoder.finish()]);
+        self.record_diagnostics(started, 1, 1, 0, 0);
     }
 }
 
