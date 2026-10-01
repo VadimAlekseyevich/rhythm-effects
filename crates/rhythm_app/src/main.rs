@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod app_paths;
 mod editor_session;
 mod editor_ui;
 mod file_dialogs;
