@@ -52,7 +52,10 @@ impl Default for TimingWindow {
 impl TimingWindow {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
-        assert!(capacity > 0, "timing window must retain at least one sample");
+        assert!(
+            capacity > 0,
+            "timing window must retain at least one sample"
+        );
         Self {
             samples_ms: VecDeque::with_capacity(capacity),
             capacity,
@@ -129,9 +132,7 @@ fn content_heap_bytes(content: &ObjectContent) -> usize {
         }
         ObjectContent::Image(_) => 0,
         ObjectContent::Text(value) => {
-            value.text.capacity()
-                + value.font.family.capacity()
-                + animated_heap_bytes(&value.color)
+            value.text.capacity() + value.font.family.capacity() + animated_heap_bytes(&value.color)
         }
     }
 }
@@ -202,12 +203,8 @@ pub fn estimate_waveform_bytes(waveform: Option<&WaveformData>) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        TimingWindow, estimate_project_semantic_bytes, estimate_waveform_bytes,
-    };
-    use crate::benchmark_fixtures::{
-        empty_benchmark_fixture, medium_motion_benchmark_fixture,
-    };
+    use super::{TimingWindow, estimate_project_semantic_bytes, estimate_waveform_bytes};
+    use crate::benchmark_fixtures::{empty_benchmark_fixture, medium_motion_benchmark_fixture};
 
     #[test]
     fn rolling_window_is_bounded_and_uses_nearest_rank_percentiles() {
