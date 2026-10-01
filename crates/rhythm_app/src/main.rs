@@ -1377,10 +1377,36 @@ fn init_tracing() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn log_runtime_diagnostics() {
+    info!(
+        app = APP_NAME,
+        app_version = env!("CARGO_PKG_VERSION"),
+        os = std::env::consts::OS,
+        architecture = std::env::consts::ARCH,
+        family = std::env::consts::FAMILY,
+        "runtime platform diagnostics"
+    );
+
+    match rhythm_engine::audio::initialize_default_output() {
+        Ok(endpoint) => info!(
+            audio_device = endpoint.device_label(),
+            audio_sample_rate = endpoint.sample_rate(),
+            audio_channels = endpoint.channels(),
+            audio_sample_format = ?endpoint.sample_format(),
+            "default audio output diagnostics"
+        ),
+        Err(error) => warn!(
+            ?error,
+            "default audio output unavailable during diagnostics probe"
+        ),
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing()?;
 
     info!(app = APP_NAME, "starting application");
+    log_runtime_diagnostics();
 
     let event_loop = EventLoop::new()?;
     let mut app = RhythmApp::default();
