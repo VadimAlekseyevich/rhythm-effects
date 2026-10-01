@@ -871,8 +871,7 @@ impl ApplicationHandler for RhythmApp {
 
                     if let Some(diagnostics) = self.diagnostics.as_mut() {
                         diagnostics.ui_cpu_ms = ui_cpu_ms;
-                        diagnostics.timeline_cpu_ms =
-                            timeline_timing.total.as_secs_f32() * 1000.0;
+                        diagnostics.timeline_cpu_ms = timeline_timing.total.as_secs_f32() * 1000.0;
                         diagnostics.animation_eval_ms =
                             evaluation_timing.total.as_secs_f32() * 1000.0;
                         diagnostics.animation_eval_calls = evaluation_timing.calls;
@@ -880,8 +879,7 @@ impl ApplicationHandler for RhythmApp {
                         diagnostics.background_queued = recovery_stats.queued;
 
                         if let Some(renderer) = renderer_timing {
-                            diagnostics.renderer_cpu_ms =
-                                renderer.cpu_time.as_secs_f32() * 1000.0;
+                            diagnostics.renderer_cpu_ms = renderer.cpu_time.as_secs_f32() * 1000.0;
                             diagnostics.render_passes = renderer.render_passes;
                             diagnostics.draw_calls = renderer.draw_calls;
                             diagnostics.isolated_objects = renderer.isolated_objects;
