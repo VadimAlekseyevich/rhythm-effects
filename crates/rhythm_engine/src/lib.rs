@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod av_sync_fixture;
+pub mod benchmark_fixtures;
 pub mod blur;
 pub mod effect_chain;
 pub mod export_ffmpeg;
