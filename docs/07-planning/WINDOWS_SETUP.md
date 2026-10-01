@@ -155,3 +155,14 @@ and flushes the active handle before Windows rename operations. Individual
 tracing events are buffered and committed under one mutex so concurrent
 worker threads do not interleave fragments. Debug builds keep console logging
 for developer workflows.
+
+
+## Runtime diagnostics in logs
+
+At startup the log records the Rhythm Effects package version, Rust target OS
+family and architecture. A best-effort default audio-output probe records the
+selected device label, sample rate, channel count and sample format; failure
+to probe audio is logged as a warning and does not prevent application launch.
+GPU initialization already records adapter name, backend and device type when
+the window/surface is created. These fields are diagnostic metadata only and
+do not include project contents or user document paths.
