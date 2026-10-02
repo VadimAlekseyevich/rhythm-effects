@@ -320,7 +320,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [x] **AI-276** — Implement full-composition default export range.
 - [x] **AI-277** — Implement output resolution scaling while preserving composition aspect ratio.
 - [x] **AI-278** — Create export renderer state that reuses creative shader/evaluation semantics without mutating preview state.
-- [ ] **AI-279** — Render one full-resolution export frame into an offscreen target.
+- [ ] **AI-279** — Render one full-resolution export frame into an offscreen target. **Frame lifecycle foundation now evaluates the exact index and clears/draws into the output-sized offscreen target in one caller command stream; shared primitive/image/text scene rasterization remains before this can be checked off.**
 - [x] **AI-280** — Convert final frame to standard SDR RGBA/BGRA readback representation.
 - [x] **AI-281** — Implement a bounded pool of at most three GPU readback/frame buffers.
 - [x] **AI-282** — Spawn bundled/resolved FFmpeg through structured process arguments, never cmd.exe shell interpolation.
