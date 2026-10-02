@@ -868,12 +868,12 @@ impl Renderer {
         self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
-    pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    /// Encode a deterministic opaque-black composition clear into the caller's
+    /// command stream. Export uses this form so creative drawing, SDR conversion
+    /// and readback can stay ordered in one submission without a hidden queue
+    /// submit between frame stages.
+    pub fn encode_clear_composition(&self, encoder: &mut wgpu::CommandEncoder) {
         let started = Instant::now();
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Rhythm Effects composition clear encoder"),
-        });
-
         {
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Rhythm Effects composition clear pass"),
@@ -897,9 +897,15 @@ impl Renderer {
                 multiview_mask: None,
             });
         }
-
-        queue.submit([encoder.finish()]);
         self.record_diagnostics(started, 1, 0, 0, 0);
+    }
+
+    pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Rhythm Effects composition clear encoder"),
+        });
+        self.encode_clear_composition(&mut encoder);
+        queue.submit([encoder.finish()]);
     }
 
     pub fn refresh_preview_display(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
