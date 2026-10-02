@@ -134,6 +134,27 @@ impl ExportRendererState {
         &mut self.renderer
     }
 
+    /// Start one exact-index full-resolution creative frame in the export
+    /// renderer's offscreen composition target.
+    ///
+    /// The frame is evaluated from the immutable snapshot, the output-sized
+    /// linear composition is cleared in the caller's command stream, and the
+    /// supplied draw callback receives the same Renderer type used by preview.
+    /// Keeping the callback here is deliberate while AI-279 finishes the shared
+    /// EvaluatedScene primitive/image/text rasterizer; this method owns frame
+    /// ordering without pretending that rasterizer already exists.
+    pub fn encode_creative_frame(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        frame_index: u64,
+        draw_scene: impl FnOnce(&mut Renderer, &EvaluatedScene, &mut wgpu::CommandEncoder),
+    ) -> Result<EvaluatedScene, ExportFrameError> {
+        let scene = self.plan.evaluate_frame(frame_index)?;
+        self.renderer.encode_clear_composition(encoder);
+        draw_scene(&mut self.renderer, &scene, encoder);
+        Ok(scene)
+    }
+
     #[must_use]
     pub const fn sdr_output(&self) -> &SdrExportConverter {
         &self.sdr
