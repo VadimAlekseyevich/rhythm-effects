@@ -44,6 +44,14 @@ MVP semantic channel layouts:
 
 Files with unsupported multichannel layouts fail with a clear import error rather than using an undocumented downmix.
 
+AI-090–093 keep committed generated 8 kHz mono tone fixtures for MP3, FLAC,
+OGG/Vorbis and AAC-in-M4A under `crates/rhythm_engine/tests/fixtures/audio`.
+Regression tests probe and decode each file through the normal Symphonia path,
+verify mono/sample-rate semantics, finite PCM and a non-silent result, and do not
+invoke FFmpeg at test time. The fixture README records one-time generation
+commands and SHA-256 hashes. Lossy-codec frame counts are deliberately not
+asserted because encoder delay/padding is codec/container metadata.
+
 Mono is duplicated to stereo semantics where needed.
 
 ## 4. Decode representation
