@@ -1116,6 +1116,59 @@ mod tests {
         std::env::temp_dir().join(format!("rhythm-effects-{}-{name}", std::process::id()))
     }
 
+    fn codec_fixture_path(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("audio")
+            .join(name)
+    }
+
+    fn assert_codec_fixture_decodes(name: &str) {
+        let path = codec_fixture_path(name);
+        let probe = probe_audio_file(&path).expect("fixture probe succeeds");
+        assert_eq!(probe.sample_rate, 8_000);
+        assert_eq!(probe.channel_layout, AudioChannelLayout::Mono);
+
+        let decoded = decode_audio_file(&path).expect("fixture decode succeeds");
+        assert_eq!(decoded.sample_rate, probe.sample_rate);
+        assert_eq!(decoded.channel_layout, probe.channel_layout);
+        assert!(decoded.frame_count() > 0);
+        assert!(
+            decoded
+                .interleaved_f32
+                .iter()
+                .all(|sample| sample.is_finite())
+        );
+        assert!(
+            decoded
+                .interleaved_f32
+                .iter()
+                .any(|sample| sample.abs() > 0.001),
+            "decoded tone must not be silent"
+        );
+    }
+
+    #[test]
+    fn mp3_fixture_probes_and_decodes() {
+        assert_codec_fixture_decodes("tone.mp3");
+    }
+
+    #[test]
+    fn flac_fixture_probes_and_decodes() {
+        assert_codec_fixture_decodes("tone.flac");
+    }
+
+    #[test]
+    fn ogg_vorbis_fixture_probes_and_decodes() {
+        assert_codec_fixture_decodes("tone.ogg");
+    }
+
+    #[test]
+    fn aac_m4a_fixture_probes_and_decodes() {
+        assert_codec_fixture_decodes("tone.m4a");
+    }
+
     #[test]
     fn clock_anchor_seqlock_round_trips_coherent_generation() {
         let clock = super::AtomicClockAnchor::default();
