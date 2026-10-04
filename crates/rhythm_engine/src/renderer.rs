@@ -694,7 +694,6 @@ impl Renderer {
         self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
-
     #[must_use]
     pub const fn text_resources(&self) -> &TextResources {
         &self.text_resources
