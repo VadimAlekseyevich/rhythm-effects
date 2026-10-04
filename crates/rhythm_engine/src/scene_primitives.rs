@@ -76,7 +76,13 @@ pub fn tessellate_scene_primitives(
                         size.y() * 0.5 + angle.sin() * size.y() * 0.5,
                     ]);
                 }
-                append_fan(&mut batch.vertices, object, fill, &polygon, composition_size);
+                append_fan(
+                    &mut batch.vertices,
+                    object,
+                    fill,
+                    &polygon,
+                    composition_size,
+                );
             }
             EvaluatedObjectContent::Image { .. } | EvaluatedObjectContent::Text { .. } => {
                 batch.skipped_non_primitive_objects += 1;
