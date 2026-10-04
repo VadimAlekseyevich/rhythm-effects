@@ -1019,99 +1019,6 @@ impl Renderer {
         self.encode_rgb_split(device, queue, encoder, targets, working)
     }
 
-    /// Encode one already-evaluated effect into a distinct pooled output.
-    /// Export passes its resolved spatial scale so composition-pixel semantics
-    /// remain correct at non-native output sizes.
-    fn encode_evaluated_effect(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        encoder: &mut wgpu::CommandEncoder,
-        effect: &EvaluatedEffect,
-        source: &TemporaryTexture,
-        output: &TemporaryTexture,
-        pool: &mut TemporaryTexturePool,
-        spatial_scale: f32,
-    ) {
-        match effect.kind {
-            EvaluatedEffectKind::Blur { radius_px } => self.blur.encode(
-                device,
-                queue,
-                encoder,
-                pool,
-                (source, output),
-                radius_px * spatial_scale,
-            ),
-            EvaluatedEffectKind::Glow {
-                radius_px,
-                intensity,
-                threshold,
-                color,
-            } => {
-                let _ = self.glow.encode(
-                    &self.blur,
-                    &mut GlowResources {
-                        device,
-                        queue,
-                        encoder,
-                        pool,
-                    },
-                    source,
-                    output,
-                    GlowParameters {
-                        radius_px: radius_px * spatial_scale,
-                        intensity,
-                        threshold,
-                        color,
-                    },
-                );
-            }
-            EvaluatedEffectKind::Tint { color, amount } => {
-                let _ = self.tint.encode(
-                    device,
-                    queue,
-                    encoder,
-                    (source, output),
-                    TintParameters { color, amount },
-                );
-            }
-            EvaluatedEffectKind::Noise {
-                amount,
-                size_px,
-                evolution,
-                seed,
-            } => {
-                let _ = self.noise.encode(
-                    device,
-                    queue,
-                    encoder,
-                    (source, output),
-                    NoiseParameters {
-                        amount,
-                        size_px: size_px * spatial_scale,
-                        evolution,
-                        seed,
-                    },
-                );
-            }
-            EvaluatedEffectKind::RgbSplit {
-                amount_px,
-                angle_degrees,
-            } => {
-                let _ = self.rgb_split.encode(
-                    device,
-                    queue,
-                    encoder,
-                    (source, output),
-                    RgbSplitParameters {
-                        amount_px: amount_px * spatial_scale,
-                        angle_degrees,
-                    },
-                );
-            }
-        }
-    }
-
     /// Draw one primitive object with its evaluated effect stack and composite
     /// it over the scene in painter order.
     pub fn encode_effected_primitive(
@@ -1132,7 +1039,7 @@ impl Renderer {
         .expect("composition size and usage are valid");
         let source = self.temporary_textures.acquire(device, key);
         {
-            let mut clear = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let _clear = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Rhythm Effects primitive isolation clear"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: source.view(),
@@ -1148,28 +1055,99 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            drop(clear);
         }
         self.encode_object_primitive(device, encoder, object, composition_size, source.view());
 
-        let effects = &object.effects;
-        let mut input = source;
-        for effect in effects {
-            let output = self.temporary_textures.acquire(device, key);
-            self.encode_evaluated_effect(
-                device,
-                queue,
-                encoder,
-                effect,
-                &input,
-                &output,
-                &mut self.temporary_textures,
-                spatial_scale,
-            );
-            self.temporary_textures.release(input);
-            input = output;
-        }
-        self.encode_composite_isolated(device, encoder, input);
+        let blur = &self.blur;
+        let glow = &self.glow;
+        let tint = &self.tint;
+        let noise = &self.noise;
+        let rgb_split = &self.rgb_split;
+        let target = encode_ordered_effect_chain(
+            device,
+            encoder,
+            &mut self.temporary_textures,
+            source,
+            &object.effects,
+            |encoder, effect, input, output, pool| match effect.kind {
+                EvaluatedEffectKind::Blur { radius_px } => blur.encode(
+                    device,
+                    queue,
+                    encoder,
+                    pool,
+                    (input, output),
+                    radius_px * spatial_scale,
+                ),
+                EvaluatedEffectKind::Glow {
+                    radius_px,
+                    intensity,
+                    threshold,
+                    color,
+                } => {
+                    let _ = glow.encode(
+                        blur,
+                        &mut GlowResources {
+                            device,
+                            queue,
+                            encoder,
+                            pool,
+                        },
+                        input,
+                        output,
+                        GlowParameters {
+                            radius_px: radius_px * spatial_scale,
+                            intensity,
+                            threshold,
+                            color,
+                        },
+                    );
+                }
+                EvaluatedEffectKind::Tint { color, amount } => {
+                    let _ = tint.encode(
+                        device,
+                        queue,
+                        encoder,
+                        (input, output),
+                        TintParameters { color, amount },
+                    );
+                }
+                EvaluatedEffectKind::Noise {
+                    amount,
+                    size_px,
+                    evolution,
+                    seed,
+                } => {
+                    let _ = noise.encode(
+                        device,
+                        queue,
+                        encoder,
+                        (input, output),
+                        NoiseParameters {
+                            amount,
+                            size_px: size_px * spatial_scale,
+                            evolution,
+                            seed,
+                        },
+                    );
+                }
+                EvaluatedEffectKind::RgbSplit {
+                    amount_px,
+                    angle_degrees,
+                } => {
+                    let _ = rgb_split.encode(
+                        device,
+                        queue,
+                        encoder,
+                        (input, output),
+                        RgbSplitParameters {
+                            amount_px: amount_px * spatial_scale,
+                            angle_degrees,
+                        },
+                    );
+                }
+            },
+        );
+        self.encode_composite_isolated(device, encoder, target);
     }
 
     /// Composite after all effects, then return the checkout to the pool.
