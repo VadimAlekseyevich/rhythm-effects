@@ -238,7 +238,6 @@ mod tests {
         assert_eq!(batch.vertices[0].color, [0.2, 0.1, 0.05, 0.25]);
     }
 
-
     #[test]
     fn single_object_tessellation_does_not_reorder_scene_content() {
         let rectangle = object(EvaluatedObjectContent::Rectangle {
