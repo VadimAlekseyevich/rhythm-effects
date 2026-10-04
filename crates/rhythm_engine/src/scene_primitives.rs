@@ -66,13 +66,13 @@ fn append_object_primitives(
         return;
     }
     match object.content {
-            EvaluatedObjectContent::Rectangle {
+        EvaluatedObjectContent::Rectangle {
                 size,
                 fill,
                 corner_radius,
             } => {
                 if size.x() <= 0.0 || size.y() <= 0.0 {
-                    continue;
+                    return;
                 }
                 let radius = corner_radius
                     .max(0.0)
@@ -87,9 +87,9 @@ fn append_object_primitives(
                     composition_size,
                 );
             }
-            EvaluatedObjectContent::Ellipse { size, fill } => {
+        EvaluatedObjectContent::Ellipse { size, fill } => {
                 if size.x() <= 0.0 || size.y() <= 0.0 {
-                    continue;
+                    return;
                 }
                 let mut polygon = Vec::with_capacity(ELLIPSE_SEGMENTS);
                 for segment in 0..ELLIPSE_SEGMENTS {
@@ -107,8 +107,8 @@ fn append_object_primitives(
                     composition_size,
                 );
             }
-            EvaluatedObjectContent::Image { .. } | EvaluatedObjectContent::Text { .. } => {
-                batch.skipped_non_primitive_objects += 1;
+        EvaluatedObjectContent::Image { .. } | EvaluatedObjectContent::Text { .. } => {
+            batch.skipped_non_primitive_objects += 1;
         }
     }
 }
