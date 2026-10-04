@@ -430,3 +430,11 @@ Bit-identical H.264 files are not required.
 ## 22. Definition of Done
 
 Export is MVP-ready when deterministic frames, H.264 MP4, optional AAC audio, scale/FPS overrides, sync tests, bounded readback memory, cancellation, and safe output publication all pass.
+
+
+The AI-279 primitive pass now tessellates evaluated effect-free Rectangle and
+Ellipse content on CPU, preserving transform/anchor semantics and premultiplied
+linear-alpha compositing into the export-owned Rgba16Float target. Rounded
+rectangle corners are tessellated explicitly. Objects with effects are not
+flattened by this pass; Image/Text and effect-bearing objects remain on the
+shared isolated-object path still to be wired.
