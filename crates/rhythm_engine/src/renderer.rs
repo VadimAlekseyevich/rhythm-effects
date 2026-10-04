@@ -666,7 +666,10 @@ impl Renderer {
         });
         pass.set_pipeline(&self.primitive_pipeline);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.draw(0..u32::try_from(batch.vertices.len()).unwrap_or(u32::MAX), 0..1);
+        pass.draw(
+            0..u32::try_from(batch.vertices.len()).unwrap_or(u32::MAX),
+            0..1,
+        );
         drop(pass);
         self.record_diagnostics(started, 1, 1, 0, 0);
     }
