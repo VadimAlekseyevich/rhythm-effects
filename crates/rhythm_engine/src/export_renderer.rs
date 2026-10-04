@@ -15,6 +15,7 @@ use crate::{
     export_sdr::SdrExportConverter,
     export_timeline::{ExportFrameError, ExportFrameTimeline, ExportTimelineError},
     renderer::Renderer,
+    runtime_assets::ValidatedDecodedImage,
     scene_eval::{EvaluatedObjectContent, EvaluatedScene},
 };
 
@@ -90,8 +91,21 @@ impl ExportRendererPlan {
     /// Allocate new GPU textures, independent image/text/effect caches and
     /// the very same creative shader pipelines used by the preview Renderer.
     pub fn initialize_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> ExportRendererState {
-        let renderer =
+        let mut renderer =
             Renderer::new_with_composition_size(device, queue, self.resolution.output_size());
+        for (asset_id, prepared) in &self.resources.images {
+            renderer
+                .upload_validated_image(
+                    device,
+                    queue,
+                    ValidatedDecodedImage::for_export(
+                        *asset_id,
+                        prepared.path.clone(),
+                        prepared.decoded.clone(),
+                    ),
+                )
+                .expect("preflighted export image must upload");
+        }
         let sdr = SdrExportConverter::new(
             device,
             renderer.composition_view(),
