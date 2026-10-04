@@ -15,7 +15,7 @@ use crate::{
     export_sdr::SdrExportConverter,
     export_timeline::{ExportFrameError, ExportFrameTimeline, ExportTimelineError},
     renderer::Renderer,
-    scene_eval::EvaluatedScene,
+    scene_eval::{EvaluatedObjectContent, EvaluatedScene},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -146,19 +146,44 @@ impl ExportRendererState {
     pub fn encode_creative_frame(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         frame_index: u64,
         draw_scene: impl FnOnce(&mut Renderer, &EvaluatedScene, &mut wgpu::CommandEncoder),
     ) -> Result<EvaluatedScene, ExportFrameError> {
         let scene = self.plan.evaluate_frame(frame_index)?;
         self.renderer.encode_clear_composition(encoder);
-        let settings = &self.plan.snapshot().project().settings;
-        self.renderer.encode_scene_primitives(
-            device,
-            encoder,
-            &scene,
-            [settings.composition_width, settings.composition_height],
-        );
+        let composition_size = self.plan.resolution().composition_size();
+        let (output_width, composition_width) = self.plan.resolution().scale_ratio();
+        let spatial_scale = output_width as f32 / composition_width as f32;
+
+        for object in &scene.objects {
+            match object.content {
+                EvaluatedObjectContent::Rectangle { .. }
+                | EvaluatedObjectContent::Ellipse { .. } => {
+                    if object.effects.is_empty() {
+                        let target = self.renderer.composition_view().clone();
+                        self.renderer.encode_object_primitive(
+                            device,
+                            encoder,
+                            object,
+                            composition_size,
+                            &target,
+                        );
+                    } else {
+                        self.renderer.encode_effected_primitive(
+                            device,
+                            queue,
+                            encoder,
+                            object,
+                            composition_size,
+                            spatial_scale,
+                        );
+                    }
+                }
+                EvaluatedObjectContent::Image { .. } | EvaluatedObjectContent::Text { .. } => {}
+            }
+        }
         draw_scene(&mut self.renderer, &scene, encoder);
         Ok(scene)
     }
