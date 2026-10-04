@@ -10,6 +10,7 @@ use std::{
 };
 
 use rhythm_core::ids::AssetId;
+use wgpu::util::DeviceExt;
 
 use crate::{
     blur::{BlurPreviewScaleError, SeparableBlur, preview_blur_radius},
@@ -23,7 +24,8 @@ use crate::{
     noise::{Noise, NoiseError, NoiseParameters, preview_noise_parameters},
     rgb_split::{RgbSplit, RgbSplitError, RgbSplitParameters, preview_rgb_split_parameters},
     runtime_assets::ValidatedDecodedImage,
-    scene_eval::EvaluatedEffect,
+    scene_eval::{EvaluatedEffect, EvaluatedScene},
+    scene_primitives::tessellate_scene_primitives,
     temporary_textures::{
         TemporaryTexture, TemporaryTextureKey, TemporaryTexturePool, TemporaryTexturePoolStats,
     },
@@ -285,6 +287,24 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+const PRIMITIVE_SHADER: &str = r#"
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+}
+@vertex
+fn vs_main(@location(0) position: vec2<f32>, @location(1) color: vec4<f32>) -> VertexOutput {
+    var output: VertexOutput;
+    output.position = vec4<f32>(position, 0.0, 1.0);
+    output.color = color;
+    return output;
+}
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return input.color;
+}
+"#;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct RendererCpuCounters {
     cpu_nanos: u64,
@@ -316,6 +336,7 @@ pub struct Renderer {
     preview_display_view: wgpu::TextureView,
     preview_bind_group: wgpu::BindGroup,
     preview_pipeline: wgpu::RenderPipeline,
+    primitive_pipeline: wgpu::RenderPipeline,
     image_textures: ImageTextureCache,
     temporary_textures: TemporaryTexturePool,
     isolated_compositor: IsolatedObjectCompositor,
@@ -463,6 +484,57 @@ impl Renderer {
             cache: None,
         });
 
+        let primitive_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Rhythm Effects primitive shader"),
+            source: wgpu::ShaderSource::Wgsl(PRIMITIVE_SHADER.into()),
+        });
+        let primitive_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Rhythm Effects primitive pipeline layout"),
+                bind_group_layouts: &[],
+                immediate_size: 0,
+            });
+        let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Rhythm Effects primitive pipeline"),
+            layout: Some(&primitive_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &primitive_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: 24,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 8,
+                            shader_location: 1,
+                        },
+                    ],
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &primitive_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COMPOSITION_FORMAT,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             _composition_texture: composition_texture,
             composition_view,
@@ -471,6 +543,7 @@ impl Renderer {
             preview_display_view,
             preview_bind_group,
             preview_pipeline,
+            primitive_pipeline,
             image_textures: ImageTextureCache::default(),
             temporary_textures: TemporaryTexturePool::default(),
             isolated_compositor: IsolatedObjectCompositor::new(device, COMPOSITION_FORMAT),
@@ -549,6 +622,53 @@ impl Renderer {
     #[must_use]
     pub fn preview_display_view(&self) -> &wgpu::TextureView {
         &self.preview_display_view
+    }
+
+    /// Draw effect-free Rectangle/Ellipse objects into linear composition.
+    pub fn encode_scene_primitives(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &EvaluatedScene,
+        composition_size: [u32; 2],
+    ) {
+        let started = Instant::now();
+        let batch = tessellate_scene_primitives(scene, composition_size);
+        if batch.vertices.is_empty() {
+            return;
+        }
+        let mut bytes = Vec::with_capacity(batch.vertices.len() * 24);
+        for vertex in &batch.vertices {
+            for value in vertex.position.into_iter().chain(vertex.color) {
+                bytes.extend_from_slice(&value.to_ne_bytes());
+            }
+        }
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Rhythm Effects primitive vertices"),
+            contents: &bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Rhythm Effects primitive scene pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.composition_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.primitive_pipeline);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..u32::try_from(batch.vertices.len()).unwrap_or(u32::MAX), 0..1);
+        drop(pass);
+        self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
     #[must_use]
