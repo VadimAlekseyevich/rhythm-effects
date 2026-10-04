@@ -24,8 +24,8 @@ use crate::{
     noise::{Noise, NoiseError, NoiseParameters, preview_noise_parameters},
     rgb_split::{RgbSplit, RgbSplitError, RgbSplitParameters, preview_rgb_split_parameters},
     runtime_assets::ValidatedDecodedImage,
-    scene_eval::{EvaluatedEffect, EvaluatedEffectKind, EvaluatedObject, EvaluatedScene},
-    scene_primitives::{tessellate_object_primitives, tessellate_scene_primitives},
+    scene_eval::{EvaluatedEffect, EvaluatedEffectKind, EvaluatedObject},
+    scene_primitives::tessellate_object_primitives,
     temporary_textures::{
         TemporaryTexture, TemporaryTextureKey, TemporaryTexturePool, TemporaryTexturePoolStats,
     },
@@ -694,28 +694,6 @@ impl Renderer {
         self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
-    /// Draw effect-free Rectangle/Ellipse objects into linear composition.
-    pub fn encode_scene_primitives(
-        &self,
-        device: &wgpu::Device,
-        encoder: &mut wgpu::CommandEncoder,
-        scene: &EvaluatedScene,
-        composition_size: [u32; 2],
-    ) {
-        let started = Instant::now();
-        let batch = tessellate_scene_primitives(scene, composition_size);
-        if batch.vertices.is_empty() {
-            return;
-        }
-        self.encode_primitive_batch(
-            device,
-            encoder,
-            &batch.vertices,
-            &self.composition_view,
-            "Rhythm Effects primitive scene pass",
-        );
-        self.record_diagnostics(started, 1, 1, 0, 0);
-    }
 
     #[must_use]
     pub const fn text_resources(&self) -> &TextResources {
