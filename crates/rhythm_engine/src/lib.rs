@@ -27,6 +27,7 @@ pub mod renderer;
 pub mod rgb_split;
 pub mod runtime_assets;
 pub mod scene_eval;
+pub mod scene_primitives;
 pub mod temporary_textures;
 pub mod text;
 pub mod tint;
