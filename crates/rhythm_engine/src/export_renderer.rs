@@ -145,12 +145,20 @@ impl ExportRendererState {
     /// ordering without pretending that rasterizer already exists.
     pub fn encode_creative_frame(
         &mut self,
+        device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         frame_index: u64,
         draw_scene: impl FnOnce(&mut Renderer, &EvaluatedScene, &mut wgpu::CommandEncoder),
     ) -> Result<EvaluatedScene, ExportFrameError> {
         let scene = self.plan.evaluate_frame(frame_index)?;
         self.renderer.encode_clear_composition(encoder);
+        let settings = &self.plan.snapshot().project().settings;
+        self.renderer.encode_scene_primitives(
+            device,
+            encoder,
+            &scene,
+            [settings.composition_width, settings.composition_height],
+        );
         draw_scene(&mut self.renderer, &scene, encoder);
         Ok(scene)
     }
