@@ -33,16 +33,39 @@ pub fn tessellate_scene_primitives(
         skipped_effect_objects: 0,
         skipped_non_primitive_objects: 0,
     };
-    if composition_size[0] == 0 || composition_size[1] == 0 {
-        return batch;
-    }
-
     for object in &scene.objects {
-        if !object.effects.is_empty() {
-            batch.skipped_effect_objects += 1;
-            continue;
-        }
-        match object.content {
+        append_object_primitives(&mut batch, object, composition_size);
+    }
+    batch
+}
+
+#[must_use]
+pub fn tessellate_object_primitives(
+    object: &EvaluatedObject,
+    composition_size: [u32; 2],
+) -> PrimitiveBatch {
+    let mut batch = PrimitiveBatch {
+        vertices: Vec::new(),
+        skipped_effect_objects: 0,
+        skipped_non_primitive_objects: 0,
+    };
+    append_object_primitives(&mut batch, object, composition_size);
+    batch
+}
+
+fn append_object_primitives(
+    batch: &mut PrimitiveBatch,
+    object: &EvaluatedObject,
+    composition_size: [u32; 2],
+) {
+    if composition_size[0] == 0 || composition_size[1] == 0 {
+        return;
+    }
+    if !object.effects.is_empty() {
+        batch.skipped_effect_objects += 1;
+        return;
+    }
+    match object.content {
             EvaluatedObjectContent::Rectangle {
                 size,
                 fill,
@@ -86,10 +109,8 @@ pub fn tessellate_scene_primitives(
             }
             EvaluatedObjectContent::Image { .. } | EvaluatedObjectContent::Text { .. } => {
                 batch.skipped_non_primitive_objects += 1;
-            }
         }
     }
-    batch
 }
 
 fn rounded_rectangle_polygon(width: f32, height: f32, radius: f32) -> Vec<[f32; 2]> {
@@ -173,7 +194,7 @@ fn composition_to_clip(x: f32, y: f32, size: [u32; 2]) -> [f32; 2] {
 
 #[cfg(test)]
 mod tests {
-    use super::tessellate_scene_primitives;
+    use super::{tessellate_object_primitives, tessellate_scene_primitives};
     use crate::scene_eval::{
         EvaluatedObject, EvaluatedObjectContent, EvaluatedScene, EvaluatedTransform,
     };
@@ -214,6 +235,20 @@ mod tests {
         assert_eq!(batch.vertices.len(), 12);
         assert_eq!(batch.vertices[0].position, [0.0, 0.0]);
         assert_eq!(batch.vertices[0].color, [0.2, 0.1, 0.05, 0.25]);
+    }
+
+
+    #[test]
+    fn single_object_tessellation_does_not_reorder_scene_content() {
+        let rectangle = object(EvaluatedObjectContent::Rectangle {
+            size: vec2(100.0, 50.0),
+            fill: LinearRgba::black_opaque(),
+            corner_radius: 0.0,
+        });
+        let batch = tessellate_object_primitives(&rectangle, [100, 50]);
+        assert_eq!(batch.vertices.len(), 12);
+        assert_eq!(batch.skipped_effect_objects, 0);
+        assert_eq!(batch.skipped_non_primitive_objects, 0);
     }
 
     #[test]
