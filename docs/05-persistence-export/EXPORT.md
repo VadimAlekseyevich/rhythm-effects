@@ -160,6 +160,16 @@ resizes the app preview Renderer. Hardware-free tests check that the plan
 respects resolution/FPS overrides, captures the original Project and rejects
 stretching ahead of GPU work. Upload/render/FFmpeg remain subsequent steps.
 
+AI-279 now has an explicit frame-lifecycle boundary in
+`ExportRendererState::encode_creative_frame`: an exact frame index is evaluated
+from the immutable snapshot, the output-sized linear composition target is
+cleared through the caller's existing command encoder, and a creative draw
+callback receives the export-owned `Renderer` plus the evaluated scene. The
+queue is not submitted between clear/draw/SDR/readback stages. This is
+intentional groundwork rather than a completion claim: the shared
+`EvaluatedScene` primitive/image/text rasterizer still has to replace the
+callback before AI-279 is checked off.
+
 If concurrent GPU use hurts editor responsiveness, preview can be throttled while export runs; Project editing remains semantically independent.
 
 ## 8. Render pipeline
@@ -420,3 +430,11 @@ Bit-identical H.264 files are not required.
 ## 22. Definition of Done
 
 Export is MVP-ready when deterministic frames, H.264 MP4, optional AAC audio, scale/FPS overrides, sync tests, bounded readback memory, cancellation, and safe output publication all pass.
+
+
+The AI-279 primitive pass now tessellates evaluated effect-free Rectangle and
+Ellipse content on CPU, preserving transform/anchor semantics and premultiplied
+linear-alpha compositing into the export-owned Rgba16Float target. Rounded
+rectangle corners are tessellated explicitly. Objects with effects are not
+flattened by this pass; Image/Text and effect-bearing objects remain on the
+shared isolated-object path still to be wired.

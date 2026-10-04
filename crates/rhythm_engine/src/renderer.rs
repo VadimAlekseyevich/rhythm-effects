@@ -10,6 +10,7 @@ use std::{
 };
 
 use rhythm_core::ids::AssetId;
+use wgpu::util::DeviceExt;
 
 use crate::{
     blur::{BlurPreviewScaleError, SeparableBlur, preview_blur_radius},
@@ -23,7 +24,8 @@ use crate::{
     noise::{Noise, NoiseError, NoiseParameters, preview_noise_parameters},
     rgb_split::{RgbSplit, RgbSplitError, RgbSplitParameters, preview_rgb_split_parameters},
     runtime_assets::ValidatedDecodedImage,
-    scene_eval::EvaluatedEffect,
+    scene_eval::{EvaluatedEffect, EvaluatedEffectKind, EvaluatedObject},
+    scene_primitives::tessellate_object_primitives,
     temporary_textures::{
         TemporaryTexture, TemporaryTextureKey, TemporaryTexturePool, TemporaryTexturePoolStats,
     },
@@ -285,6 +287,24 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+const PRIMITIVE_SHADER: &str = r#"
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+}
+@vertex
+fn vs_main(@location(0) position: vec2<f32>, @location(1) color: vec4<f32>) -> VertexOutput {
+    var output: VertexOutput;
+    output.position = vec4<f32>(position, 0.0, 1.0);
+    output.color = color;
+    return output;
+}
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return input.color;
+}
+"#;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct RendererCpuCounters {
     cpu_nanos: u64,
@@ -316,6 +336,7 @@ pub struct Renderer {
     preview_display_view: wgpu::TextureView,
     preview_bind_group: wgpu::BindGroup,
     preview_pipeline: wgpu::RenderPipeline,
+    primitive_pipeline: wgpu::RenderPipeline,
     image_textures: ImageTextureCache,
     temporary_textures: TemporaryTexturePool,
     isolated_compositor: IsolatedObjectCompositor,
@@ -463,6 +484,57 @@ impl Renderer {
             cache: None,
         });
 
+        let primitive_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Rhythm Effects primitive shader"),
+            source: wgpu::ShaderSource::Wgsl(PRIMITIVE_SHADER.into()),
+        });
+        let primitive_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Rhythm Effects primitive pipeline layout"),
+                bind_group_layouts: &[],
+                immediate_size: 0,
+            });
+        let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Rhythm Effects primitive pipeline"),
+            layout: Some(&primitive_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &primitive_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: 24,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 8,
+                            shader_location: 1,
+                        },
+                    ],
+                })],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &primitive_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COMPOSITION_FORMAT,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             _composition_texture: composition_texture,
             composition_view,
@@ -471,6 +543,7 @@ impl Renderer {
             preview_display_view,
             preview_bind_group,
             preview_pipeline,
+            primitive_pipeline,
             image_textures: ImageTextureCache::default(),
             temporary_textures: TemporaryTexturePool::default(),
             isolated_compositor: IsolatedObjectCompositor::new(device, COMPOSITION_FORMAT),
@@ -549,6 +622,76 @@ impl Renderer {
     #[must_use]
     pub fn preview_display_view(&self) -> &wgpu::TextureView {
         &self.preview_display_view
+    }
+
+    fn encode_primitive_batch(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        vertices: &[crate::scene_primitives::PrimitiveVertex],
+        target: &wgpu::TextureView,
+        label: &'static str,
+    ) {
+        if vertices.is_empty() {
+            return;
+        }
+        let mut bytes = Vec::with_capacity(vertices.len() * 24);
+        for vertex in vertices {
+            for value in vertex.position.into_iter().chain(vertex.color) {
+                bytes.extend_from_slice(&value.to_ne_bytes());
+            }
+        }
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Rhythm Effects primitive vertices"),
+            contents: &bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some(label),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.primitive_pipeline);
+        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.draw(0..u32::try_from(vertices.len()).unwrap_or(u32::MAX), 0..1);
+    }
+
+    /// Draw one primitive into the supplied target without changing painter
+    /// order. Effect application remains the caller's responsibility.
+    pub fn encode_object_primitive(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        object: &EvaluatedObject,
+        composition_size: [u32; 2],
+        target: &wgpu::TextureView,
+    ) {
+        let started = Instant::now();
+        let mut content_object = object.clone();
+        content_object.effects.clear();
+        let batch = tessellate_object_primitives(&content_object, composition_size);
+        if batch.vertices.is_empty() {
+            return;
+        }
+        self.encode_primitive_batch(
+            device,
+            encoder,
+            &batch.vertices,
+            target,
+            "Rhythm Effects primitive object pass",
+        );
+        self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
     #[must_use]
@@ -853,6 +996,137 @@ impl Renderer {
         self.encode_rgb_split(device, queue, encoder, targets, working)
     }
 
+    /// Draw one primitive object with its evaluated effect stack and composite
+    /// it over the scene in painter order.
+    pub fn encode_effected_primitive(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        object: &EvaluatedObject,
+        composition_size: [u32; 2],
+        spatial_scale: f32,
+    ) {
+        let key = TemporaryTextureKey::new(
+            self.composition_size[0],
+            self.composition_size[1],
+            COMPOSITION_FORMAT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        )
+        .expect("composition size and usage are valid");
+        let source = self.temporary_textures.acquire(device, key);
+        {
+            let _clear = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Rhythm Effects primitive isolation clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: source.view(),
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+        }
+        self.encode_object_primitive(device, encoder, object, composition_size, source.view());
+
+        let blur = &self.blur;
+        let glow = &self.glow;
+        let tint = &self.tint;
+        let noise = &self.noise;
+        let rgb_split = &self.rgb_split;
+        let target = encode_ordered_effect_chain(
+            device,
+            encoder,
+            &mut self.temporary_textures,
+            source,
+            &object.effects,
+            |encoder, effect, input, output, pool| match effect.kind {
+                EvaluatedEffectKind::Blur { radius_px } => blur.encode(
+                    device,
+                    queue,
+                    encoder,
+                    pool,
+                    (input, output),
+                    radius_px * spatial_scale,
+                ),
+                EvaluatedEffectKind::Glow {
+                    radius_px,
+                    intensity,
+                    threshold,
+                    color,
+                } => {
+                    let _ = glow.encode(
+                        blur,
+                        &mut GlowResources {
+                            device,
+                            queue,
+                            encoder,
+                            pool,
+                        },
+                        input,
+                        output,
+                        GlowParameters {
+                            radius_px: radius_px * spatial_scale,
+                            intensity,
+                            threshold,
+                            color,
+                        },
+                    );
+                }
+                EvaluatedEffectKind::Tint { color, amount } => {
+                    let _ = tint.encode(
+                        device,
+                        queue,
+                        encoder,
+                        (input, output),
+                        TintParameters { color, amount },
+                    );
+                }
+                EvaluatedEffectKind::Noise {
+                    amount,
+                    size_px,
+                    evolution,
+                    seed,
+                } => {
+                    let _ = noise.encode(
+                        device,
+                        queue,
+                        encoder,
+                        (input, output),
+                        NoiseParameters {
+                            amount,
+                            size_px: size_px * spatial_scale,
+                            evolution,
+                            seed,
+                        },
+                    );
+                }
+                EvaluatedEffectKind::RgbSplit {
+                    amount_px,
+                    angle_degrees,
+                } => {
+                    let _ = rgb_split.encode(
+                        device,
+                        queue,
+                        encoder,
+                        (input, output),
+                        RgbSplitParameters {
+                            amount_px: amount_px * spatial_scale,
+                            angle_degrees,
+                        },
+                    );
+                }
+            },
+        );
+        self.encode_composite_isolated(device, encoder, target);
+    }
+
     /// Composite after all effects, then return the checkout to the pool.
     /// The source cannot alias the destination composition texture.
     pub fn encode_composite_isolated(
@@ -868,12 +1142,12 @@ impl Renderer {
         self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
-    pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    /// Encode a deterministic opaque-black composition clear into the caller's
+    /// command stream. Export uses this form so creative drawing, SDR conversion
+    /// and readback can stay ordered in one submission without a hidden queue
+    /// submit between frame stages.
+    pub fn encode_clear_composition(&self, encoder: &mut wgpu::CommandEncoder) {
         let started = Instant::now();
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Rhythm Effects composition clear encoder"),
-        });
-
         {
             let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Rhythm Effects composition clear pass"),
@@ -897,9 +1171,15 @@ impl Renderer {
                 multiview_mask: None,
             });
         }
-
-        queue.submit([encoder.finish()]);
         self.record_diagnostics(started, 1, 0, 0, 0);
+    }
+
+    pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Rhythm Effects composition clear encoder"),
+        });
+        self.encode_clear_composition(&mut encoder);
+        queue.submit([encoder.finish()]);
     }
 
     pub fn refresh_preview_display(&self, device: &wgpu::Device, queue: &wgpu::Queue) {

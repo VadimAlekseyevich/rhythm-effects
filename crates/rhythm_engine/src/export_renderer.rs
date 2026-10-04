@@ -15,7 +15,8 @@ use crate::{
     export_sdr::SdrExportConverter,
     export_timeline::{ExportFrameError, ExportFrameTimeline, ExportTimelineError},
     renderer::Renderer,
-    scene_eval::EvaluatedScene,
+    runtime_assets::ValidatedDecodedImage,
+    scene_eval::{EvaluatedObjectContent, EvaluatedScene},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -90,8 +91,21 @@ impl ExportRendererPlan {
     /// Allocate new GPU textures, independent image/text/effect caches and
     /// the very same creative shader pipelines used by the preview Renderer.
     pub fn initialize_gpu(self, device: &wgpu::Device, queue: &wgpu::Queue) -> ExportRendererState {
-        let renderer =
+        let mut renderer =
             Renderer::new_with_composition_size(device, queue, self.resolution.output_size());
+        for (asset_id, prepared) in &self.resources.images {
+            renderer
+                .upload_validated_image(
+                    device,
+                    queue,
+                    ValidatedDecodedImage::for_export(
+                        *asset_id,
+                        prepared.path.clone(),
+                        prepared.decoded.clone(),
+                    ),
+                )
+                .expect("preflighted export image must upload");
+        }
         let sdr = SdrExportConverter::new(
             device,
             renderer.composition_view(),
@@ -132,6 +146,60 @@ impl ExportRendererState {
 
     pub fn renderer_mut(&mut self) -> &mut Renderer {
         &mut self.renderer
+    }
+
+    /// Start one exact-index full-resolution creative frame in the export
+    /// renderer's offscreen composition target.
+    ///
+    /// The frame is evaluated from the immutable snapshot, the output-sized
+    /// linear composition is cleared in the caller's command stream, and the
+    /// supplied draw callback receives the same Renderer type used by preview.
+    /// Keeping the callback here is deliberate while AI-279 finishes the shared
+    /// EvaluatedScene primitive/image/text rasterizer; this method owns frame
+    /// ordering without pretending that rasterizer already exists.
+    pub fn encode_creative_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame_index: u64,
+        draw_scene: impl FnOnce(&mut Renderer, &EvaluatedScene, &mut wgpu::CommandEncoder),
+    ) -> Result<EvaluatedScene, ExportFrameError> {
+        let scene = self.plan.evaluate_frame(frame_index)?;
+        self.renderer.encode_clear_composition(encoder);
+        let composition_size = self.plan.resolution().composition_size();
+        let (output_width, composition_width) = self.plan.resolution().scale_ratio();
+        let spatial_scale = output_width as f32 / composition_width as f32;
+
+        for object in &scene.objects {
+            match object.content {
+                EvaluatedObjectContent::Rectangle { .. }
+                | EvaluatedObjectContent::Ellipse { .. } => {
+                    if object.effects.is_empty() {
+                        let target = self.renderer.composition_view().clone();
+                        self.renderer.encode_object_primitive(
+                            device,
+                            encoder,
+                            object,
+                            composition_size,
+                            &target,
+                        );
+                    } else {
+                        self.renderer.encode_effected_primitive(
+                            device,
+                            queue,
+                            encoder,
+                            object,
+                            composition_size,
+                            spatial_scale,
+                        );
+                    }
+                }
+                EvaluatedObjectContent::Image { .. } | EvaluatedObjectContent::Text { .. } => {}
+            }
+        }
+        draw_scene(&mut self.renderer, &scene, encoder);
+        Ok(scene)
     }
 
     #[must_use]
