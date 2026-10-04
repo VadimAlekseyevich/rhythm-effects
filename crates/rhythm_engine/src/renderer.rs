@@ -667,8 +667,8 @@ impl Renderer {
         pass.draw(0..u32::try_from(vertices.len()).unwrap_or(u32::MAX), 0..1);
     }
 
-    /// Draw one effect-free primitive into the supplied target without
-    /// changing painter order. This is also the content stage for isolation.
+    /// Draw one primitive into the supplied target without changing painter
+    /// order. Effect application remains the caller's responsibility.
     pub fn encode_object_primitive(
         &self,
         device: &wgpu::Device,
@@ -678,7 +678,9 @@ impl Renderer {
         target: &wgpu::TextureView,
     ) {
         let started = Instant::now();
-        let batch = tessellate_object_primitives(object, composition_size);
+        let mut content_object = object.clone();
+        content_object.effects.clear();
+        let batch = tessellate_object_primitives(&content_object, composition_size);
         if batch.vertices.is_empty() {
             return;
         }
