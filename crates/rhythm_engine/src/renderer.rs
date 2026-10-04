@@ -501,7 +501,7 @@ impl Renderer {
                 module: &primitive_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: 24,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &[
@@ -516,7 +516,7 @@ impl Renderer {
                             shader_location: 1,
                         },
                     ],
-                }],
+                })],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &primitive_shader,
