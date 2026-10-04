@@ -16,6 +16,16 @@ pub struct ValidatedDecodedImage {
 
 impl ValidatedDecodedImage {
     #[must_use]
+    pub fn for_export(asset_id: AssetId, path: PathBuf, image: DecodedImage) -> Self {
+        Self {
+            asset_id,
+            generation: ImageDecodeGeneration::INITIAL,
+            path,
+            image,
+        }
+    }
+
+    #[must_use]
     pub const fn asset_id(&self) -> AssetId {
         self.asset_id
     }
