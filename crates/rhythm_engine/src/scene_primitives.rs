@@ -65,48 +65,49 @@ fn append_object_primitives(
         batch.skipped_effect_objects += 1;
         return;
     }
+
     match object.content {
         EvaluatedObjectContent::Rectangle {
-                size,
+            size,
+            fill,
+            corner_radius,
+        } => {
+            if size.x() <= 0.0 || size.y() <= 0.0 {
+                return;
+            }
+            let radius = corner_radius
+                .max(0.0)
+                .min(size.x() * 0.5)
+                .min(size.y() * 0.5);
+            let polygon = rounded_rectangle_polygon(size.x(), size.y(), radius);
+            append_fan(
+                &mut batch.vertices,
+                object,
                 fill,
-                corner_radius,
-            } => {
-                if size.x() <= 0.0 || size.y() <= 0.0 {
-                    return;
-                }
-                let radius = corner_radius
-                    .max(0.0)
-                    .min(size.x() * 0.5)
-                    .min(size.y() * 0.5);
-                let polygon = rounded_rectangle_polygon(size.x(), size.y(), radius);
-                append_fan(
-                    &mut batch.vertices,
-                    object,
-                    fill,
-                    &polygon,
-                    composition_size,
-                );
-            }
+                &polygon,
+                composition_size,
+            );
+        }
         EvaluatedObjectContent::Ellipse { size, fill } => {
-                if size.x() <= 0.0 || size.y() <= 0.0 {
-                    return;
-                }
-                let mut polygon = Vec::with_capacity(ELLIPSE_SEGMENTS);
-                for segment in 0..ELLIPSE_SEGMENTS {
-                    let angle = std::f32::consts::TAU * segment as f32 / ELLIPSE_SEGMENTS as f32;
-                    polygon.push([
-                        size.x() * 0.5 + angle.cos() * size.x() * 0.5,
-                        size.y() * 0.5 + angle.sin() * size.y() * 0.5,
-                    ]);
-                }
-                append_fan(
-                    &mut batch.vertices,
-                    object,
-                    fill,
-                    &polygon,
-                    composition_size,
-                );
+            if size.x() <= 0.0 || size.y() <= 0.0 {
+                return;
             }
+            let mut polygon = Vec::with_capacity(ELLIPSE_SEGMENTS);
+            for segment in 0..ELLIPSE_SEGMENTS {
+                let angle = std::f32::consts::TAU * segment as f32 / ELLIPSE_SEGMENTS as f32;
+                polygon.push([
+                    size.x() * 0.5 + angle.cos() * size.x() * 0.5,
+                    size.y() * 0.5 + angle.sin() * size.y() * 0.5,
+                ]);
+            }
+            append_fan(
+                &mut batch.vertices,
+                object,
+                fill,
+                &polygon,
+                composition_size,
+            );
+        }
         EvaluatedObjectContent::Image { .. } | EvaluatedObjectContent::Text { .. } => {
             batch.skipped_non_primitive_objects += 1;
         }
