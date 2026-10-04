@@ -56,7 +56,13 @@ pub fn tessellate_scene_primitives(
                     .min(size.x() * 0.5)
                     .min(size.y() * 0.5);
                 let polygon = rounded_rectangle_polygon(size.x(), size.y(), radius);
-                append_fan(&mut batch.vertices, object, fill, &polygon, composition_size);
+                append_fan(
+                    &mut batch.vertices,
+                    object,
+                    fill,
+                    &polygon,
+                    composition_size,
+                );
             }
             EvaluatedObjectContent::Ellipse { size, fill } => {
                 if size.x() <= 0.0 || size.y() <= 0.0 {
@@ -64,8 +70,7 @@ pub fn tessellate_scene_primitives(
                 }
                 let mut polygon = Vec::with_capacity(ELLIPSE_SEGMENTS);
                 for segment in 0..ELLIPSE_SEGMENTS {
-                    let angle =
-                        std::f32::consts::TAU * segment as f32 / ELLIPSE_SEGMENTS as f32;
+                    let angle = std::f32::consts::TAU * segment as f32 / ELLIPSE_SEGMENTS as f32;
                     polygon.push([
                         size.x() * 0.5 + angle.cos() * size.x() * 0.5,
                         size.y() * 0.5 + angle.sin() * size.y() * 0.5,
@@ -94,8 +99,8 @@ fn rounded_rectangle_polygon(width: f32, height: f32, radius: f32) -> Vec<[f32; 
     let mut polygon = Vec::with_capacity(corners.len() * (ROUNDED_CORNER_SEGMENTS + 1));
     for (center, start) in corners {
         for step in 0..=ROUNDED_CORNER_SEGMENTS {
-            let angle = start
-                + std::f32::consts::FRAC_PI_2 * step as f32 / ROUNDED_CORNER_SEGMENTS as f32;
+            let angle =
+                start + std::f32::consts::FRAC_PI_2 * step as f32 / ROUNDED_CORNER_SEGMENTS as f32;
             polygon.push([
                 center[0] + angle.cos() * radius,
                 center[1] + angle.sin() * radius,
