@@ -24,8 +24,8 @@ use crate::{
     noise::{Noise, NoiseError, NoiseParameters, preview_noise_parameters},
     rgb_split::{RgbSplit, RgbSplitError, RgbSplitParameters, preview_rgb_split_parameters},
     runtime_assets::ValidatedDecodedImage,
-    scene_eval::{EvaluatedEffect, EvaluatedScene},
-    scene_primitives::tessellate_scene_primitives,
+    scene_eval::{EvaluatedEffect, EvaluatedObject, EvaluatedScene},
+    scene_primitives::{tessellate_object_primitives, tessellate_scene_primitives},
     temporary_textures::{
         TemporaryTexture, TemporaryTextureKey, TemporaryTexturePool, TemporaryTexturePoolStats,
     },
@@ -624,21 +624,19 @@ impl Renderer {
         &self.preview_display_view
     }
 
-    /// Draw effect-free Rectangle/Ellipse objects into linear composition.
-    pub fn encode_scene_primitives(
+    fn encode_primitive_batch(
         &self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        scene: &EvaluatedScene,
-        composition_size: [u32; 2],
+        vertices: &[crate::scene_primitives::PrimitiveVertex],
+        target: &wgpu::TextureView,
+        label: &'static str,
     ) {
-        let started = Instant::now();
-        let batch = tessellate_scene_primitives(scene, composition_size);
-        if batch.vertices.is_empty() {
+        if vertices.is_empty() {
             return;
         }
-        let mut bytes = Vec::with_capacity(batch.vertices.len() * 24);
-        for vertex in &batch.vertices {
+        let mut bytes = Vec::with_capacity(vertices.len() * 24);
+        for vertex in vertices {
             for value in vertex.position.into_iter().chain(vertex.color) {
                 bytes.extend_from_slice(&value.to_ne_bytes());
             }
@@ -649,9 +647,9 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Rhythm Effects primitive scene pass"),
+            label: Some(label),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.composition_view,
+                view: target,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Load,
@@ -666,11 +664,54 @@ impl Renderer {
         });
         pass.set_pipeline(&self.primitive_pipeline);
         pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-        pass.draw(
-            0..u32::try_from(batch.vertices.len()).unwrap_or(u32::MAX),
-            0..1,
+        pass.draw(0..u32::try_from(vertices.len()).unwrap_or(u32::MAX), 0..1);
+    }
+
+    /// Draw one effect-free primitive into the supplied target without
+    /// changing painter order. This is also the content stage for isolation.
+    pub fn encode_object_primitive(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        object: &EvaluatedObject,
+        composition_size: [u32; 2],
+        target: &wgpu::TextureView,
+    ) {
+        let started = Instant::now();
+        let batch = tessellate_object_primitives(object, composition_size);
+        if batch.vertices.is_empty() {
+            return;
+        }
+        self.encode_primitive_batch(
+            device,
+            encoder,
+            &batch.vertices,
+            target,
+            "Rhythm Effects primitive object pass",
         );
-        drop(pass);
+        self.record_diagnostics(started, 1, 1, 0, 0);
+    }
+
+    /// Draw effect-free Rectangle/Ellipse objects into linear composition.
+    pub fn encode_scene_primitives(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        scene: &EvaluatedScene,
+        composition_size: [u32; 2],
+    ) {
+        let started = Instant::now();
+        let batch = tessellate_scene_primitives(scene, composition_size);
+        if batch.vertices.is_empty() {
+            return;
+        }
+        self.encode_primitive_batch(
+            device,
+            encoder,
+            &batch.vertices,
+            &self.composition_view,
+            "Rhythm Effects primitive scene pass",
+        );
         self.record_diagnostics(started, 1, 1, 0, 0);
     }
 
