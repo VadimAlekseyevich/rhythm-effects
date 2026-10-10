@@ -376,6 +376,14 @@ impl ApplicationHandler for RhythmApp {
                         Ok(false) => {}
                         Err(error) => warn!(?error, "keyframe drag commit failed"),
                     }
+                    match self
+                        .session
+                        .commit_pending_keyframe_easing(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "keyframe easing edit failed"),
+                    }
                     let paint_jobs =
                         egui_context.tessellate(full_output.shapes, full_output.pixels_per_point);
                     let mut textures_delta = full_output.textures_delta;
