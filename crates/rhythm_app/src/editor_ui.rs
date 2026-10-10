@@ -1,6 +1,6 @@
 use crate::{
     editor_session::{EditorSession, PreviewQuality},
-    timeline::draw_timeline,
+    timeline::{draw_easing_preset_menu, draw_timeline},
 };
 use rhythm_core::{project::Project, time::ProjectTimeNs};
 
@@ -109,7 +109,12 @@ pub fn draw_editor_shell(
         .resizable(true)
         .default_size(300.0)
         .show(ui, |ui| {
-            ui.heading("Timeline");
+            ui.horizontal(|ui| {
+                ui.heading("Timeline");
+                ui.add_enabled_ui(session.selected_keyframe_count() > 0, |ui| {
+                    ui.menu_button("Easing", |ui| draw_easing_preset_menu(ui, session));
+                });
+            });
             ui.separator();
             draw_timeline(ui, session, project, waveform);
             ui.take_available_space();
