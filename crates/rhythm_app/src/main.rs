@@ -228,8 +228,20 @@ impl ApplicationHandler for RhythmApp {
                         && !shift
                         && !alt
                         && !super_key
-                        && code == KeyCode::KeyV
+                        && code == KeyCode::KeyD
+                        && !event.repeat
                     {
+                        match self
+                            .session
+                            .duplicate_selected_keyframes(&mut self.project_editor)
+                        {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "duplicate selected keyframes failed");
+                                false
+                            }
+                        }
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyV {
                         match self
                             .session
                             .paste_keyframe_clipboard(&mut self.project_editor)

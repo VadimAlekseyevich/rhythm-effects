@@ -440,9 +440,10 @@ impl EditorSession {
             packet.entries[0].source_object_id,
             packet.entries[0].source_property,
         );
-        let single_source = packet.entries.iter().all(|entry| {
-            (entry.source_object_id, entry.source_property) == first_source
-        });
+        let single_source = packet
+            .entries
+            .iter()
+            .all(|entry| (entry.source_object_id, entry.source_property) == first_source);
         let remap_target = self.focused_property.filter(|focused| {
             single_source
                 && packet
@@ -482,6 +483,63 @@ impl EditorSession {
             return Ok(false);
         }
 
+        self.replace_keyframe_selection(new_ids);
+        Ok(true)
+    }
+
+    pub fn duplicate_selected_keyframes(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let mut selected_ids = self.selected_keyframe_ids();
+        if selected_ids.is_empty() {
+            return Ok(false);
+        }
+        selected_ids.sort_unstable();
+
+        let mut located = Vec::with_capacity(selected_ids.len());
+        for keyframe_id in selected_ids {
+            let keyframe = locate_property_keyframe(editor.project(), keyframe_id)
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+            located.push(keyframe);
+        }
+
+        let first_tick = located
+            .iter()
+            .map(|entry| entry.keyframe.tick.get())
+            .min()
+            .expect("selected keys are nonempty");
+        let last_tick = located
+            .iter()
+            .map(|entry| entry.keyframe.tick.get())
+            .max()
+            .expect("selected keys are nonempty");
+
+        // Place the copy just after the selected range, never on top of its source.
+        // Use i128 so even extreme but valid MusicalTicks cannot overflow here.
+        let delta = i128::from(last_tick) - i128::from(first_tick)
+            + i128::from(self.authoring_division.ticks_per_step());
+        let drafts = located
+            .into_iter()
+            .map(|entry| {
+                let target_tick = i128::from(entry.keyframe.tick.get()) + delta;
+                let target_tick = i64::try_from(target_tick)
+                    .map_err(|_| EditError::HistoryInvariant("duplicate tick overflow"))?;
+                Ok(PropertyKeyframeDraft {
+                    object_id: entry.object_id,
+                    property: entry.property,
+                    tick: MusicalTick::new(target_tick),
+                    value: entry.keyframe.value,
+                    interpolation: entry.keyframe.interpolation,
+                })
+            })
+            .collect::<Result<Vec<_>, EditError>>()?;
+
+        // Reuse the compound insertion command for fresh IDs, collisions, and undo.
+        let new_ids = editor.insert_property_keyframes(drafts)?;
+        if new_ids.is_empty() {
+            return Ok(false);
+        }
         self.replace_keyframe_selection(new_ids);
         Ok(true)
     }
@@ -1005,6 +1063,247 @@ mod tests {
         assert!(pasted_first.id.get() > second.get());
         assert!(session.is_keyframe_selected(pasted_first.id));
         assert!(session.is_keyframe_selected(pasted_second.id));
+    }
+
+    #[test]
+    fn duplicate_preserves_multi_property_pattern_and_selects_fresh_ids() {
+        use rhythm_core::{
+            animation::Interpolation,
+            editor::PropertyKeyframeDraft,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let source_ids = editor
+            .insert_property_keyframes(vec![
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Opacity,
+                    tick: MusicalTick::new(0),
+                    value: PropertyValue::Scalar(0.25),
+                    interpolation: Interpolation::Hold,
+                },
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Opacity,
+                    tick: MusicalTick::new(480),
+                    value: PropertyValue::Scalar(0.75),
+                    interpolation: Interpolation::Linear,
+                },
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Rotation,
+                    tick: MusicalTick::new(240),
+                    value: PropertyValue::Scalar(30.0),
+                    interpolation: Interpolation::Linear,
+                },
+            ])
+            .expect("source keys");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection(source_ids.iter().copied());
+        let history_before = editor.history_len();
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), history_before + 1);
+
+        let duplicate_ids = session.selected_keyframe_ids();
+        assert_eq!(duplicate_ids.len(), 3);
+        assert!(duplicate_ids.iter().all(|id| !source_ids.contains(id)));
+
+        for (property, tick, value, interpolation) in [
+            (
+                AnimatableProperty::Opacity,
+                720,
+                PropertyValue::Scalar(0.25),
+                Interpolation::Hold,
+            ),
+            (
+                AnimatableProperty::Opacity,
+                1_200,
+                PropertyValue::Scalar(0.75),
+                Interpolation::Linear,
+            ),
+            (
+                AnimatableProperty::Rotation,
+                960,
+                PropertyValue::Scalar(30.0),
+                Interpolation::Linear,
+            ),
+        ] {
+            let copied = property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                property,
+                MusicalTick::new(tick),
+            )
+            .expect("property")
+            .expect("duplicate key");
+            assert_eq!(copied.value, value);
+            assert_eq!(copied.interpolation, interpolation);
+            assert!(session.is_keyframe_selected(copied.id));
+        }
+
+        for (property, tick) in [
+            (AnimatableProperty::Opacity, 0),
+            (AnimatableProperty::Opacity, 480),
+            (AnimatableProperty::Rotation, 240),
+        ] {
+            assert!(
+                property_keyframe_at_tick(
+                    editor.project(),
+                    object_id,
+                    property,
+                    MusicalTick::new(tick),
+                )
+                .expect("property")
+                .is_some()
+            );
+        }
+
+        assert_eq!(editor.undo(), Ok(true));
+        for tick in [720, 1_200] {
+            assert!(
+                property_keyframe_at_tick(
+                    editor.project(),
+                    object_id,
+                    AnimatableProperty::Opacity,
+                    MusicalTick::new(tick),
+                )
+                .expect("property")
+                .is_none()
+            );
+        }
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+            )
+            .expect("property")
+            .expect("restored copy")
+            .interpolation,
+            Interpolation::Hold
+        );
+    }
+
+    #[test]
+    fn duplicate_collision_replaces_target_and_undo_restores_it() {
+        use rhythm_core::{
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.2),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(0.4),
+            )
+            .expect("insert")
+            .expect("second");
+        let occupied_id = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+                PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("occupied");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, second]);
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
+
+        let collided = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(720),
+        )
+        .expect("property")
+        .expect("new key");
+        assert_eq!(collided.value, PropertyValue::Scalar(0.2));
+        assert_ne!(collided.id, occupied_id);
+        assert!(session.is_keyframe_selected(collided.id));
+
+        assert_eq!(editor.undo(), Ok(true));
+        let restored = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(720),
+        )
+        .expect("property")
+        .expect("restored collision");
+        assert_eq!(restored.id, occupied_id);
+        assert_eq!(restored.value, PropertyValue::Scalar(0.9));
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+            )
+            .expect("property")
+            .expect("redo collision")
+            .id,
+            collided.id
+        );
+    }
+
+    #[test]
+    fn duplicate_empty_selection_and_overflow_do_not_mutate_project() {
+        use rhythm_core::{
+            editor::EditError,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(false));
+
+        let key_id = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(i64::MAX),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("key");
+        session.select_only_keyframe(key_id);
+        let project_before = editor.project().clone();
+        let history_before = editor.history_len();
+        assert_eq!(
+            session.duplicate_selected_keyframes(&mut editor),
+            Err(EditError::HistoryInvariant("duplicate tick overflow"))
+        );
+        assert_eq!(editor.project(), &project_before);
+        assert_eq!(editor.history_len(), history_before);
+        assert!(session.is_keyframe_selected(key_id));
     }
 
     #[test]
