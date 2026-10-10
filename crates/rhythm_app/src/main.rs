@@ -241,12 +241,7 @@ impl ApplicationHandler for RhythmApp {
                                 false
                             }
                         }
-                    } else if control
-                        && !shift
-                        && !alt
-                        && !super_key
-                        && code == KeyCode::KeyV
-                    {
+                    } else if control && !shift && !alt && !super_key && code == KeyCode::KeyV {
                         match self
                             .session
                             .paste_keyframe_clipboard(&mut self.project_editor)
