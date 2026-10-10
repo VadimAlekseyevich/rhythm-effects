@@ -1060,7 +1060,8 @@ mod tests {
     };
 
     use super::{
-        AudioChannelLayout, AudioDecodeError, DecodedAudio, decode_audio_file, probe_audio_file,
+        AudioChannelLayout, AudioDecodeError, DecodedAudio, ProjectTimeNs, decode_audio_file,
+        probe_audio_file,
     };
 
     fn write_pcm16_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[i16]) {
