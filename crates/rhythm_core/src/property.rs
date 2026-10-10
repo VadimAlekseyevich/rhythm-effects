@@ -406,9 +406,7 @@ pub(crate) fn set_property_keyframe_interpolation(
         AnimatedMut::Scalar(animated) => {
             animated.set_keyframe_interpolation_by_id(id, interpolation)
         }
-        AnimatedMut::Vec2(animated) => {
-            animated.set_keyframe_interpolation_by_id(id, interpolation)
-        }
+        AnimatedMut::Vec2(animated) => animated.set_keyframe_interpolation_by_id(id, interpolation),
         AnimatedMut::Color(animated) => {
             animated.set_keyframe_interpolation_by_id(id, interpolation)
         }
