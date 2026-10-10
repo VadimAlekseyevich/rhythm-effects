@@ -216,7 +216,10 @@ impl<T> Animated<T> {
         id: KeyframeId,
         interpolation: Interpolation,
     ) -> Option<Interpolation> {
-        let keyframe = self.keyframes.iter_mut().find(|keyframe| keyframe.id == id)?;
+        let keyframe = self
+            .keyframes
+            .iter_mut()
+            .find(|keyframe| keyframe.id == id)?;
         let previous = keyframe.interpolation;
         keyframe.interpolation = interpolation;
         Some(previous)
@@ -482,7 +485,10 @@ mod tests {
             let Interpolation::CubicBezier(bezier) = preset.interpolation() else {
                 panic!("named easing must resolve to cubic Bezier");
             };
-            assert_eq!([bezier.x1(), bezier.y1(), bezier.x2(), bezier.y2()], expected);
+            assert_eq!(
+                [bezier.x1(), bezier.y1(), bezier.x2(), bezier.y2()],
+                expected
+            );
             assert_eq!(super::evaluate_bezier_easing(bezier, 0.0), 0.0);
             assert_eq!(super::evaluate_bezier_easing(bezier, 1.0), 1.0);
         }
