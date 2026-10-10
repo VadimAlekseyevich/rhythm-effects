@@ -1448,7 +1448,10 @@ mod tests {
             session.commit_pending_keyframe_easing(&mut editor),
             Ok(true)
         );
-        assert_eq!(get(&editor, AnimatableProperty::Opacity, 0), Interpolation::Linear);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Linear
+        );
     }
 
     #[test]
