@@ -381,6 +381,40 @@ pub(crate) fn insert_property_keyframe(
     }
 }
 
+/// Returns whether a keyframe owns a following segment on its property.
+pub fn property_keyframe_has_successor(
+    project: &Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    tick: MusicalTick,
+) -> Result<bool, PropertyAccessError> {
+    Ok(match animated_ref(project, object_id, property)? {
+        AnimatedRef::Scalar(animated) => animated.has_keyframe_after(tick),
+        AnimatedRef::Vec2(animated) => animated.has_keyframe_after(tick),
+        AnimatedRef::Color(animated) => animated.has_keyframe_after(tick),
+    })
+}
+
+pub(crate) fn set_property_keyframe_interpolation(
+    project: &mut Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    id: KeyframeId,
+    interpolation: Interpolation,
+) -> Result<Option<Interpolation>, PropertyAccessError> {
+    Ok(match animated_mut(project, object_id, property)? {
+        AnimatedMut::Scalar(animated) => {
+            animated.set_keyframe_interpolation_by_id(id, interpolation)
+        }
+        AnimatedMut::Vec2(animated) => {
+            animated.set_keyframe_interpolation_by_id(id, interpolation)
+        }
+        AnimatedMut::Color(animated) => {
+            animated.set_keyframe_interpolation_by_id(id, interpolation)
+        }
+    })
+}
+
 pub(crate) fn remove_property_keyframe_at_tick(
     project: &mut Project,
     object_id: ObjectId,
