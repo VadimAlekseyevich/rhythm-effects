@@ -218,7 +218,9 @@ The copied selection begins one current authoring-grid step after the latest sel
 
 ## 20. Easing
 
-Fast preset access through context/command/curve UI.
+Right-click a keyframe diamond to open outgoing easing actions for the active keyframe selection. Right-clicking an unselected diamond selects that key; right-clicking an already selected diamond keeps the multi-selection. A keyboard-accessible Easing menu is also available in the timeline header.
+
+Actions include Hold, Linear, Ease In, Ease Out, and Ease In-Out. Presets apply only to selected keys that have a following key on the same object/property. Terminal keys have no outgoing segment and are skipped. Each multi-key action is one undoable history entry; applying an unchanged preset or selecting only terminal keys creates no history entry. Existing IDs, key values, and musical tick spacing stay unchanged.
 
 Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
