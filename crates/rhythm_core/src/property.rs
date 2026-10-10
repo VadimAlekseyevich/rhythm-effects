@@ -178,13 +178,13 @@ pub fn property_keyframe_at_tick(
     Ok(match animated_ref(project, object_id, property)? {
         AnimatedRef::Scalar(animated) => animated
             .keyframe_at_tick(tick)
-            .map(|keyframe| pack_scalar_keyframe(keyframe)),
+            .map(pack_scalar_keyframe),
         AnimatedRef::Vec2(animated) => animated
             .keyframe_at_tick(tick)
-            .map(|keyframe| pack_vec2_keyframe(keyframe)),
+            .map(pack_vec2_keyframe),
         AnimatedRef::Color(animated) => animated
             .keyframe_at_tick(tick)
-            .map(|keyframe| pack_color_keyframe(keyframe)),
+            .map(pack_color_keyframe),
     })
 }
 
