@@ -406,6 +406,7 @@ impl EditorSession {
         true
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn keyframe_clipboard(&self) -> Option<&KeyframeCopyPacket> {
         self.keyframe_clipboard.as_ref()
@@ -582,6 +583,7 @@ impl EditorSession {
     }
 
     #[must_use]
+    #[allow(dead_code)] // used by timeline controls added in the next task
     pub fn selected_keyframe_count(&self) -> usize {
         self.selected_keyframes.len()
     }
@@ -644,6 +646,7 @@ impl EditorSession {
             .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
     }
 
+    #[allow(dead_code)] // reserved for a future explicit grid selection control
     pub const fn set_authoring_division(&mut self, division: BeatDivision) {
         self.authoring_division = division;
     }
@@ -854,9 +857,14 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSession, PreviewQuality};
-    use rhythm_core::time::{
-        BeatDivision, BpmMicros, DurationNs, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
+    use super::{EditorSession, KeyframeDragMember, PreviewQuality};
+    use rhythm_core::{
+        ids::{KeyframeId, ObjectId},
+        property::AnimatableProperty,
+        time::{
+            BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
+            TempoMap, TimeSignature,
+        },
     };
 
     fn tempo_120() -> TempoMap {
