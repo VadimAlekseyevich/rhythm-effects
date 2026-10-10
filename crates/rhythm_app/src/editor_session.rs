@@ -1393,42 +1393,61 @@ mod tests {
         session.replace_keyframe_selection([first, middle, last, other, other_last]);
         let before = editor.history_len();
         session.request_selected_keyframe_easing(EasingPreset::EaseInOut);
-        assert_eq!(session.commit_pending_keyframe_easing(&mut editor), Ok(true));
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
         assert_eq!(editor.history_len(), before + 1);
         assert_eq!(session.selected_keyframe_count(), 5);
 
         let get = |editor: &rhythm_core::editor::ProjectEditor,
                    property: AnimatableProperty,
                    tick: i64| {
-            property_keyframe_at_tick(
-                editor.project(),
-                object,
-                property,
-                MusicalTick::new(tick),
-            )
-            .expect("property")
-            .expect("keyframe")
-            .interpolation
+            property_keyframe_at_tick(editor.project(), object, property, MusicalTick::new(tick))
+                .expect("property")
+                .expect("keyframe")
+                .interpolation
         };
 
         let ease = EasingPreset::EaseInOut.interpolation();
         assert_eq!(get(&editor, AnimatableProperty::Opacity, 0), ease);
         assert_eq!(get(&editor, AnimatableProperty::Opacity, 240), ease);
-        assert_eq!(get(&editor, AnimatableProperty::Opacity, 480), Interpolation::Linear);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 480),
+            Interpolation::Linear
+        );
         assert_eq!(get(&editor, AnimatableProperty::Rotation, 0), ease);
-        assert_eq!(get(&editor, AnimatableProperty::Rotation, 960), Interpolation::Linear);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Rotation, 960),
+            Interpolation::Linear
+        );
 
         assert_eq!(editor.undo(), Ok(true));
-        assert_eq!(get(&editor, AnimatableProperty::Opacity, 0), Interpolation::Linear);
-        assert_eq!(get(&editor, AnimatableProperty::Rotation, 0), Interpolation::Linear);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Linear
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Rotation, 0),
+            Interpolation::Linear
+        );
         assert_eq!(editor.redo(), Ok(true));
         assert_eq!(get(&editor, AnimatableProperty::Opacity, 240), ease);
 
         session.request_selected_keyframe_easing(EasingPreset::Hold);
-        assert_eq!(session.commit_pending_keyframe_easing(&mut editor), Ok(true));
-        assert_eq!(get(&editor, AnimatableProperty::Opacity, 0), Interpolation::Hold);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Hold
+        );
         session.request_selected_keyframe_easing(EasingPreset::Linear);
-        assert_eq!(session.commit_pending_keyframe_easing(&mut editor), Ok(true));
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
         assert_eq!(get(&editor, AnimatableProperty::Opacity, 0), Interpolation::Linear);
     }
 
@@ -1456,7 +1475,10 @@ mod tests {
         session.select_only_keyframe(only_id);
         let history = editor.history_len();
         session.request_selected_keyframe_easing(EasingPreset::EaseOut);
-        assert_eq!(session.commit_pending_keyframe_easing(&mut editor), Ok(false));
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(false)
+        );
         assert_eq!(editor.history_len(), history);
     }
 
