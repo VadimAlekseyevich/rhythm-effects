@@ -1465,10 +1465,7 @@ impl ProjectEditor {
                     set_property_base_value(&mut self.project, *object_id, *property, *base_after)?;
                 }
             }
-            (
-                HistoryPayload::PropertyKeyframesInserted { records },
-                direction,
-            ) => match direction {
+            (HistoryPayload::PropertyKeyframesInserted { records }, direction) => match direction {
                 HistoryDirection::Undo => {
                     for record in records.iter().rev() {
                         remove_property_keyframe_by_id(
