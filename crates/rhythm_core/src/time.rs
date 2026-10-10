@@ -223,7 +223,7 @@ fn grid_bound_tick_position(
         scaled.floor() * step
     };
 
-    if snapped < i64::MIN as f64 || snapped > i64::MAX as f64 {
+    if snapped < -9_223_372_036_854_775_808.0 || snapped >= 9_223_372_036_854_775_808.0 {
         return Err(TimeConversionError::Overflow);
     }
 
@@ -249,7 +249,7 @@ pub fn snap_tick_position_to_grid(
         upper
     };
 
-    if snapped < i64::MIN as f64 || snapped > i64::MAX as f64 {
+    if snapped < -9_223_372_036_854_775_808.0 || snapped >= 9_223_372_036_854_775_808.0 {
         return Err(TimeConversionError::Overflow);
     }
 
@@ -721,6 +721,25 @@ mod tests {
         for invalid in [0, 5, 7, 10, 48, u16::MAX] {
             assert!(super::BeatDivision::new(invalid).is_none());
         }
+    }
+
+    #[test]
+    fn grid_helpers_reject_the_first_unrepresentable_positive_i64_value() {
+        let division = super::BeatDivision::new(4).expect("valid division");
+        let first_out_of_range = 9_223_372_036_854_775_808.0_f64;
+
+        assert_eq!(
+            super::floor_tick_position_to_grid(first_out_of_range, division),
+            Err(super::TimeConversionError::Overflow)
+        );
+        assert_eq!(
+            super::ceil_tick_position_to_grid(first_out_of_range, division),
+            Err(super::TimeConversionError::Overflow)
+        );
+        assert_eq!(
+            super::snap_tick_position_to_grid(first_out_of_range, division),
+            Err(super::TimeConversionError::Overflow)
+        );
     }
 
     #[test]
