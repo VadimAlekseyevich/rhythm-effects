@@ -195,7 +195,7 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 ## M7 — Editor core
 
 - [x] **AI-162** — Implement CPU inverse-transform hit testing for Rectangle.
-- [ ] **AI-163** — Implement CPU inverse-transform hit testing for Ellipse.
+- [x] **AI-163** — Implement CPU inverse-transform hit testing for Ellipse.
 - [ ] **AI-164** — Implement CPU bounds hit testing for Image.
 - [ ] **AI-165** — Implement CPU layout-bounds hit testing hook for Text.
 - [ ] **AI-166** — Select the topmost visible unlocked viewport object on click.
