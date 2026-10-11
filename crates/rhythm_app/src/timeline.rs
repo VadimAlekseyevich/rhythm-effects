@@ -1,6 +1,6 @@
 use crate::editor_session::{EditorSession, KeyframeDragMember};
 use rhythm_core::{
-    animation::Animated,
+    animation::{Animated, EasingPreset},
     ids::{EffectId, KeyframeId, ObjectId},
     project::{EffectKind, ObjectContent, Project},
     property::{AnimatableProperty, EffectAnimatableProperty, property_keyframe_by_id},
@@ -735,6 +735,15 @@ pub fn draw_timeline(
     draw_timeline_rows(ui, session, &rows, project, tempo_map, ruler_transform);
 }
 
+pub fn draw_easing_preset_menu(ui: &mut egui::Ui, session: &mut EditorSession) {
+    for preset in EasingPreset::ALL {
+        if ui.button(preset.label()).clicked() {
+            session.request_selected_keyframe_easing(preset);
+            ui.close();
+        }
+    }
+}
+
 fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {
     ui.painter().text(
         rect.center(),
@@ -901,6 +910,18 @@ fn draw_timeline_rows(
                                         session.select_only_keyframe(keyframe.id);
                                     }
                                 }
+                                if response.secondary_clicked() {
+                                    // Preserve existing multi-selection on right click.
+                                    session.focus_property(*object_id, animatable_property);
+                                    if !session.is_keyframe_selected(keyframe.id) {
+                                        session.select_only_keyframe(keyframe.id);
+                                    }
+                                }
+                                response.context_menu(|ui| {
+                                    ui.label("Outgoing easing");
+                                    ui.separator();
+                                    draw_easing_preset_menu(ui, session);
+                                });
                                 if response.drag_started() {
                                     session.focus_property(*object_id, animatable_property);
                                     if !session.is_keyframe_selected(keyframe.id) {

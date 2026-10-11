@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
+    animation::EasingPreset,
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
@@ -101,6 +102,7 @@ pub struct EditorSession {
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
     keyframe_clipboard: Option<KeyframeCopyPacket>,
+    pending_easing_preset: Option<EasingPreset>,
     timeline_box_selection: Option<TimelineBoxSelection>,
 }
 
@@ -116,6 +118,7 @@ impl Default for EditorSession {
             keyframe_drag: None,
             pending_keyframe_move: None,
             keyframe_clipboard: None,
+            pending_easing_preset: None,
             timeline_box_selection: None,
         }
     }
@@ -545,6 +548,22 @@ impl EditorSession {
         Ok(true)
     }
 
+    pub fn request_selected_keyframe_easing(&mut self, preset: EasingPreset) {
+        self.pending_easing_preset = Some(preset);
+    }
+
+    pub fn commit_pending_keyframe_easing(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(preset) = self.pending_easing_preset.take() else {
+            return Ok(false);
+        };
+        let mut ids = self.selected_keyframe_ids();
+        ids.sort_unstable();
+        editor.set_property_keyframe_interpolations(ids, preset.interpolation())
+    }
+
     pub fn delete_selected_keyframes(
         &mut self,
         editor: &mut ProjectEditor,
@@ -583,7 +602,6 @@ impl EditorSession {
     }
 
     #[must_use]
-    #[allow(dead_code)] // used by timeline controls added in the next task
     pub fn selected_keyframe_count(&self) -> usize {
         self.selected_keyframes.len()
     }
@@ -1312,6 +1330,159 @@ mod tests {
         assert_eq!(editor.project(), &project_before);
         assert_eq!(editor.history_len(), history_before);
         assert!(session.is_keyframe_selected(key_id));
+    }
+
+    #[test]
+    fn easing_preset_changes_selected_outgoing_segments_as_one_undo_entry() {
+        use rhythm_core::{
+            animation::{EasingPreset, Interpolation},
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object = ObjectId::new(1).expect("object");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.0),
+            )
+            .expect("insert")
+            .expect("first");
+        let middle = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("middle");
+        let last = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(1.0),
+            )
+            .expect("insert")
+            .expect("last");
+        let other = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Rotation,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.0),
+            )
+            .expect("insert")
+            .expect("other");
+        let other_last = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Rotation,
+                MusicalTick::new(960),
+                PropertyValue::Scalar(90.0),
+            )
+            .expect("insert")
+            .expect("other last");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, middle, last, other, other_last]);
+        let before = editor.history_len();
+        session.request_selected_keyframe_easing(EasingPreset::EaseInOut);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), before + 1);
+        assert_eq!(session.selected_keyframe_count(), 5);
+
+        let get = |editor: &rhythm_core::editor::ProjectEditor,
+                   property: AnimatableProperty,
+                   tick: i64| {
+            property_keyframe_at_tick(editor.project(), object, property, MusicalTick::new(tick))
+                .expect("property")
+                .expect("keyframe")
+                .interpolation
+        };
+
+        let ease = EasingPreset::EaseInOut.interpolation();
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 0), ease);
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 240), ease);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 480),
+            Interpolation::Linear
+        );
+        assert_eq!(get(&editor, AnimatableProperty::Rotation, 0), ease);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Rotation, 960),
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Linear
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Rotation, 0),
+            Interpolation::Linear
+        );
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 240), ease);
+
+        session.request_selected_keyframe_easing(EasingPreset::Hold);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Hold
+        );
+        session.request_selected_keyframe_easing(EasingPreset::Linear);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Linear
+        );
+    }
+
+    #[test]
+    fn easing_edit_on_only_terminal_key_is_noop() {
+        use rhythm_core::{
+            animation::EasingPreset,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue},
+            time::MusicalTick,
+        };
+
+        let object = ObjectId::new(1).expect("object");
+        let mut editor = editor_with_object_for_drag();
+        let only_id = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("id");
+        let mut session = EditorSession::default();
+        session.select_only_keyframe(only_id);
+        let history = editor.history_len();
+        session.request_selected_keyframe_easing(EasingPreset::EaseOut);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(false)
+        );
+        assert_eq!(editor.history_len(), history);
     }
 
     #[test]
