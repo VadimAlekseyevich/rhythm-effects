@@ -712,7 +712,7 @@ fn eased_progress(interpolation: Interpolation, progress: f64) -> f64 {
     }
 }
 
-fn evaluate_scalar(animated: &Animated<f32>, tick: f64) -> f32 {
+pub(crate) fn evaluate_scalar(animated: &Animated<f32>, tick: f64) -> f32 {
     if animated.keyframes().is_empty() {
         return *animated.base_value();
     }
@@ -730,7 +730,7 @@ fn evaluate_scalar(animated: &Animated<f32>, tick: f64) -> f32 {
     )
 }
 
-fn evaluate_vec2(animated: &Animated<Vec2>, tick: f64) -> Vec2 {
+pub(crate) fn evaluate_vec2(animated: &Animated<Vec2>, tick: f64) -> Vec2 {
     if animated.keyframes().is_empty() {
         return *animated.base_value();
     }

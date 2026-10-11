@@ -70,6 +70,8 @@ No GPU readback picking.
 
 Text uses layout bounds, image uses local rectangle, rectangle/ellipse use geometry.
 
+AI-162 implements `rhythm_core::hit_test::hit_test_rectangle` for a composition-space pointer and an evaluated continuous musical tick. The inverse is: subtract evaluated Position, undo Rotation (degrees), undo non-uniform or negative Scale, then add normalized Anchor × evaluated Rectangle Size. Edge hits are inclusive with a minimal floating-point tolerance. Singular scales, nonpositive sizes, non-finite rotation/tick and non-rectangles do not hit. Visibility/locking and topmost selection remain separate AI-166 responsibilities. Screen-to-composition camera conversion and UI hookup are not implemented by this geometry-only task.
+
 ## 8. Locked/hidden objects
 
 Hidden objects are not rendered or pointer-selectable.

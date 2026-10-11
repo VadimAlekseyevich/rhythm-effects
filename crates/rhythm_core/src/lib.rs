@@ -3,6 +3,7 @@
 pub mod animation;
 pub mod domain;
 pub mod editor;
+pub mod hit_test;
 
 pub mod ids;
 pub mod project;
