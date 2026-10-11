@@ -226,14 +226,16 @@ Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
 ## 21. Playback follow
 
-Follow Playhead is available but OFF by default.
+Follow Playhead is available as a timeline-header toggle and is OFF by default.
 
-When enabled:
+When enabled, **authoritative audible playback positions** may move the horizontal viewport as follows:
 
-- during playback, scroll only when playhead approaches a viewport edge;
-- user manual pan disables follow until explicitly re-enabled.
+- within the middle 75% of the visible time span, the view does not move;
+- if the audible playhead enters the outer 1/8 of either edge, scroll just enough to place it 1/5 of the span inside that edge (with project-bound clamping), retaining the same zoom/span;
+- user manual pan via Shift+wheel or middle-button drag disables follow until explicitly re-enabled, even if a pan hits the project boundary;
+- manual paused seeks and editing/navigation actions never auto-scroll via Follow Playhead. Timeline zoom does not disable the toggle.
 
-Avoid constant recentring.
+This avoids constant recentring and maintains a stable view while listening. **Integration note:** the editor's audio transport is not yet wired into `EditorSession::update_playhead_from_audio_clock`. The toggle and viewport-follow policy are implemented and unit-tested, but live audio-driven following remains dependent on transport integration. AI-160 is not complete until that wiring is present.
 
 ## 22. Focus
 
