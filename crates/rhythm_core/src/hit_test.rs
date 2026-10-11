@@ -20,11 +20,7 @@ use crate::{
 /// This is a geometry test only. Hidden/locked filtering and z-order selection
 /// belong to the viewport object-selection step (AI-166).
 #[must_use]
-pub fn hit_test_rectangle(
-    object: &Object,
-    continuous_tick: f64,
-    composition_point: Vec2,
-) -> bool {
+pub fn hit_test_rectangle(object: &Object, continuous_tick: f64, composition_point: Vec2) -> bool {
     let ObjectContent::Rectangle(rectangle) = &object.content else {
         return false;
     };
@@ -54,10 +50,10 @@ pub fn hit_test_rectangle(
     let dx = f64::from(composition_point.x()) - f64::from(position.x());
     let dy = f64::from(composition_point.y()) - f64::from(position.y());
 
-    let local_x = (cos * dx + sin * dy) / f64::from(scale.x())
-        + f64::from(anchor.x()) * f64::from(size.x());
-    let local_y = (-sin * dx + cos * dy) / f64::from(scale.y())
-        + f64::from(anchor.y()) * f64::from(size.y());
+    let local_x =
+        (cos * dx + sin * dy) / f64::from(scale.x()) + f64::from(anchor.x()) * f64::from(size.x());
+    let local_y =
+        (-sin * dx + cos * dy) / f64::from(scale.y()) + f64::from(anchor.y()) * f64::from(size.y());
 
     // Floating-point trigonometry can differ by a few ULPs at edges.
     let epsilon_x = f64::from(size.x()).max(1.0) * 1e-9;
