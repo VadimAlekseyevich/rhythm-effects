@@ -164,6 +164,8 @@ mod tests {
         assert!(hit_test_ellipse(&object, 0.0, vec2(250.0, 100.0)));
         assert!(hit_test_ellipse(&object, 0.0, vec2(200.0, 80.0)));
         assert!(!hit_test_ellipse(&object, 0.0, vec2(250.0, 120.0)));
+        assert!(hit_test_ellipse(&object, 0.0, vec2(235.0, 114.0)));
+        assert!(!hit_test_ellipse(&object, 0.0, vec2(236.0, 115.0)));
         assert!(!hit_test_ellipse(&object, 0.0, vec2(251.0, 100.0)));
         assert!(!hit_test_ellipse(&object, 0.0, vec2(200.0, 121.0)));
     }
@@ -251,6 +253,7 @@ mod tests {
             )
             .expect("unique size keys");
         }
+        assert!(!hit_test_ellipse(&object, f64::NAN, vec2(300.0, 100.0)));
         assert!(hit_test_ellipse(&object, 480.0, vec2(375.0, 100.0)));
         assert!(!hit_test_ellipse(&object, 480.0, vec2(376.0, 100.0)));
         assert!(!hit_test_ellipse(&object, 480.0, vec2(200.0, 100.0)));
