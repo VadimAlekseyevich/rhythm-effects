@@ -138,7 +138,7 @@ pub fn hit_test_text(
     composition_point: Vec2,
     layout_bounds: Option<TextLayoutBounds>,
 ) -> bool {
-    if !matches!(object.content, ObjectContent::Text(_)) || !continuous_tick.is_finite() {
+    if !matches!(&object.content, ObjectContent::Text(_)) || !continuous_tick.is_finite() {
         return false;
     }
     let Some(bounds) = layout_bounds else {
@@ -217,7 +217,9 @@ fn inverse_transform_point(
 
 #[cfg(test)]
 mod tests {
-    use super::{TextLayoutBounds, hit_test_ellipse, hit_test_image, hit_test_rectangle, hit_test_text};
+    use super::{
+        TextLayoutBounds, hit_test_ellipse, hit_test_image, hit_test_rectangle, hit_test_text,
+    };
     use crate::{
         animation::{Animated, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
@@ -279,7 +281,7 @@ mod tests {
     fn text_object() -> Object {
         let mut object = rectangle();
         object.content = ObjectContent::Text(TextObject {
-            text: "Привет\\nHello".to_owned(),
+            text: "Привет\nHello".to_owned(),
             font: FontReference {
                 family: "Inter".to_owned(),
                 weight: FontWeight::Normal,
