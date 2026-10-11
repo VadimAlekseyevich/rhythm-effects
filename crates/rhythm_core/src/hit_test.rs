@@ -24,6 +24,9 @@ pub fn hit_test_rectangle(object: &Object, continuous_tick: f64, composition_poi
     let ObjectContent::Rectangle(rectangle) = &object.content else {
         return false;
     };
+    if !continuous_tick.is_finite() {
+        return false;
+    }
     let size = evaluate_vec2(&rectangle.size, continuous_tick);
     let Some((local_x, local_y)) =
         inverse_transform_point(object, size, continuous_tick, composition_point)
@@ -40,7 +43,6 @@ pub fn hit_test_rectangle(object: &Object, continuous_tick: f64, composition_poi
         && local_y <= f64::from(size.y()) + epsilon_y
 }
 
-
 /// Tests an ellipse contained in the object's unrounded local Size rectangle.
 ///
 /// Its normalized center is (0.5, 0.5), independent of the transform Anchor.
@@ -51,6 +53,9 @@ pub fn hit_test_ellipse(object: &Object, continuous_tick: f64, composition_point
     let ObjectContent::Ellipse(ellipse) = &object.content else {
         return false;
     };
+    if !continuous_tick.is_finite() {
+        return false;
+    }
 
     let size = evaluate_vec2(&ellipse.size, continuous_tick);
     let Some((local_x, local_y)) =
