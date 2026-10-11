@@ -1749,11 +1749,7 @@ mod tests {
 
     fn narrow_timeline_shape_count(project: &rhythm_core::project::Project) -> usize {
         let mut session = crate::editor_session::EditorSession::default();
-        assert!(session.zoom_timeline(
-            project.settings.duration,
-            ProjectTimeNs::new(0),
-            400.0,
-        ));
+        assert!(session.zoom_timeline(project.settings.duration, ProjectTimeNs::new(0), 400.0,));
 
         let context = egui::Context::default();
         let raw_input = egui::RawInput {
@@ -1803,9 +1799,17 @@ mod tests {
         // A fixed 2-second viewport must create roughly the same number of
         // painter shapes regardless of the 10k total project keyframe count.
         // This guards against accidental iteration/drawing of every key glyph.
+        let empty_shapes = narrow_timeline_shape_count(&large_keyframe_project(0));
         let small_shapes = narrow_timeline_shape_count(&small);
         let large_shapes = narrow_timeline_shape_count(&large);
-        assert!(large_shapes < 1_000, "large view drew {large_shapes} shapes");
+        assert!(
+            large_shapes >= empty_shapes + 20,
+            "expected visible keyframe diamonds: empty {empty_shapes}, dense {large_shapes}"
+        );
+        assert!(
+            large_shapes < 1_000,
+            "large view drew {large_shapes} shapes"
+        );
         assert!(
             large_shapes <= small_shapes + 10,
             "shape count grew with nonvisible keys: {small_shapes} to {large_shapes}"
