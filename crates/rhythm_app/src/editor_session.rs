@@ -440,9 +440,10 @@ impl EditorSession {
             packet.entries[0].source_object_id,
             packet.entries[0].source_property,
         );
-        let single_source = packet.entries.iter().all(|entry| {
-            (entry.source_object_id, entry.source_property) == first_source
-        });
+        let single_source = packet
+            .entries
+            .iter()
+            .all(|entry| (entry.source_object_id, entry.source_property) == first_source);
         let remap_target = self.focused_property.filter(|focused| {
             single_source
                 && packet
