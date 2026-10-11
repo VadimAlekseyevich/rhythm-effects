@@ -214,7 +214,7 @@ Cross-property paste requires semantic/type compatibility.
 
 Ctrl+D duplicates active keyframe selection and leaves the duplicate selected for immediate Alt+Arrow repositioning.
 
-Relative pattern timing remains unchanged.
+The copied selection begins one current authoring-grid step after the latest selected keyframe (measured from the earliest selected keyframe). A single selected key moves forward one grid step. The offset is applied in integer MusicalTicks to every selected key, regardless of property, without requiring BPM or moving the playhead. Relative pattern timing remains unchanged. The originals remain intact; an unrelated key at a destination tick follows the normal paste collision rule. Duplication is one undoable compound insertion and does not change the clipboard.
 
 ## 20. Easing
 
