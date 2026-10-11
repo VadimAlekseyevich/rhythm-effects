@@ -109,6 +109,63 @@ pub fn hit_test_image(
     rectangle_bounds_hit(local_x, local_y, size)
 }
 
+/// Rectangle returned by the composition text shaper in its *local* layout space.
+///
+/// Bounds can have a nonzero or negative origin (for example when text is
+/// center/right aligned). Its extent controls normalized Anchor positioning;
+/// glyph shaping, line-height and font fallback are the layout engine's work.
+/// The viewport must supply bounds from the same cached layout used to render.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextLayoutBounds {
+    pub min: Vec2,
+    pub max: Vec2,
+}
+
+/// Tests an already-shaped Text object's local layout rectangle.
+///
+/// Uses the exact inverse object transform shared by Rectangle, Ellipse and
+/// Image. Text's normalized Anchor is relative to the measured bounding box,
+/// not an estimated number of characters. Missing, empty or invalid layout
+/// bounds cannot hit; the caller owns layout cache freshness after text, font,
+/// size or alignment changes. This function never shapes text or opens fonts.
+///
+/// Camera conversion, hidden/locked filtering and painter-order selection
+/// remain separate viewport responsibilities (AI-166).
+#[must_use]
+pub fn hit_test_text(
+    object: &Object,
+    continuous_tick: f64,
+    composition_point: Vec2,
+    layout_bounds: Option<TextLayoutBounds>,
+) -> bool {
+    if !matches!(&object.content, ObjectContent::Text(_)) || !continuous_tick.is_finite() {
+        return false;
+    }
+    let Some(bounds) = layout_bounds else {
+        return false;
+    };
+
+    let width = bounds.max.x() - bounds.min.x();
+    let height = bounds.max.y() - bounds.min.y();
+    if width <= 0.0 || height <= 0.0 {
+        return false;
+    }
+
+    let Ok(size) = Vec2::new(width, height) else {
+        return false;
+    };
+    let Some((local_x, local_y)) =
+        inverse_transform_point(object, size, continuous_tick, composition_point)
+    else {
+        return false;
+    };
+
+    // Local coordinates are normalized to the measured bounds' minimum
+    // before applying Anchor. Layout origin offsets thus cannot cause an
+    // extra shift in the selection rectangle.
+    rectangle_bounds_hit(local_x, local_y, size)
+}
+
 fn rectangle_bounds_hit(local_x: f64, local_y: f64, size: Vec2) -> bool {
     // Inclusive edges with minimal tolerance for f64 trigonometric rounding.
     let epsilon_x = f64::from(size.x()).max(1.0) * 1e-9;
@@ -160,13 +217,16 @@ fn inverse_transform_point(
 
 #[cfg(test)]
 mod tests {
-    use super::{hit_test_ellipse, hit_test_image, hit_test_rectangle};
+    use super::{
+        TextLayoutBounds, hit_test_ellipse, hit_test_image, hit_test_rectangle, hit_test_text,
+    };
     use crate::{
         animation::{Animated, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
         ids::{AssetId, KeyframeId, ObjectId},
         project::{
-            EllipseObject, ImageObject, Object, ObjectContent, RectangleObject, TransformAnimation,
+            EllipseObject, FontReference, FontStyle, FontWeight, ImageObject, Object,
+            ObjectContent, RectangleObject, TextAlignment, TextObject, TransformAnimation,
         },
         time::MusicalTick,
     };
@@ -216,6 +276,146 @@ mod tests {
 
     fn intrinsic(width: u32, height: u32) -> Option<(AssetId, [u32; 2])> {
         Some((AssetId::new(2).expect("asset id"), [width, height]))
+    }
+
+    fn text_object() -> Object {
+        let mut object = rectangle();
+        object.content = ObjectContent::Text(TextObject {
+            text: "Привет\nHello".to_owned(),
+            font: FontReference {
+                family: "Inter".to_owned(),
+                weight: FontWeight::Normal,
+                style: FontStyle::Normal,
+            },
+            font_size: 24.0,
+            color: Animated::new_static(LinearRgba::black_opaque()),
+            alignment: TextAlignment::Center,
+        });
+        object
+    }
+
+    fn layout(min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> Option<TextLayoutBounds> {
+        Some(TextLayoutBounds {
+            min: vec2(min_x, min_y),
+            max: vec2(max_x, max_y),
+        })
+    }
+
+    #[test]
+    fn text_layout_bounds_use_measured_extent_not_origin_or_string_length() {
+        let object = text_object();
+        let shape = layout(-70.0, 12.0, 30.0, 52.0);
+        assert!(hit_test_text(&object, 0.0, vec2(200.0, 100.0), shape));
+        assert!(hit_test_text(&object, 0.0, vec2(150.0, 80.0), shape));
+        assert!(hit_test_text(&object, 0.0, vec2(250.0, 120.0), shape));
+        assert!(!hit_test_text(&object, 0.0, vec2(149.0, 100.0), shape));
+        assert!(!hit_test_text(&object, 0.0, vec2(200.0, 121.0), shape));
+    }
+
+    #[test]
+    fn text_hit_supports_noncentral_anchor_and_rotation() {
+        let mut object = text_object();
+        object.transform.anchor = Animated::new_static(vec2(0.0, 0.0));
+        assert!(hit_test_text(
+            &object,
+            0.0,
+            vec2(300.0, 140.0),
+            layout(-70.0, 12.0, 30.0, 52.0),
+        ));
+        assert!(!hit_test_text(
+            &object,
+            0.0,
+            vec2(199.0, 100.0),
+            layout(-70.0, 12.0, 30.0, 52.0),
+        ));
+
+        object.transform.anchor = Animated::new_static(vec2(0.5, 0.5));
+        object.transform.rotation_degrees = Animated::new_static(90.0);
+        assert!(hit_test_text(
+            &object,
+            0.0,
+            vec2(200.0, 149.0),
+            layout(-70.0, 12.0, 30.0, 52.0),
+        ));
+        assert!(!hit_test_text(
+            &object,
+            0.0,
+            vec2(200.0, 151.0),
+            layout(-70.0, 12.0, 30.0, 52.0),
+        ));
+    }
+
+    #[test]
+    fn text_hit_handles_mirrored_nonuniform_scale() {
+        let mut object = text_object();
+        object.transform.anchor = Animated::new_static(vec2(0.0, 0.0));
+        object.transform.scale = Animated::new_static(vec2(-2.0, 0.5));
+        let shape = layout(-70.0, 12.0, 30.0, 52.0);
+        assert!(hit_test_text(&object, 0.0, vec2(0.0, 120.0), shape));
+        assert!(hit_test_text(&object, 0.0, vec2(150.0, 110.0), shape));
+        assert!(!hit_test_text(&object, 0.0, vec2(201.0, 110.0), shape));
+        assert!(!hit_test_text(&object, 0.0, vec2(150.0, 121.0), shape));
+    }
+
+    #[test]
+    fn text_hit_rejects_missing_degenerate_and_wrong_kind_layouts() {
+        let object = text_object();
+        assert!(!hit_test_text(&object, 0.0, vec2(200.0, 100.0), None));
+        for bounds in [
+            layout(0.0, 0.0, 0.0, 40.0),
+            layout(0.0, 0.0, 100.0, 0.0),
+            layout(100.0, 0.0, 0.0, 40.0),
+            layout(0.0, 40.0, 100.0, 0.0),
+        ] {
+            assert!(!hit_test_text(&object, 0.0, vec2(200.0, 100.0), bounds));
+        }
+        assert!(!hit_test_text(
+            &rectangle(),
+            0.0,
+            vec2(200.0, 100.0),
+            layout(0.0, 0.0, 100.0, 40.0),
+        ));
+    }
+
+    #[test]
+    fn text_hit_rejects_singular_transform_and_invalid_tick() {
+        let mut object = text_object();
+        let shape = layout(0.0, 0.0, 100.0, 40.0);
+        object.transform.scale = Animated::new_static(vec2(0.0, 1.0));
+        assert!(!hit_test_text(&object, 0.0, vec2(200.0, 100.0), shape));
+        object.transform.scale = Animated::new_static(vec2(1.0, 1.0));
+        object.transform.rotation_degrees = Animated::new_static(f32::NAN);
+        assert!(!hit_test_text(&object, 0.0, vec2(200.0, 100.0), shape));
+        object.transform.rotation_degrees = Animated::new_static(0.0);
+        assert!(!hit_test_text(&object, f64::NAN, vec2(200.0, 100.0), shape));
+    }
+
+    #[test]
+    fn text_hit_evaluates_animated_transform_at_tick() {
+        let mut object = text_object();
+        object.transform.position = Animated::with_keyframes(
+            vec2(200.0, 100.0),
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(3).expect("key id"),
+                    MusicalTick::new(0),
+                    vec2(200.0, 100.0),
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(4).expect("key id"),
+                    MusicalTick::new(960),
+                    vec2(400.0, 100.0),
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("distinct key IDs");
+        let shape = layout(0.0, 0.0, 100.0, 40.0);
+        assert!(hit_test_text(&object, 480.0, vec2(300.0, 100.0), shape));
+        assert!(!hit_test_text(&object, 480.0, vec2(200.0, 100.0), shape));
+        assert!(hit_test_text(&object, 960.0, vec2(400.0, 100.0), shape));
+        assert!(!hit_test_text(&object, f64::NAN, vec2(400.0, 100.0), shape));
     }
 
     #[test]

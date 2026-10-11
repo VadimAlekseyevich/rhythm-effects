@@ -76,6 +76,8 @@ AI-163 adds `rhythm_core::hit_test::hit_test_ellipse`, reusing the exact same in
 
 AI-164 adds `rhythm_core::hit_test::hit_test_image`. Image local bounds are the **source's decoded intrinsic pixel dimensions**; the semantic `ImageObject` still stores only `AssetId`. The caller supplies optional prepared metadata `(AssetId, [width_px, height_px])`; missing, stale (mismatched AssetId) or zero-size dimensions must miss instead of guessing a fallback box or performing synchronous file decode. The same CPU inverse Position/Rotation/Scale/Anchor helper used by Rectangle and Ellipse is reused for image rectangular bounds, including mirrored or nonuniform transforms. No project-schema change, disk access, GPU readback or viewport integration is introduced by this task.
 
+AI-165 adds `rhythm_core::hit_test::hit_test_text` with optional `TextLayoutBounds { min, max }` measured by the composition text shaper. A text's local picking box has the measured extent `max - min`, positioned by its evaluated normalized Anchor; nonzero/negative local bounds origins from shaping/alignment do not shift the anchor a second time. Neither text length nor font size is used as an approximate width. Missing or degenerate layout misses, and the caller must supply bounds from the same up-to-date cache entry used by the renderer (invalidated on text/font/size/alignment changes); transforms and colors do not reshape text. Text shaping, caching, renderer parity and UI selection remain unimplemented by this *hook* task.
+
 ## 8. Locked/hidden objects
 
 Hidden objects are not rendered or pointer-selectable.
