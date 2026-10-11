@@ -950,6 +950,10 @@ mod tests {
         },
     };
 
+    fn apply_audible_time(session: &mut EditorSession, duration: DurationNs, ns: i64) -> bool {
+        session.update_playhead_from_audio_clock(ProjectTimeNs::new(ns), duration)
+    }
+
     fn tempo_120() -> TempoMap {
         TempoMap::with_initial_tempo(
             GridOffsetNs::new(0),
@@ -1069,10 +1073,7 @@ mod tests {
         assert!(!session.follow_playhead_enabled());
         assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
 
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(3_000_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 3_000_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
@@ -1086,10 +1087,7 @@ mod tests {
         );
 
         // The next authoritative audio tick, not the paused seek, is allowed to follow.
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(7_000_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 7_000_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (
@@ -1106,19 +1104,13 @@ mod tests {
         assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
         session.set_follow_playhead_enabled(true);
 
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(1_500_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 1_500_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
         );
 
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(1_800_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 1_800_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (
@@ -1126,10 +1118,7 @@ mod tests {
                 ProjectTimeNs::new(2_200_000_000),
             )
         );
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(1_900_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 1_900_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (
@@ -1139,18 +1128,12 @@ mod tests {
         );
 
         // Seeking to an earlier audible position shifts left without re-centering.
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(100_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 100_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
         );
-        assert!(!session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(100_000_000),
-            duration,
-        ));
+        assert!(!apply_audible_time(&mut session, duration, 100_000_000));
     }
 
     #[test]
@@ -1159,10 +1142,7 @@ mod tests {
         let mut session = EditorSession::default();
         assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
         session.set_follow_playhead_enabled(true);
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(1_800_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 1_800_000_000));
 
         assert!(session.pan_timeline_points(duration, -200.0, 1_000.0));
         assert!(!session.follow_playhead_enabled());
@@ -1173,10 +1153,7 @@ mod tests {
                 ProjectTimeNs::new(2_600_000_000),
             )
         );
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(2_900_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 2_900_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (
@@ -1185,10 +1162,7 @@ mod tests {
             )
         );
         session.set_follow_playhead_enabled(true);
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(2_900_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 2_900_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (
@@ -1209,25 +1183,15 @@ mod tests {
         let duration = DurationNs::new(10_000_000_000);
         let mut session = EditorSession::default();
         session.set_follow_playhead_enabled(true);
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(15_000_000_000),
-            duration,
-        ));
+        assert!(apply_audible_time(&mut session, duration, 15_000_000_000));
         assert_eq!(session.playhead(), ProjectTimeNs::new(10_000_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (ProjectTimeNs::new(0), ProjectTimeNs::new(10_000_000_000))
         );
 
-        assert!(session.zoom_timeline(
-            duration,
-            ProjectTimeNs::new(10_000_000_000),
-            5.0,
-        ));
-        assert!(session.update_playhead_from_audio_clock(
-            ProjectTimeNs::new(9_990_000_000),
-            duration,
-        ));
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(10_000_000_000), 5.0,));
+        assert!(apply_audible_time(&mut session, duration, 9_990_000_000));
         assert_eq!(
             session.timeline_range(duration),
             (
