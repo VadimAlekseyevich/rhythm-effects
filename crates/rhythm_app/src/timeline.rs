@@ -1706,8 +1706,10 @@ mod tests {
             time::{DurationNs, MusicalTick},
         };
 
-        let mut settings = ProjectSettings::default();
-        settings.duration = DurationNs::new(800_000_000_000);
+        let settings = ProjectSettings {
+            duration: DurationNs::new(800_000_000_000),
+            ..Default::default()
+        };
         let tempo = TempoMap::with_initial_tempo(
             GridOffsetNs::new(0),
             BpmMicros::new(120_000_000).expect("120 BPM"),
