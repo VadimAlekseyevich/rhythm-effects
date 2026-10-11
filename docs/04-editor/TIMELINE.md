@@ -255,6 +255,8 @@ Horizontal:
 
 Frame cost should depend primarily on visible rows/keys, not project total.
 
+The AI-161 regression fixture creates 10,000 sorted keys on one animated property and validates the project. It verifies a narrow inclusive MusicalTick query returns only its matching slice, then runs a headless egui timeline frame over the same two-second window for both 64-key and 10,000-key projects. The 10,000-key case must emit fewer than 1,000 painter shapes and no more than ten additional shapes relative to the 64-key case. This checks that nonvisible keyframes are not emitted as draw geometry; it is not a wall-clock performance benchmark. Visible key queries use sorted-slice partition-point range lookups.
+
 ## 24. Overlapping visual keys
 
 At extreme zoom-out, multiple distinct MusicalTicks may occupy the same few pixels.
