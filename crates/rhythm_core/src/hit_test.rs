@@ -165,7 +165,9 @@ mod tests {
         animation::{Animated, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
         ids::{AssetId, KeyframeId, ObjectId},
-        project::{EllipseObject, ImageObject, Object, ObjectContent, RectangleObject, TransformAnimation},
+        project::{
+            EllipseObject, ImageObject, Object, ObjectContent, RectangleObject, TransformAnimation,
+        },
         time::MusicalTick,
     };
 
@@ -219,25 +221,75 @@ mod tests {
     #[test]
     fn image_uses_intrinsic_pixel_bounds_with_inclusive_edges() {
         let object = image();
-        assert!(hit_test_image(&object, 0.0, vec2(200.0, 100.0), intrinsic(100, 40)));
-        assert!(hit_test_image(&object, 0.0, vec2(150.0, 80.0), intrinsic(100, 40)));
-        assert!(hit_test_image(&object, 0.0, vec2(250.0, 120.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, 0.0, vec2(149.0, 100.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, 0.0, vec2(200.0, 121.0), intrinsic(100, 40)));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(150.0, 80.0),
+            intrinsic(100, 40)
+        ));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(250.0, 120.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(149.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 121.0),
+            intrinsic(100, 40)
+        ));
     }
 
     #[test]
     fn image_picking_inverts_rotation_and_noncentral_anchor() {
         let mut object = image();
         object.transform.anchor = Animated::new_static(vec2(0.0, 0.0));
-        assert!(hit_test_image(&object, 0.0, vec2(300.0, 140.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, 0.0, vec2(199.0, 100.0), intrinsic(100, 40)));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(300.0, 140.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(199.0, 100.0),
+            intrinsic(100, 40)
+        ));
 
         object.transform.anchor = Animated::new_static(vec2(0.5, 0.5));
         object.transform.rotation_degrees = Animated::new_static(90.0);
-        assert!(hit_test_image(&object, 0.0, vec2(200.0, 149.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, 0.0, vec2(230.0, 100.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, 0.0, vec2(200.0, 151.0), intrinsic(100, 40)));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 149.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(230.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 151.0),
+            intrinsic(100, 40)
+        ));
     }
 
     #[test]
@@ -245,25 +297,60 @@ mod tests {
         let mut object = image();
         object.transform.anchor = Animated::new_static(vec2(0.0, 0.0));
         object.transform.scale = Animated::new_static(vec2(-2.0, 0.5));
-        assert!(hit_test_image(&object, 0.0, vec2(0.0, 120.0), intrinsic(100, 40)));
-        assert!(hit_test_image(&object, 0.0, vec2(150.0, 110.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, 0.0, vec2(201.0, 110.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, 0.0, vec2(150.0, 121.0), intrinsic(100, 40)));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(0.0, 120.0),
+            intrinsic(100, 40)
+        ));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(150.0, 110.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(201.0, 110.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(150.0, 121.0),
+            intrinsic(100, 40)
+        ));
     }
 
     #[test]
     fn image_hit_rejects_missing_stale_or_zero_asset_dimensions() {
         let object = image();
         assert!(!hit_test_image(&object, 0.0, vec2(200.0, 100.0), None));
-        assert!(!hit_test_image(&object, 0.0, vec2(200.0, 100.0), intrinsic(0, 40)));
-        assert!(!hit_test_image(&object, 0.0, vec2(200.0, 100.0), intrinsic(100, 0)));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(0, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 0)
+        ));
         assert!(!hit_test_image(
             &object,
             0.0,
             vec2(200.0, 100.0),
             Some((AssetId::new(3).expect("other asset"), [100, 40])),
         ));
-        assert!(!hit_test_image(&rectangle(), 0.0, vec2(200.0, 100.0), intrinsic(100, 40)));
+        assert!(!hit_test_image(
+            &rectangle(),
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
         assert!(!hit_test_rectangle(&object, 0.0, vec2(200.0, 100.0)));
     }
 
@@ -271,12 +358,27 @@ mod tests {
     fn image_hit_rejects_singular_transform_and_invalid_time() {
         let mut object = image();
         object.transform.scale = Animated::new_static(vec2(1.0, 0.0));
-        assert!(!hit_test_image(&object, 0.0, vec2(200.0, 100.0), intrinsic(100, 40)));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
         object.transform.scale = Animated::new_static(vec2(1.0, 1.0));
         object.transform.rotation_degrees = Animated::new_static(f32::NAN);
-        assert!(!hit_test_image(&object, 0.0, vec2(200.0, 100.0), intrinsic(100, 40)));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
         object.transform.rotation_degrees = Animated::new_static(0.0);
-        assert!(!hit_test_image(&object, f64::NAN, vec2(200.0, 100.0), intrinsic(100, 40)));
+        assert!(!hit_test_image(
+            &object,
+            f64::NAN,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
     }
 
     #[test]
@@ -300,10 +402,30 @@ mod tests {
             ],
         )
         .expect("unique keys");
-        assert!(hit_test_image(&object, 480.0, vec2(300.0, 100.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, 480.0, vec2(200.0, 100.0), intrinsic(100, 40)));
-        assert!(hit_test_image(&object, 960.0, vec2(400.0, 100.0), intrinsic(100, 40)));
-        assert!(!hit_test_image(&object, f64::NAN, vec2(400.0, 100.0), intrinsic(100, 40)));
+        assert!(hit_test_image(
+            &object,
+            480.0,
+            vec2(300.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            480.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(hit_test_image(
+            &object,
+            960.0,
+            vec2(400.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            f64::NAN,
+            vec2(400.0, 100.0),
+            intrinsic(100, 40)
+        ));
     }
 
     #[test]
