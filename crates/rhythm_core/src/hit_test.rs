@@ -225,8 +225,8 @@ mod tests {
         domain::{LinearRgba, Vec2},
         ids::{AssetId, KeyframeId, ObjectId},
         project::{
-            EllipseObject, FontReference, FontStyle, FontWeight, ImageObject, Object, ObjectContent,
-            RectangleObject, TextAlignment, TextObject, TransformAnimation,
+            EllipseObject, FontReference, FontStyle, FontWeight, ImageObject, Object,
+            ObjectContent, RectangleObject, TextAlignment, TextObject, TransformAnimation,
         },
         time::MusicalTick,
     };
