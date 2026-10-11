@@ -224,6 +224,23 @@ impl ApplicationHandler for RhythmApp {
                     {
                         self.session
                             .copy_selected_keyframes(self.project_editor.project())
+                    } else if control
+                        && !shift
+                        && !alt
+                        && !super_key
+                        && code == KeyCode::KeyD
+                        && !event.repeat
+                    {
+                        match self
+                            .session
+                            .duplicate_selected_keyframes(&mut self.project_editor)
+                        {
+                            Ok(changed) => changed,
+                            Err(error) => {
+                                warn!(?error, "duplicate selected keyframes failed");
+                                false
+                            }
+                        }
                     } else if control && !shift && !alt && !super_key && code == KeyCode::KeyV {
                         match self
                             .session
@@ -358,6 +375,14 @@ impl ApplicationHandler for RhythmApp {
                         Ok(true) => window.request_redraw(),
                         Ok(false) => {}
                         Err(error) => warn!(?error, "keyframe drag commit failed"),
+                    }
+                    match self
+                        .session
+                        .commit_pending_keyframe_easing(&mut self.project_editor)
+                    {
+                        Ok(true) => window.request_redraw(),
+                        Ok(false) => {}
+                        Err(error) => warn!(?error, "keyframe easing edit failed"),
                     }
                     let paint_jobs =
                         egui_context.tessellate(full_output.shapes, full_output.pixels_per_point);

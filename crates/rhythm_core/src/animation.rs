@@ -62,6 +62,54 @@ pub enum Interpolation {
     CubicBezier(BezierEasing),
 }
 
+/// Named timing presets. The outgoing keyframe owns the segment easing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EasingPreset {
+    Hold,
+    Linear,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+
+impl EasingPreset {
+    pub const ALL: [Self; 5] = [
+        Self::Hold,
+        Self::Linear,
+        Self::EaseIn,
+        Self::EaseOut,
+        Self::EaseInOut,
+    ];
+
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Hold => "Hold",
+            Self::Linear => "Linear",
+            Self::EaseIn => "Ease In",
+            Self::EaseOut => "Ease Out",
+            Self::EaseInOut => "Ease In-Out",
+        }
+    }
+
+    #[must_use]
+    pub fn interpolation(self) -> Interpolation {
+        match self {
+            Self::Hold => Interpolation::Hold,
+            Self::Linear => Interpolation::Linear,
+            Self::EaseIn => Interpolation::CubicBezier(
+                BezierEasing::new(0.42, 0.0, 1.0, 1.0).expect("valid Ease In preset"),
+            ),
+            Self::EaseOut => Interpolation::CubicBezier(
+                BezierEasing::new(0.0, 0.0, 0.58, 1.0).expect("valid Ease Out preset"),
+            ),
+            Self::EaseInOut => Interpolation::CubicBezier(
+                BezierEasing::new(0.42, 0.0, 0.58, 1.0).expect("valid Ease In-Out preset"),
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Keyframe<T> {
     pub id: KeyframeId,
@@ -160,6 +208,26 @@ impl<T> Animated<T> {
                 Ok(index)
             }
         }
+    }
+
+    /// Changes only interpolation, without moving or re-allocating the keyframe.
+    pub fn set_keyframe_interpolation_by_id(
+        &mut self,
+        id: KeyframeId,
+        interpolation: Interpolation,
+    ) -> Option<Interpolation> {
+        let keyframe = self
+            .keyframes
+            .iter_mut()
+            .find(|keyframe| keyframe.id == id)?;
+        let previous = keyframe.interpolation;
+        keyframe.interpolation = interpolation;
+        Some(previous)
+    }
+
+    #[must_use]
+    pub fn has_keyframe_after(&self, tick: MusicalTick) -> bool {
+        self.keyframes.last().is_some_and(|last| last.tick > tick)
     }
 
     #[must_use]
@@ -402,6 +470,28 @@ mod tests {
         let second = super::evaluate_bezier_easing(ease, 0.5);
         assert_eq!(first, second);
         assert!((first - 0.802_403_4).abs() < 0.000_01);
+    }
+
+    #[test]
+    fn named_easing_presets_have_canonical_control_points() {
+        use super::{EasingPreset, Interpolation};
+        assert_eq!(EasingPreset::Hold.interpolation(), Interpolation::Hold);
+        assert_eq!(EasingPreset::Linear.interpolation(), Interpolation::Linear);
+        for (preset, expected) in [
+            (EasingPreset::EaseIn, [0.42, 0.0, 1.0, 1.0]),
+            (EasingPreset::EaseOut, [0.0, 0.0, 0.58, 1.0]),
+            (EasingPreset::EaseInOut, [0.42, 0.0, 0.58, 1.0]),
+        ] {
+            let Interpolation::CubicBezier(bezier) = preset.interpolation() else {
+                panic!("named easing must resolve to cubic Bezier");
+            };
+            assert_eq!(
+                [bezier.x1(), bezier.y1(), bezier.x2(), bezier.y2()],
+                expected
+            );
+            assert_eq!(super::evaluate_bezier_easing(bezier, 0.0), 0.0);
+            assert_eq!(super::evaluate_bezier_easing(bezier, 1.0), 1.0);
+        }
     }
 
     #[test]

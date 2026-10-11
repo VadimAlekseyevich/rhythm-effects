@@ -214,24 +214,28 @@ Cross-property paste requires semantic/type compatibility.
 
 Ctrl+D duplicates active keyframe selection and leaves the duplicate selected for immediate Alt+Arrow repositioning.
 
-Relative pattern timing remains unchanged.
+The copied selection begins one current authoring-grid step after the latest selected keyframe (measured from the earliest selected keyframe). A single selected key moves forward one grid step. The offset is applied in integer MusicalTicks to every selected key, regardless of property, without requiring BPM or moving the playhead. Relative pattern timing remains unchanged. The originals remain intact; an unrelated key at a destination tick follows the normal paste collision rule. Duplication is one undoable compound insertion and does not change the clipboard.
 
 ## 20. Easing
 
-Fast preset access through context/command/curve UI.
+Right-click a keyframe diamond to open outgoing easing actions for the active keyframe selection. Right-clicking an unselected diamond selects that key; right-clicking an already selected diamond keeps the multi-selection. A keyboard-accessible Easing menu is also available in the timeline header.
+
+Actions include Hold, Linear, Ease In, Ease Out, and Ease In-Out. Presets apply only to selected keys that have a following key on the same object/property. Terminal keys have no outgoing segment and are skipped. Each multi-key action is one undoable history entry; applying an unchanged preset or selecting only terminal keys creates no history entry. Existing IDs, key values, and musical tick spacing stay unchanged.
 
 Timeline does not attempt to visualize detailed curve shape in each key glyph.
 
 ## 21. Playback follow
 
-Follow Playhead is available but OFF by default.
+Follow Playhead is available as a timeline-header toggle and is OFF by default.
 
-When enabled:
+When enabled, **authoritative audible playback positions** may move the horizontal viewport as follows:
 
-- during playback, scroll only when playhead approaches a viewport edge;
-- user manual pan disables follow until explicitly re-enabled.
+- within the middle 75% of the visible time span, the view does not move;
+- if the audible playhead enters the outer 1/8 of either edge, scroll just enough to place it 1/5 of the span inside that edge (with project-bound clamping), retaining the same zoom/span;
+- user manual pan via Shift+wheel or middle-button drag disables follow until explicitly re-enabled, even if a pan hits the project boundary;
+- manual paused seeks and editing/navigation actions never auto-scroll via Follow Playhead. Timeline zoom does not disable the toggle.
 
-Avoid constant recentring.
+This avoids constant recentring and maintains a stable view while listening. **Integration note:** the editor's audio transport is not yet wired into `EditorSession::update_playhead_from_audio_clock`. The toggle and viewport-follow policy are implemented and unit-tested, but live audio-driven following remains dependent on transport integration. AI-160 is not complete until that wiring is present.
 
 ## 22. Focus
 
@@ -250,6 +254,8 @@ Horizontal:
 - query sorted keyframes by visible MusicalTick range plus margin.
 
 Frame cost should depend primarily on visible rows/keys, not project total.
+
+The AI-161 regression fixture creates 10,000 sorted keys on one animated property and validates the project. It verifies a narrow inclusive MusicalTick query returns only its matching slice, then runs a headless egui timeline frame over the same two-second window for both 64-key and 10,000-key projects. The 10,000-key case must emit fewer than 1,000 painter shapes and no more than ten additional shapes relative to the 64-key case. This checks that nonvisible keyframes are not emitted as draw geometry; it is not a wall-clock performance benchmark. Visible key queries use sorted-slice partition-point range lookups.
 
 ## 24. Overlapping visual keys
 

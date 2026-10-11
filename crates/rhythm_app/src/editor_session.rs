@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
+    animation::EasingPreset,
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
@@ -96,11 +97,13 @@ pub struct EditorSession {
     playhead: ProjectTimeNs,
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
+    follow_playhead: bool,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
     keyframe_clipboard: Option<KeyframeCopyPacket>,
+    pending_easing_preset: Option<EasingPreset>,
     timeline_box_selection: Option<TimelineBoxSelection>,
 }
 
@@ -111,11 +114,13 @@ impl Default for EditorSession {
             playhead: ProjectTimeNs::new(0),
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
+            follow_playhead: false,
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
             pending_keyframe_move: None,
             keyframe_clipboard: None,
+            pending_easing_preset: None,
             timeline_box_selection: None,
         }
     }
@@ -129,6 +134,66 @@ impl EditorSession {
 
     pub const fn seek_paused(&mut self, project_time: ProjectTimeNs) {
         self.playhead = project_time;
+    }
+
+    #[must_use]
+    pub const fn follow_playhead_enabled(&self) -> bool {
+        self.follow_playhead
+    }
+
+    pub fn set_follow_playhead_enabled(&mut self, enabled: bool) {
+        self.follow_playhead = enabled;
+    }
+
+    /// Accept only positions sourced from the audible audio clock while playing.
+    /// The app's audio transport will call this after it is connected; never
+    /// estimate playback from UI frame deltas.
+    #[allow(dead_code)]
+    pub fn update_playhead_from_audio_clock(
+        &mut self,
+        audible_time: ProjectTimeNs,
+        duration: DurationNs,
+    ) -> bool {
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let next_playhead = ProjectTimeNs::new(audible_time.get().clamp(0, duration_ns));
+        let changed = self.playhead != next_playhead;
+        self.playhead = next_playhead;
+        self.follow_playhead_during_playback(duration) || changed
+    }
+
+    /// Follow at the viewport edges rather than continuously centering the playhead.
+    /// A 1/8-width trigger zone and 1/5-width landing inset prevent oscillation.
+    fn follow_playhead_during_playback(&mut self, duration: DurationNs) -> bool {
+        if !self.follow_playhead {
+            return false;
+        }
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let (start, end) = self.timeline_range(duration);
+        let span = end.get() - start.get();
+        if span >= duration_ns || span < 5 {
+            return false;
+        }
+
+        let trigger_inset = (span / 8).max(1);
+        let landing_inset = (span / 5).max(1);
+        let playhead_ns = self.playhead.get().clamp(0, duration_ns);
+        let desired_start = if playhead_ns < start.get().saturating_add(trigger_inset) {
+            playhead_ns.saturating_sub(landing_inset)
+        } else if playhead_ns > end.get().saturating_sub(trigger_inset) {
+            playhead_ns.saturating_sub(span - landing_inset)
+        } else {
+            return false;
+        };
+
+        let new_start = desired_start.clamp(0, duration_ns - span);
+        if new_start == start.get() {
+            return false;
+        }
+        self.timeline_view = Some(TimelineView {
+            start: ProjectTimeNs::new(new_start),
+            end: ProjectTimeNs::new(new_start.saturating_add(span)),
+        });
+        true
     }
 
     #[must_use]
@@ -488,6 +553,79 @@ impl EditorSession {
         Ok(true)
     }
 
+    pub fn duplicate_selected_keyframes(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let mut selected_ids = self.selected_keyframe_ids();
+        if selected_ids.is_empty() {
+            return Ok(false);
+        }
+        selected_ids.sort_unstable();
+
+        let mut located = Vec::with_capacity(selected_ids.len());
+        for keyframe_id in selected_ids {
+            let keyframe = locate_property_keyframe(editor.project(), keyframe_id)
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+            located.push(keyframe);
+        }
+
+        let first_tick = located
+            .iter()
+            .map(|entry| entry.keyframe.tick.get())
+            .min()
+            .expect("selected keys are nonempty");
+        let last_tick = located
+            .iter()
+            .map(|entry| entry.keyframe.tick.get())
+            .max()
+            .expect("selected keys are nonempty");
+
+        // Place the copy just after the selected range, never on top of its source.
+        // Use i128 so even extreme but valid MusicalTicks cannot overflow here.
+        let delta = i128::from(last_tick) - i128::from(first_tick)
+            + i128::from(self.authoring_division.ticks_per_step());
+        let drafts = located
+            .into_iter()
+            .map(|entry| {
+                let target_tick = i128::from(entry.keyframe.tick.get()) + delta;
+                let target_tick = i64::try_from(target_tick)
+                    .map_err(|_| EditError::HistoryInvariant("duplicate tick overflow"))?;
+                Ok(PropertyKeyframeDraft {
+                    object_id: entry.object_id,
+                    property: entry.property,
+                    tick: MusicalTick::new(target_tick),
+                    value: entry.keyframe.value,
+                    interpolation: entry.keyframe.interpolation,
+                })
+            })
+            .collect::<Result<Vec<_>, EditError>>()?;
+
+        // Reuse the compound insertion command for fresh IDs, collisions, and undo.
+        let new_ids = editor.insert_property_keyframes(drafts)?;
+        if new_ids.is_empty() {
+            return Ok(false);
+        }
+        self.replace_keyframe_selection(new_ids);
+        Ok(true)
+    }
+
+    pub fn request_selected_keyframe_easing(&mut self, preset: EasingPreset) {
+        self.pending_easing_preset = Some(preset);
+    }
+
+    pub fn commit_pending_keyframe_easing(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(preset) = self.pending_easing_preset.take() else {
+            return Ok(false);
+        };
+        let mut ids = self.selected_keyframe_ids();
+        ids.sort_unstable();
+        editor.set_property_keyframe_interpolations(ids, preset.interpolation())
+    }
+
     pub fn delete_selected_keyframes(
         &mut self,
         editor: &mut ProjectEditor,
@@ -526,7 +664,6 @@ impl EditorSession {
     }
 
     #[must_use]
-    #[allow(dead_code)] // used in the pending timeline easing UI branch
     pub fn selected_keyframe_count(&self) -> usize {
         self.selected_keyframes.len()
     }
@@ -589,7 +726,7 @@ impl EditorSession {
             .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
     }
 
-    #[allow(dead_code)] // reserved for a forthcoming explicit grid UI
+    #[allow(dead_code)] // reserved for a future explicit grid selection control
     pub const fn set_authoring_division(&mut self, division: BeatDivision) {
         self.authoring_division = division;
     }
@@ -706,6 +843,9 @@ impl EditorSession {
             return false;
         }
 
+        // A deliberate pan cancels following even if this gesture is clamped
+        // at the timeline boundary or rounds to less than one nanosecond.
+        self.follow_playhead = false;
         let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
         let (start, end) = self.timeline_range(duration);
         let span = (end.get() - start.get()).max(1);
@@ -809,6 +949,10 @@ mod tests {
             TempoMap, TimeSignature,
         },
     };
+
+    fn apply_audible_time(session: &mut EditorSession, duration: DurationNs, ns: i64) -> bool {
+        session.update_playhead_from_audio_clock(ProjectTimeNs::new(ns), duration)
+    }
 
     fn tempo_120() -> TempoMap {
         TempoMap::with_initial_tempo(
@@ -923,6 +1067,142 @@ mod tests {
     }
 
     #[test]
+    fn follow_playhead_defaults_off_and_never_follows_manual_seeks() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(!session.follow_playhead_enabled());
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+
+        assert!(apply_audible_time(&mut session, duration, 3_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        session.set_follow_playhead_enabled(true);
+        session.seek_paused(ProjectTimeNs::new(7_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        // The next authoritative audio tick, not the paused seek, is allowed to follow.
+        assert!(apply_audible_time(&mut session, duration, 7_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(5_400_000_000),
+                ProjectTimeNs::new(7_400_000_000),
+            )
+        );
+    }
+
+    #[test]
+    fn follow_playhead_moves_only_near_edges_and_preserves_zoom_span() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+        session.set_follow_playhead_enabled(true);
+
+        assert!(apply_audible_time(&mut session, duration, 1_500_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        assert!(apply_audible_time(&mut session, duration, 1_800_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(200_000_000),
+                ProjectTimeNs::new(2_200_000_000),
+            )
+        );
+        assert!(apply_audible_time(&mut session, duration, 1_900_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(200_000_000),
+                ProjectTimeNs::new(2_200_000_000),
+            )
+        );
+
+        // Seeking to an earlier audible position shifts left without re-centering.
+        assert!(apply_audible_time(&mut session, duration, 100_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+        assert!(!apply_audible_time(&mut session, duration, 100_000_000));
+    }
+
+    #[test]
+    fn manual_pan_disables_follow_until_user_reenables_it() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+        session.set_follow_playhead_enabled(true);
+        assert!(apply_audible_time(&mut session, duration, 1_800_000_000));
+
+        assert!(session.pan_timeline_points(duration, -200.0, 1_000.0));
+        assert!(!session.follow_playhead_enabled());
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(600_000_000),
+                ProjectTimeNs::new(2_600_000_000),
+            )
+        );
+        assert!(apply_audible_time(&mut session, duration, 2_900_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(600_000_000),
+                ProjectTimeNs::new(2_600_000_000),
+            )
+        );
+        session.set_follow_playhead_enabled(true);
+        assert!(apply_audible_time(&mut session, duration, 2_900_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(1_300_000_000),
+                ProjectTimeNs::new(3_300_000_000),
+            )
+        );
+
+        // A real pan attempt disables follow even at a clamped/full-width boundary.
+        assert!(session.pan_timeline_points(duration, -1_000_000.0, 1_000.0));
+        session.set_follow_playhead_enabled(true);
+        assert!(!session.pan_timeline_points(duration, -1_000.0, 1_000.0));
+        assert!(!session.follow_playhead_enabled());
+    }
+
+    #[test]
+    fn playback_follow_clamps_to_project_bounds_without_zooming() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        session.set_follow_playhead_enabled(true);
+        assert!(apply_audible_time(&mut session, duration, 15_000_000_000));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(10_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(10_000_000_000))
+        );
+
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(10_000_000_000), 5.0,));
+        assert!(apply_audible_time(&mut session, duration, 9_990_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(8_000_000_000),
+                ProjectTimeNs::new(10_000_000_000),
+            )
+        );
+        assert!(session.follow_playhead_enabled());
+    }
+
+    #[test]
     fn timeline_pan_uses_content_motion_and_clamps_to_project() {
         let duration = DurationNs::new(10_000_000_000);
         let mut session = EditorSession::default();
@@ -1014,6 +1294,400 @@ mod tests {
         assert!(pasted_first.id.get() > second.get());
         assert!(session.is_keyframe_selected(pasted_first.id));
         assert!(session.is_keyframe_selected(pasted_second.id));
+    }
+
+    #[test]
+    fn duplicate_preserves_multi_property_pattern_and_selects_fresh_ids() {
+        use rhythm_core::{
+            animation::Interpolation,
+            editor::PropertyKeyframeDraft,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let source_ids = editor
+            .insert_property_keyframes(vec![
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Opacity,
+                    tick: MusicalTick::new(0),
+                    value: PropertyValue::Scalar(0.25),
+                    interpolation: Interpolation::Hold,
+                },
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Opacity,
+                    tick: MusicalTick::new(480),
+                    value: PropertyValue::Scalar(0.75),
+                    interpolation: Interpolation::Linear,
+                },
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Rotation,
+                    tick: MusicalTick::new(240),
+                    value: PropertyValue::Scalar(30.0),
+                    interpolation: Interpolation::Linear,
+                },
+            ])
+            .expect("source keys");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection(source_ids.iter().copied());
+        let history_before = editor.history_len();
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), history_before + 1);
+
+        let duplicate_ids = session.selected_keyframe_ids();
+        assert_eq!(duplicate_ids.len(), 3);
+        assert!(duplicate_ids.iter().all(|id| !source_ids.contains(id)));
+
+        for (property, tick, value, interpolation) in [
+            (
+                AnimatableProperty::Opacity,
+                720,
+                PropertyValue::Scalar(0.25),
+                Interpolation::Hold,
+            ),
+            (
+                AnimatableProperty::Opacity,
+                1_200,
+                PropertyValue::Scalar(0.75),
+                Interpolation::Linear,
+            ),
+            (
+                AnimatableProperty::Rotation,
+                960,
+                PropertyValue::Scalar(30.0),
+                Interpolation::Linear,
+            ),
+        ] {
+            let copied = property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                property,
+                MusicalTick::new(tick),
+            )
+            .expect("property")
+            .expect("duplicate key");
+            assert_eq!(copied.value, value);
+            assert_eq!(copied.interpolation, interpolation);
+            assert!(session.is_keyframe_selected(copied.id));
+        }
+
+        for (property, tick) in [
+            (AnimatableProperty::Opacity, 0),
+            (AnimatableProperty::Opacity, 480),
+            (AnimatableProperty::Rotation, 240),
+        ] {
+            assert!(
+                property_keyframe_at_tick(
+                    editor.project(),
+                    object_id,
+                    property,
+                    MusicalTick::new(tick),
+                )
+                .expect("property")
+                .is_some()
+            );
+        }
+
+        assert_eq!(editor.undo(), Ok(true));
+        for tick in [720, 1_200] {
+            assert!(
+                property_keyframe_at_tick(
+                    editor.project(),
+                    object_id,
+                    AnimatableProperty::Opacity,
+                    MusicalTick::new(tick),
+                )
+                .expect("property")
+                .is_none()
+            );
+        }
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+            )
+            .expect("property")
+            .expect("restored copy")
+            .interpolation,
+            Interpolation::Hold
+        );
+    }
+
+    #[test]
+    fn duplicate_collision_replaces_target_and_undo_restores_it() {
+        use rhythm_core::{
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.2),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(0.4),
+            )
+            .expect("insert")
+            .expect("second");
+        let occupied_id = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+                PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("occupied");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, second]);
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
+
+        let collided = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(720),
+        )
+        .expect("property")
+        .expect("new key");
+        assert_eq!(collided.value, PropertyValue::Scalar(0.2));
+        assert_ne!(collided.id, occupied_id);
+        assert!(session.is_keyframe_selected(collided.id));
+
+        assert_eq!(editor.undo(), Ok(true));
+        let restored = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(720),
+        )
+        .expect("property")
+        .expect("restored collision");
+        assert_eq!(restored.id, occupied_id);
+        assert_eq!(restored.value, PropertyValue::Scalar(0.9));
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+            )
+            .expect("property")
+            .expect("redo collision")
+            .id,
+            collided.id
+        );
+    }
+
+    #[test]
+    fn duplicate_empty_selection_and_overflow_do_not_mutate_project() {
+        use rhythm_core::{
+            editor::EditError,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(false));
+
+        let key_id = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(i64::MAX),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("key");
+        session.select_only_keyframe(key_id);
+        let project_before = editor.project().clone();
+        let history_before = editor.history_len();
+        assert_eq!(
+            session.duplicate_selected_keyframes(&mut editor),
+            Err(EditError::HistoryInvariant("duplicate tick overflow"))
+        );
+        assert_eq!(editor.project(), &project_before);
+        assert_eq!(editor.history_len(), history_before);
+        assert!(session.is_keyframe_selected(key_id));
+    }
+
+    #[test]
+    fn easing_preset_changes_selected_outgoing_segments_as_one_undo_entry() {
+        use rhythm_core::{
+            animation::{EasingPreset, Interpolation},
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object = ObjectId::new(1).expect("object");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.0),
+            )
+            .expect("insert")
+            .expect("first");
+        let middle = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("middle");
+        let last = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(1.0),
+            )
+            .expect("insert")
+            .expect("last");
+        let other = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Rotation,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.0),
+            )
+            .expect("insert")
+            .expect("other");
+        let other_last = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Rotation,
+                MusicalTick::new(960),
+                PropertyValue::Scalar(90.0),
+            )
+            .expect("insert")
+            .expect("other last");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, middle, last, other, other_last]);
+        let before = editor.history_len();
+        session.request_selected_keyframe_easing(EasingPreset::EaseInOut);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), before + 1);
+        assert_eq!(session.selected_keyframe_count(), 5);
+
+        let get = |editor: &rhythm_core::editor::ProjectEditor,
+                   property: AnimatableProperty,
+                   tick: i64| {
+            property_keyframe_at_tick(editor.project(), object, property, MusicalTick::new(tick))
+                .expect("property")
+                .expect("keyframe")
+                .interpolation
+        };
+
+        let ease = EasingPreset::EaseInOut.interpolation();
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 0), ease);
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 240), ease);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 480),
+            Interpolation::Linear
+        );
+        assert_eq!(get(&editor, AnimatableProperty::Rotation, 0), ease);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Rotation, 960),
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Linear
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Rotation, 0),
+            Interpolation::Linear
+        );
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 240), ease);
+
+        session.request_selected_keyframe_easing(EasingPreset::Hold);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Hold
+        );
+        session.request_selected_keyframe_easing(EasingPreset::Linear);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Linear
+        );
+    }
+
+    #[test]
+    fn easing_edit_on_only_terminal_key_is_noop() {
+        use rhythm_core::{
+            animation::EasingPreset,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue},
+            time::MusicalTick,
+        };
+
+        let object = ObjectId::new(1).expect("object");
+        let mut editor = editor_with_object_for_drag();
+        let only_id = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("id");
+        let mut session = EditorSession::default();
+        session.select_only_keyframe(only_id);
+        let history = editor.history_len();
+        session.request_selected_keyframe_easing(EasingPreset::EaseOut);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(false)
+        );
+        assert_eq!(editor.history_len(), history);
     }
 
     #[test]
