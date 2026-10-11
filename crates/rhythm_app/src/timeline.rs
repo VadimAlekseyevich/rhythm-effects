@@ -1761,10 +1761,14 @@ mod tests {
             )),
             ..Default::default()
         };
-        let output = context.run_ui(raw_input, |ui| {
+        let mut output = context.run_ui(raw_input, |ui| {
             super::draw_timeline(ui, &mut session, project, None);
         });
-        output.shapes.len()
+        let shape_count = output.shapes.len();
+        // The headless test has no GPU to upload font textures to. Acknowledge
+        // the egui delta explicitly; otherwise epaint asserts when it is dropped.
+        output.textures_delta.clear();
+        shape_count
     }
 
     #[test]
