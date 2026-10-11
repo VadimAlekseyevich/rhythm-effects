@@ -1,15 +1,16 @@
 use std::collections::HashSet;
 
 use crate::{
-    animation::{AnimationInvariantError, Keyframe},
+    animation::{AnimationInvariantError, Interpolation, Keyframe},
     domain::Vec2,
     ids::{EntityIdAllocator, IdAllocationError, KeyframeId, ObjectId},
     project::{Object, Project, ProjectValidationError},
     property::{
         AnimatableProperty, PropertyAccessError, PropertyKeyframe, PropertyValue,
         insert_property_keyframe, locate_property_keyframe, property_base_value,
-        property_keyframe_by_id, property_keyframe_count, remove_property_keyframe_by_id,
-        set_property_base_value,
+        property_keyframe_by_id, property_keyframe_count, property_keyframe_has_successor,
+        remove_property_keyframe_by_id, set_property_base_value,
+        set_property_keyframe_interpolation,
     },
     time::{MusicalTick, TempoMap},
 };
@@ -68,6 +69,15 @@ pub struct PropertyKeyframeInsertRecord {
     pub property: AnimatableProperty,
     pub keyframe: PropertyKeyframe,
     pub replaced: Option<PropertyKeyframe>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PropertyKeyframeInterpolationChange {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub keyframe_id: KeyframeId,
+    pub before: Interpolation,
+    pub after: Interpolation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +155,10 @@ pub enum EditCommand {
     MovePropertyKeyframes {
         moves: Vec<PropertyKeyframeMove>,
     },
+    SetPropertyKeyframeInterpolations {
+        keyframe_ids: Vec<KeyframeId>,
+        interpolation: Interpolation,
+    },
     SetTempoMap {
         tempo_map: TempoMap,
     },
@@ -165,6 +179,7 @@ impl EditCommand {
             Self::InsertPropertyKeyframes { .. } => "InsertPropertyKeyframes",
             Self::DeletePropertyKeyframes { .. } => "DeletePropertyKeyframes",
             Self::MovePropertyKeyframes { .. } => "MovePropertyKeyframes",
+            Self::SetPropertyKeyframeInterpolations { .. } => "SetPropertyKeyframeInterpolations",
             Self::SetTempoMap { .. } => "SetTempoMap",
         }
     }
@@ -220,6 +235,9 @@ pub enum HistoryPayload {
     },
     PropertyKeyframesMoved {
         records: Vec<PropertyKeyframeMoveRecord>,
+    },
+    PropertyKeyframeInterpolationsChanged {
+        changes: Vec<PropertyKeyframeInterpolationChange>,
     },
     TempoMapChanged {
         before: TempoMap,
@@ -512,6 +530,17 @@ impl ProjectEditor {
 
         let changed = self.execute(EditCommand::InsertPropertyKeyframes { entries })?;
         Ok(if changed { ids } else { Vec::new() })
+    }
+
+    pub fn set_property_keyframe_interpolations(
+        &mut self,
+        keyframe_ids: Vec<KeyframeId>,
+        interpolation: Interpolation,
+    ) -> Result<bool, EditError> {
+        self.execute(EditCommand::SetPropertyKeyframeInterpolations {
+            keyframe_ids,
+            interpolation,
+        })
     }
 
     pub fn delete_property_keyframes(
@@ -1120,6 +1149,71 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetPropertyKeyframeInterpolations {
+                keyframe_ids,
+                interpolation,
+            } => {
+                let mut ids = HashSet::with_capacity(keyframe_ids.len());
+                let mut changes = Vec::new();
+
+                // Resolve everything before mutating. A stale selection must be atomic.
+                for id in keyframe_ids {
+                    if !ids.insert(id) {
+                        continue;
+                    }
+                    let located = locate_property_keyframe(&self.project, id)
+                        .ok_or(EditError::KeyframeNotFound(id))?;
+                    if !property_keyframe_has_successor(
+                        &self.project,
+                        located.object_id,
+                        located.property,
+                        located.keyframe.tick,
+                    )? || located.keyframe.interpolation == interpolation
+                    {
+                        continue;
+                    }
+                    changes.push(PropertyKeyframeInterpolationChange {
+                        object_id: located.object_id,
+                        property: located.property,
+                        keyframe_id: id,
+                        before: located.keyframe.interpolation,
+                        after: interpolation,
+                    });
+                }
+
+                if changes.is_empty() {
+                    return Ok(None);
+                }
+
+                for change in &changes {
+                    set_property_keyframe_interpolation(
+                        &mut self.project,
+                        change.object_id,
+                        change.property,
+                        change.keyframe_id,
+                        change.after,
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(change.keyframe_id))?;
+                }
+
+                if let Err(error) = self.project.validate() {
+                    for change in &changes {
+                        let _ = set_property_keyframe_interpolation(
+                            &mut self.project,
+                            change.object_id,
+                            change.property,
+                            change.keyframe_id,
+                            change.before,
+                        );
+                    }
+                    return Err(EditError::InvalidProject(error));
+                }
+
+                Ok(Some(PendingHistoryEntry::new(
+                    "Set Keyframe Easing",
+                    HistoryPayload::PropertyKeyframeInterpolationsChanged { changes },
+                )))
+            }
             EditCommand::MovePropertyKeyframes { moves } => {
                 let mut resolved = Vec::with_capacity(moves.len());
                 let mut ids = HashSet::with_capacity(moves.len());
@@ -1611,6 +1705,18 @@ impl ProjectEditor {
                     }
                 }
             },
+            (HistoryPayload::PropertyKeyframeInterpolationsChanged { changes }, direction) => {
+                for change in changes {
+                    set_property_keyframe_interpolation(
+                        &mut self.project,
+                        change.object_id,
+                        change.property,
+                        change.keyframe_id,
+                        *direction.pick(&change.before, &change.after),
+                    )?
+                    .ok_or(EditError::KeyframeNotFound(change.keyframe_id))?;
+                }
+            }
             (HistoryPayload::TempoMapChanged { before, after }, direction) => {
                 self.project.tempo_map = direction.pick(before, after).clone();
             }

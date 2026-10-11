@@ -309,7 +309,8 @@ mod tests {
             .iter()
             .map(|level| level.peaks.len())
             .sum();
-        // Pairwise ceil-division adds at most one extra peak per mip level.
+        // Pairwise ceil-division adds at most one extra peak per mip level
+        // beyond the geometric 2x base-level bound.
         assert!(
             total_peaks
                 <= waveform.pyramid.levels[0].peaks.len() * 2 + waveform.pyramid.levels.len()

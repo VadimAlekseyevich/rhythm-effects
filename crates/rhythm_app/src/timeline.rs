@@ -1,6 +1,6 @@
 use crate::editor_session::{EditorSession, KeyframeDragMember};
 use rhythm_core::{
-    animation::Animated,
+    animation::{Animated, EasingPreset},
     ids::{EffectId, KeyframeId, ObjectId},
     project::{EffectKind, ObjectContent, Project},
     property::{AnimatableProperty, EffectAnimatableProperty, property_keyframe_by_id},
@@ -735,6 +735,15 @@ pub fn draw_timeline(
     draw_timeline_rows(ui, session, &rows, project, tempo_map, ruler_transform);
 }
 
+pub fn draw_easing_preset_menu(ui: &mut egui::Ui, session: &mut EditorSession) {
+    for preset in EasingPreset::ALL {
+        if ui.button(preset.label()).clicked() {
+            session.request_selected_keyframe_easing(preset);
+            ui.close();
+        }
+    }
+}
+
 fn draw_empty_state_label(ui: &egui::Ui, rect: egui::Rect, text: &str) {
     ui.painter().text(
         rect.center(),
@@ -901,6 +910,18 @@ fn draw_timeline_rows(
                                         session.select_only_keyframe(keyframe.id);
                                     }
                                 }
+                                if response.secondary_clicked() {
+                                    // Preserve existing multi-selection on right click.
+                                    session.focus_property(*object_id, animatable_property);
+                                    if !session.is_keyframe_selected(keyframe.id) {
+                                        session.select_only_keyframe(keyframe.id);
+                                    }
+                                }
+                                response.context_menu(|ui| {
+                                    ui.label("Outgoing easing");
+                                    ui.separator();
+                                    draw_easing_preset_menu(ui, session);
+                                });
                                 if response.drag_started() {
                                     session.focus_property(*object_id, animatable_property);
                                     if !session.is_keyframe_selected(keyframe.id) {
@@ -1669,6 +1690,134 @@ mod tests {
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].id.get(), 3);
         assert_eq!(visible[0].tick, MusicalTick::new(240));
+    }
+
+    /// Deterministic single-property stress fixture: 10,000 sorted, unique
+    /// quarter-grid keyframes, without allocating an image or audio asset.
+    fn large_keyframe_project(key_count: usize) -> rhythm_core::project::Project {
+        use rhythm_core::{
+            animation::{Animated, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            ids::{KeyframeId, ObjectId},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{DurationNs, MusicalTick},
+        };
+
+        let settings = ProjectSettings {
+            duration: DurationNs::new(800_000_000_000),
+            ..Default::default()
+        };
+        let tempo = TempoMap::with_initial_tempo(
+            GridOffsetNs::new(0),
+            BpmMicros::new(120_000_000).expect("120 BPM"),
+            TimeSignature::default(),
+        );
+        let keys = (0..key_count)
+            .map(|index| {
+                Keyframe::new(
+                    KeyframeId::new(index as u64 + 2).expect("nonzero id"),
+                    MusicalTick::new(index as i64 * 120),
+                    (index % 100) as f32 / 100.0,
+                    Interpolation::Linear,
+                )
+            })
+            .collect();
+        let mut project = Project::new("10k timeline keys", settings, tempo);
+        project.composition.objects.push(Object {
+            id: ObjectId::new(1).expect("object id"),
+            name: "Dense opacity".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(Vec2::new(0.0, 0.0).expect("position")),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::with_keyframes(1.0, keys).expect("unique increasing keys"),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(100.0, 50.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = key_count as u64 + 2;
+        project
+    }
+
+    fn narrow_timeline_shape_count(project: &rhythm_core::project::Project) -> usize {
+        let mut session = crate::editor_session::EditorSession::default();
+        assert!(session.zoom_timeline(project.settings.duration, ProjectTimeNs::new(0), 400.0,));
+
+        let context = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1_000.0, 360.0),
+            )),
+            ..Default::default()
+        };
+        let mut output = context.run_ui(raw_input, |ui| {
+            super::draw_timeline(ui, &mut session, project, None);
+        });
+        let shape_count = output.shapes.len();
+        // The headless test has no GPU to upload font textures to. Acknowledge
+        // the egui delta explicitly; otherwise epaint asserts when it is dropped.
+        output.textures_delta.clear();
+        shape_count
+    }
+
+    #[test]
+    fn ten_thousand_keys_query_and_draw_only_visible_key_glyphs() {
+        use rhythm_core::{ids::ObjectId, time::MusicalTick};
+
+        let large = large_keyframe_project(10_000);
+        assert!(large.validate().is_ok());
+        let small = large_keyframe_project(64);
+        let object = ObjectId::new(1).expect("object id");
+
+        let visible = query_visible_keyframes(
+            &large,
+            object,
+            super::TimelineProperty::Opacity,
+            MusicalTick::new(960_000),
+            MusicalTick::new(961_200),
+        );
+        assert_eq!(visible.len(), 11);
+        assert_eq!(visible.first().expect("first").id.get(), 8_002);
+        assert_eq!(visible.last().expect("last").id.get(), 8_012);
+
+        let after_end = query_visible_keyframes(
+            &large,
+            object,
+            super::TimelineProperty::Opacity,
+            MusicalTick::new(1_200_000),
+            MusicalTick::new(1_200_960),
+        );
+        assert!(after_end.is_empty());
+
+        // A fixed 2-second viewport must create roughly the same number of
+        // painter shapes regardless of the 10k total project keyframe count.
+        // This guards against accidental iteration/drawing of every key glyph.
+        let empty_shapes = narrow_timeline_shape_count(&large_keyframe_project(0));
+        let small_shapes = narrow_timeline_shape_count(&small);
+        let large_shapes = narrow_timeline_shape_count(&large);
+        assert!(
+            large_shapes >= empty_shapes + 20,
+            "expected visible keyframe diamonds: empty {empty_shapes}, dense {large_shapes}"
+        );
+        assert!(
+            large_shapes < 1_000,
+            "large view drew {large_shapes} shapes"
+        );
+        assert!(
+            large_shapes <= small_shapes + 10,
+            "shape count grew with nonvisible keys: {small_shapes} to {large_shapes}"
+        );
     }
 
     #[test]

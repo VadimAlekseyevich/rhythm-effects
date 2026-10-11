@@ -994,7 +994,9 @@ fn resample_decoded_audio(
         .process_all(&input, frame_count, None)
         .map_err(|error| AudioDecodeError::Resample(error.to_string()))?;
 
-    // FFT padding can produce one extra frame; preserve the intended duration.
+    // Rubato's FFT block processing can return one extra endpoint frame.
+    // Playback duration must follow the input frame count and sample-rate
+    // ratio, not the implementation-specific padded FFT output length.
     let target_frames = (frame_count as u128 * u128::from(output_sample_rate)
         + u128::from(audio.sample_rate) / 2)
         / u128::from(audio.sample_rate);
