@@ -1759,10 +1759,8 @@ mod tests {
             )),
             ..Default::default()
         };
-        let output = context.run(raw_input, |context| {
-            egui::CentralPanel::default().show(context, |ui| {
-                super::draw_timeline(ui, &mut session, project, None);
-            });
+        let output = context.run_ui(raw_input, |ui| {
+            super::draw_timeline(ui, &mut session, project, None);
         });
         output.shapes.len()
     }
