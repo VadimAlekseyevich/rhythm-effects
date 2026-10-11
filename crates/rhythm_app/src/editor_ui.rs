@@ -114,6 +114,14 @@ pub fn draw_editor_shell(
                 ui.add_enabled_ui(session.selected_keyframe_count() > 0, |ui| {
                     ui.menu_button("Easing", |ui| draw_easing_preset_menu(ui, session));
                 });
+                let mut follow = session.follow_playhead_enabled();
+                if ui
+                    .checkbox(&mut follow, "Follow Playhead")
+                    .on_hover_text("Scroll near timeline edges during audio playback. Manual pan turns this off.")
+                    .changed()
+                {
+                    session.set_follow_playhead_enabled(follow);
+                }
             });
             ui.separator();
             draw_timeline(ui, session, project, waveform);
