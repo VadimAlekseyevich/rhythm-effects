@@ -34,13 +34,7 @@ pub fn hit_test_rectangle(object: &Object, continuous_tick: f64, composition_poi
         return false;
     };
 
-    // Floating-point trigonometry can differ by a few ULPs at edges.
-    let epsilon_x = f64::from(size.x()).max(1.0) * 1e-9;
-    let epsilon_y = f64::from(size.y()).max(1.0) * 1e-9;
-    local_x >= -epsilon_x
-        && local_x <= f64::from(size.x()) + epsilon_x
-        && local_y >= -epsilon_y
-        && local_y <= f64::from(size.y()) + epsilon_y
+    rectangle_bounds_hit(local_x, local_y, size)
 }
 
 /// Tests an ellipse contained in the object's unrounded local Size rectangle.
@@ -69,6 +63,60 @@ pub fn hit_test_ellipse(object: &Object, continuous_tick: f64, composition_point
 
     // Inclusive curve with tiny normalized tolerance for trig/rounding noise.
     norm_x * norm_x + norm_y * norm_y <= 1.0 + 1e-9
+}
+
+/// Tests image bounds using already prepared intrinsic pixel dimensions.
+///
+/// The image object stores only an AssetId; dimensions come from an external
+/// decoded/prepared-image metadata cache. The supplied asset ID must match the
+/// object's image source to avoid picking using stale dimensions after Relink.
+/// Missing metadata, zero dimensions and non-image objects never hit.
+///
+/// This function performs no image decoding, I/O, allocation or GPU readback.
+/// Size is an unscaled, uncropped local pixel rectangle; the shared inverse
+/// transform applies Position, Rotation, Scale (including mirroring) and Anchor.
+/// Hidden/locked filtering and viewport-camera conversion are separate concerns.
+#[must_use]
+pub fn hit_test_image(
+    object: &Object,
+    continuous_tick: f64,
+    composition_point: Vec2,
+    intrinsic_size: Option<(crate::ids::AssetId, [u32; 2])>,
+) -> bool {
+    let ObjectContent::Image(image) = &object.content else {
+        return false;
+    };
+    if !continuous_tick.is_finite() {
+        return false;
+    }
+
+    let Some((asset_id, [width, height])) = intrinsic_size else {
+        return false;
+    };
+    if asset_id != image.asset || width == 0 || height == 0 {
+        return false;
+    }
+
+    // All u32 image dimensions can be represented as finite f32 coordinates.
+    // No local Size is added to the semantic Project schema.
+    let size = Vec2::new(width as f32, height as f32).expect("u32 pixel sizes are finite");
+    let Some((local_x, local_y)) =
+        inverse_transform_point(object, size, continuous_tick, composition_point)
+    else {
+        return false;
+    };
+
+    rectangle_bounds_hit(local_x, local_y, size)
+}
+
+fn rectangle_bounds_hit(local_x: f64, local_y: f64, size: Vec2) -> bool {
+    // Inclusive edges with minimal tolerance for f64 trigonometric rounding.
+    let epsilon_x = f64::from(size.x()).max(1.0) * 1e-9;
+    let epsilon_y = f64::from(size.y()).max(1.0) * 1e-9;
+    local_x >= -epsilon_x
+        && local_x <= f64::from(size.x()) + epsilon_x
+        && local_y >= -epsilon_y
+        && local_y <= f64::from(size.y()) + epsilon_y
 }
 
 /// Inverts the exact same affine transform for every geometric object.
@@ -112,12 +160,14 @@ fn inverse_transform_point(
 
 #[cfg(test)]
 mod tests {
-    use super::{hit_test_ellipse, hit_test_rectangle};
+    use super::{hit_test_ellipse, hit_test_image, hit_test_rectangle};
     use crate::{
         animation::{Animated, Interpolation, Keyframe},
         domain::{LinearRgba, Vec2},
-        ids::{KeyframeId, ObjectId},
-        project::{EllipseObject, Object, ObjectContent, RectangleObject, TransformAnimation},
+        ids::{AssetId, KeyframeId, ObjectId},
+        project::{
+            EllipseObject, ImageObject, Object, ObjectContent, RectangleObject, TransformAnimation,
+        },
         time::MusicalTick,
     };
 
@@ -154,6 +204,228 @@ mod tests {
             fill: Animated::new_static(LinearRgba::black_opaque()),
         });
         object
+    }
+
+    fn image() -> Object {
+        let mut object = rectangle();
+        object.content = ObjectContent::Image(ImageObject {
+            asset: AssetId::new(2).expect("asset id"),
+        });
+        object
+    }
+
+    fn intrinsic(width: u32, height: u32) -> Option<(AssetId, [u32; 2])> {
+        Some((AssetId::new(2).expect("asset id"), [width, height]))
+    }
+
+    #[test]
+    fn image_uses_intrinsic_pixel_bounds_with_inclusive_edges() {
+        let object = image();
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(150.0, 80.0),
+            intrinsic(100, 40)
+        ));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(250.0, 120.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(149.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 121.0),
+            intrinsic(100, 40)
+        ));
+    }
+
+    #[test]
+    fn image_picking_inverts_rotation_and_noncentral_anchor() {
+        let mut object = image();
+        object.transform.anchor = Animated::new_static(vec2(0.0, 0.0));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(300.0, 140.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(199.0, 100.0),
+            intrinsic(100, 40)
+        ));
+
+        object.transform.anchor = Animated::new_static(vec2(0.5, 0.5));
+        object.transform.rotation_degrees = Animated::new_static(90.0);
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 149.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(230.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 151.0),
+            intrinsic(100, 40)
+        ));
+    }
+
+    #[test]
+    fn image_hit_supports_mirrored_nonuniform_scale() {
+        let mut object = image();
+        object.transform.anchor = Animated::new_static(vec2(0.0, 0.0));
+        object.transform.scale = Animated::new_static(vec2(-2.0, 0.5));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(0.0, 120.0),
+            intrinsic(100, 40)
+        ));
+        assert!(hit_test_image(
+            &object,
+            0.0,
+            vec2(150.0, 110.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(201.0, 110.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(150.0, 121.0),
+            intrinsic(100, 40)
+        ));
+    }
+
+    #[test]
+    fn image_hit_rejects_missing_stale_or_zero_asset_dimensions() {
+        let object = image();
+        assert!(!hit_test_image(&object, 0.0, vec2(200.0, 100.0), None));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(0, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 0)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            Some((AssetId::new(3).expect("other asset"), [100, 40])),
+        ));
+        assert!(!hit_test_image(
+            &rectangle(),
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_rectangle(&object, 0.0, vec2(200.0, 100.0)));
+    }
+
+    #[test]
+    fn image_hit_rejects_singular_transform_and_invalid_time() {
+        let mut object = image();
+        object.transform.scale = Animated::new_static(vec2(1.0, 0.0));
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        object.transform.scale = Animated::new_static(vec2(1.0, 1.0));
+        object.transform.rotation_degrees = Animated::new_static(f32::NAN);
+        assert!(!hit_test_image(
+            &object,
+            0.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        object.transform.rotation_degrees = Animated::new_static(0.0);
+        assert!(!hit_test_image(
+            &object,
+            f64::NAN,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
+    }
+
+    #[test]
+    fn image_hit_evaluates_animated_position_at_the_requested_tick() {
+        let mut object = image();
+        object.transform.position = Animated::with_keyframes(
+            vec2(200.0, 100.0),
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(3).expect("key id"),
+                    MusicalTick::new(0),
+                    vec2(200.0, 100.0),
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(4).expect("key id"),
+                    MusicalTick::new(960),
+                    vec2(400.0, 100.0),
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("unique keys");
+        assert!(hit_test_image(
+            &object,
+            480.0,
+            vec2(300.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            480.0,
+            vec2(200.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(hit_test_image(
+            &object,
+            960.0,
+            vec2(400.0, 100.0),
+            intrinsic(100, 40)
+        ));
+        assert!(!hit_test_image(
+            &object,
+            f64::NAN,
+            vec2(400.0, 100.0),
+            intrinsic(100, 40)
+        ));
     }
 
     #[test]

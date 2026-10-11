@@ -74,6 +74,8 @@ AI-162 implements `rhythm_core::hit_test::hit_test_rectangle` for a composition-
 
 AI-163 adds `rhythm_core::hit_test::hit_test_ellipse`, reusing the exact same inverse object transform as Rectangle. Its local shape is the mathematical ellipse within evaluated Size (center = half Size, radii = half Size) irrespective of Anchor; transformed bounding-box corners must not count as hits. The ellipse curve is inclusive with a minimal normalized floating-point tolerance. Nonpositive Size, zero Scale, invalid rotation/tick and the wrong object kind miss. Viewport camera conversion and selection remain separate work.
 
+AI-164 adds `rhythm_core::hit_test::hit_test_image`. Image local bounds are the **source's decoded intrinsic pixel dimensions**; the semantic `ImageObject` still stores only `AssetId`. The caller supplies optional prepared metadata `(AssetId, [width_px, height_px])`; missing, stale (mismatched AssetId) or zero-size dimensions must miss instead of guessing a fallback box or performing synchronous file decode. The same CPU inverse Position/Rotation/Scale/Anchor helper used by Rectangle and Ellipse is reused for image rectangular bounds, including mirrored or nonuniform transforms. No project-schema change, disk access, GPU readback or viewport integration is introduced by this task.
+
 ## 8. Locked/hidden objects
 
 Hidden objects are not rendered or pointer-selectable.
