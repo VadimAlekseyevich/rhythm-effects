@@ -18,9 +18,11 @@ The original [MVP_PLAN.md](MVP_PLAN.md) is retained as historical planning conte
 
 ## Current status
 
-**M0 — Architecture Contract: complete.**
+**Architecture contract accepted; Rust implementation in progress (not MVP-ready).**
 
-The repository is documentation-complete for the MVP architecture and ready to begin implementation milestones. Canonical specs are Accepted; implementation changes must update specs/ADRs rather than silently diverging.
+The Windows CI validates the workspace format, Clippy, unit tests, and build. The app currently exposes a GPU/egui shell, editor session, and timeline foundations, but the end-to-end audio transport, scene rendering, object editing, project save/open and measured reference-machine release gates are not complete. Several feature tasks remain in unmerged pull requests. Do not infer product readiness from a green CI run or a task checkbox.
+
+See the [2026-10-11 Codebase Health Review](docs/06-quality/CODEBASE_HEALTH_REVIEW_2026-10-11.md) for prioritized integration risks and quality gates. Canonical specs are Accepted; implementation changes must update specs/ADRs rather than silently diverging.
 
 ## Local Windows setup
 
