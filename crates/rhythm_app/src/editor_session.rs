@@ -97,6 +97,7 @@ pub struct EditorSession {
     playhead: ProjectTimeNs,
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
+    follow_playhead: bool,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -113,6 +114,7 @@ impl Default for EditorSession {
             playhead: ProjectTimeNs::new(0),
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
+            follow_playhead: false,
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
@@ -132,6 +134,66 @@ impl EditorSession {
 
     pub const fn seek_paused(&mut self, project_time: ProjectTimeNs) {
         self.playhead = project_time;
+    }
+
+    #[must_use]
+    pub const fn follow_playhead_enabled(&self) -> bool {
+        self.follow_playhead
+    }
+
+    pub fn set_follow_playhead_enabled(&mut self, enabled: bool) {
+        self.follow_playhead = enabled;
+    }
+
+    /// Accept only positions sourced from the audible audio clock while playing.
+    /// The app's audio transport will call this after it is connected; never
+    /// estimate playback from UI frame deltas.
+    #[allow(dead_code)]
+    pub fn update_playhead_from_audio_clock(
+        &mut self,
+        audible_time: ProjectTimeNs,
+        duration: DurationNs,
+    ) -> bool {
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let next_playhead = ProjectTimeNs::new(audible_time.get().clamp(0, duration_ns));
+        let changed = self.playhead != next_playhead;
+        self.playhead = next_playhead;
+        self.follow_playhead_during_playback(duration) || changed
+    }
+
+    /// Follow at the viewport edges rather than continuously centering the playhead.
+    /// A 1/8-width trigger zone and 1/5-width landing inset prevent oscillation.
+    fn follow_playhead_during_playback(&mut self, duration: DurationNs) -> bool {
+        if !self.follow_playhead {
+            return false;
+        }
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let (start, end) = self.timeline_range(duration);
+        let span = end.get() - start.get();
+        if span >= duration_ns || span < 5 {
+            return false;
+        }
+
+        let trigger_inset = (span / 8).max(1);
+        let landing_inset = (span / 5).max(1);
+        let playhead_ns = self.playhead.get().clamp(0, duration_ns);
+        let desired_start = if playhead_ns < start.get().saturating_add(trigger_inset) {
+            playhead_ns.saturating_sub(landing_inset)
+        } else if playhead_ns > end.get().saturating_sub(trigger_inset) {
+            playhead_ns.saturating_sub(span - landing_inset)
+        } else {
+            return false;
+        };
+
+        let new_start = desired_start.clamp(0, duration_ns - span);
+        if new_start == start.get() {
+            return false;
+        }
+        self.timeline_view = Some(TimelineView {
+            start: ProjectTimeNs::new(new_start),
+            end: ProjectTimeNs::new(new_start.saturating_add(span)),
+        });
+        true
     }
 
     #[must_use]
@@ -781,6 +843,9 @@ impl EditorSession {
             return false;
         }
 
+        // A deliberate pan cancels following even if this gesture is clamped
+        // at the timeline boundary or rounds to less than one nanosecond.
+        self.follow_playhead = false;
         let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
         let (start, end) = self.timeline_range(duration);
         let span = (end.get() - start.get()).max(1);
@@ -995,6 +1060,181 @@ mod tests {
                 ProjectTimeNs::new(7_500_000_000),
             )
         );
+    }
+
+    #[test]
+    fn follow_playhead_defaults_off_and_never_follows_manual_seeks() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(!session.follow_playhead_enabled());
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(3_000_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        session.set_follow_playhead_enabled(true);
+        session.seek_paused(ProjectTimeNs::new(7_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        // The next authoritative audio tick, not the paused seek, is allowed to follow.
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(7_000_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(5_400_000_000),
+                ProjectTimeNs::new(7_400_000_000),
+            )
+        );
+    }
+
+    #[test]
+    fn follow_playhead_moves_only_near_edges_and_preserves_zoom_span() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+        session.set_follow_playhead_enabled(true);
+
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(1_500_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(1_800_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(200_000_000),
+                ProjectTimeNs::new(2_200_000_000),
+            )
+        );
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(1_900_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(200_000_000),
+                ProjectTimeNs::new(2_200_000_000),
+            )
+        );
+
+        // Seeking to an earlier audible position shifts left without re-centering.
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(100_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+        assert!(!session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(100_000_000),
+            duration,
+        ));
+    }
+
+    #[test]
+    fn manual_pan_disables_follow_until_user_reenables_it() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+        session.set_follow_playhead_enabled(true);
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(1_800_000_000),
+            duration,
+        ));
+
+        assert!(session.pan_timeline_points(duration, -200.0, 1_000.0));
+        assert!(!session.follow_playhead_enabled());
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(600_000_000),
+                ProjectTimeNs::new(2_600_000_000),
+            )
+        );
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(2_900_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(600_000_000),
+                ProjectTimeNs::new(2_600_000_000),
+            )
+        );
+        session.set_follow_playhead_enabled(true);
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(2_900_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(1_300_000_000),
+                ProjectTimeNs::new(3_300_000_000),
+            )
+        );
+
+        // A real pan attempt disables follow even at a clamped/full-width boundary.
+        session.set_follow_playhead_enabled(true);
+        assert!(!session.pan_timeline_points(duration, 1_000_000.0, 1_000.0));
+        assert!(!session.follow_playhead_enabled());
+    }
+
+    #[test]
+    fn playback_follow_clamps_to_project_bounds_without_zooming() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        session.set_follow_playhead_enabled(true);
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(15_000_000_000),
+            duration,
+        ));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(10_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(10_000_000_000))
+        );
+
+        assert!(session.zoom_timeline(
+            duration,
+            ProjectTimeNs::new(10_000_000_000),
+            5.0,
+        ));
+        assert!(session.update_playhead_from_audio_clock(
+            ProjectTimeNs::new(9_990_000_000),
+            duration,
+        ));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(8_000_000_000),
+                ProjectTimeNs::new(10_000_000_000),
+            )
+        );
+        assert!(session.follow_playhead_enabled());
     }
 
     #[test]
