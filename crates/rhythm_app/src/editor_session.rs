@@ -1198,8 +1198,9 @@ mod tests {
         );
 
         // A real pan attempt disables follow even at a clamped/full-width boundary.
+        assert!(session.pan_timeline_points(duration, -1_000_000.0, 1_000.0));
         session.set_follow_playhead_enabled(true);
-        assert!(!session.pan_timeline_points(duration, 1_000_000.0, 1_000.0));
+        assert!(!session.pan_timeline_points(duration, -1_000.0, 1_000.0));
         assert!(!session.follow_playhead_enabled());
     }
 
