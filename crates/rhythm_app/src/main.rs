@@ -390,13 +390,9 @@ impl ApplicationHandler for RhythmApp {
                             locked: false,
                             transform: TransformAnimation::new(
                                 Animated::new_static(center),
-                                Animated::new_static(
-                                    Vec2::new(1.0, 1.0).expect("finite scale"),
-                                ),
+                                Animated::new_static(Vec2::new(1.0, 1.0).expect("finite scale")),
                                 Animated::new_static(0.0),
-                                Animated::new_static(
-                                    Vec2::new(0.5, 0.5).expect("finite anchor"),
-                                ),
+                                Animated::new_static(Vec2::new(0.5, 0.5).expect("finite anchor")),
                                 Animated::new_static(1.0),
                             ),
                             content: ObjectContent::Rectangle(RectangleObject {
