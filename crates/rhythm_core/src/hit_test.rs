@@ -188,8 +188,12 @@ pub fn pick_topmost_object(
             return None;
         }
         let hit = match &object.content {
-            ObjectContent::Rectangle(_) => hit_test_rectangle(object, continuous_tick, composition_point),
-            ObjectContent::Ellipse(_) => hit_test_ellipse(object, continuous_tick, composition_point),
+            ObjectContent::Rectangle(_) => {
+                hit_test_rectangle(object, continuous_tick, composition_point)
+            }
+            ObjectContent::Ellipse(_) => {
+                hit_test_ellipse(object, continuous_tick, composition_point)
+            }
             ObjectContent::Image(image) => hit_test_image(
                 object,
                 continuous_tick,
@@ -235,12 +239,10 @@ impl OutlineGeometry {
         if !u.is_finite() || !v.is_finite() {
             return None;
         }
-        let x = (u - f64::from(self.anchor.x()))
-            * f64::from(self.size.x())
-            * f64::from(self.scale.x());
-        let y = (v - f64::from(self.anchor.y()))
-            * f64::from(self.size.y())
-            * f64::from(self.scale.y());
+        let x =
+            (u - f64::from(self.anchor.x())) * f64::from(self.size.x()) * f64::from(self.scale.x());
+        let y =
+            (v - f64::from(self.anchor.y())) * f64::from(self.size.y()) * f64::from(self.scale.y());
         let px = f64::from(self.position.x()) + self.cos * x - self.sin * y;
         let py = f64::from(self.position.y()) + self.sin * x + self.cos * y;
         if !px.is_finite() || !py.is_finite() {
