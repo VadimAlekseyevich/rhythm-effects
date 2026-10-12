@@ -1823,6 +1823,42 @@ mod tests {
     }
 
     #[test]
+    fn created_objects_have_monotonic_ids_even_after_undo() {
+        let project = Project::new(
+            "new",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let first = editor.create_object(object(999, "first")).expect("add first");
+        assert_eq!(first.get(), 1);
+        assert_eq!(editor.project().next_entity_id, 2);
+        assert_eq!(editor.project().composition.objects[0].id, first);
+        assert!(editor.undo().expect("undo"));
+        assert!(editor.project().composition.objects.is_empty());
+        let second = editor.create_object(object(999, "second")).expect("add second");
+        assert_eq!(second.get(), 2);
+        assert_eq!(editor.project().next_entity_id, 3);
+        assert_eq!(editor.project().composition.objects[0].id, second);
+    }
+
+    #[test]
+    fn failed_create_object_restores_allocator_and_project() {
+        let project = Project::new(
+            "new",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut invalid = object(999, "invalid");
+        invalid.transform.opacity = Animated::new_static(2.0);
+        assert!(editor.create_object(invalid).is_err());
+        assert_eq!(editor.project().next_entity_id, 1);
+        assert!(editor.project().composition.objects.is_empty());
+        assert_eq!(editor.history_len(), 0);
+    }
+
+    #[test]
     fn batch_insert_allocates_fresh_ids_and_restores_collision_on_undo() {
         let mut editor = editor_with_object();
         let object_id = ObjectId::new(1).expect("object id");
