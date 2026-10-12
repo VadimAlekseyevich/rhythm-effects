@@ -462,7 +462,9 @@ impl ProjectEditor {
             Ok(true) => Ok(id),
             Ok(false) => {
                 self.project.next_entity_id = previous_next_entity_id;
-                Err(EditError::HistoryInvariant("AddObject unexpectedly did not change project"))
+                Err(EditError::HistoryInvariant(
+                    "AddObject unexpectedly did not change project",
+                ))
             }
             Err(error) => {
                 self.project.next_entity_id = previous_next_entity_id;
@@ -1830,13 +1832,17 @@ mod tests {
             TempoMap::unset(GridOffsetNs::new(0)),
         );
         let mut editor = ProjectEditor::new(project).expect("valid project");
-        let first = editor.create_object(object(999, "first")).expect("add first");
+        let first = editor
+            .create_object(object(999, "first"))
+            .expect("add first");
         assert_eq!(first.get(), 1);
         assert_eq!(editor.project().next_entity_id, 2);
         assert_eq!(editor.project().composition.objects[0].id, first);
         assert!(editor.undo().expect("undo"));
         assert!(editor.project().composition.objects.is_empty());
-        let second = editor.create_object(object(999, "second")).expect("add second");
+        let second = editor
+            .create_object(object(999, "second"))
+            .expect("add second");
         assert_eq!(second.get(), 2);
         assert_eq!(editor.project().next_entity_id, 3);
         assert_eq!(editor.project().composition.objects[0].id, second);
