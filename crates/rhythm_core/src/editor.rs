@@ -445,6 +445,34 @@ impl ProjectEditor {
         self.history.mark_saved();
     }
 
+    /// Adds a new object using the project's monotonic ID allocator.
+    ///
+    /// The new ID is never reused after Undo. On failure both the object and
+    /// the allocator counter are rolled back. Ordinary AddObject commands
+    /// remain available for import/replay with explicitly assigned IDs.
+    pub fn create_object(&mut self, mut object: Object) -> Result<ObjectId, EditError> {
+        let mut allocator = EntityIdAllocator::new(self.project.next_entity_id)?;
+        let id = allocator.allocate_object()?;
+        let previous_next_entity_id = self.project.next_entity_id;
+        object.id = id;
+        self.project.next_entity_id = allocator.next_entity_id();
+        match self.execute(EditCommand::AddObject {
+            object: Box::new(object),
+        }) {
+            Ok(true) => Ok(id),
+            Ok(false) => {
+                self.project.next_entity_id = previous_next_entity_id;
+                Err(EditError::HistoryInvariant(
+                    "AddObject unexpectedly did not change project",
+                ))
+            }
+            Err(error) => {
+                self.project.next_entity_id = previous_next_entity_id;
+                Err(error)
+            }
+        }
+    }
+
     pub fn next_keyframe_id(&self) -> Result<KeyframeId, EditError> {
         let mut allocator = EntityIdAllocator::new(self.project.next_entity_id)?;
         Ok(allocator.allocate_keyframe()?)
@@ -1794,6 +1822,46 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn created_objects_have_monotonic_ids_even_after_undo() {
+        let project = Project::new(
+            "new",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let first = editor
+            .create_object(object(999, "first"))
+            .expect("add first");
+        assert_eq!(first.get(), 1);
+        assert_eq!(editor.project().next_entity_id, 2);
+        assert_eq!(editor.project().composition.objects[0].id, first);
+        assert!(editor.undo().expect("undo"));
+        assert!(editor.project().composition.objects.is_empty());
+        let second = editor
+            .create_object(object(999, "second"))
+            .expect("add second");
+        assert_eq!(second.get(), 2);
+        assert_eq!(editor.project().next_entity_id, 3);
+        assert_eq!(editor.project().composition.objects[0].id, second);
+    }
+
+    #[test]
+    fn failed_create_object_restores_allocator_and_project() {
+        let project = Project::new(
+            "new",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let mut invalid = object(999, "invalid");
+        invalid.transform.opacity = Animated::new_static(2.0);
+        assert!(editor.create_object(invalid).is_err());
+        assert_eq!(editor.project().next_entity_id, 1);
+        assert!(editor.project().composition.objects.is_empty());
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]

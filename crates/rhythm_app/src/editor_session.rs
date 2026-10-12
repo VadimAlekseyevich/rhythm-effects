@@ -98,6 +98,7 @@ pub struct EditorSession {
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
     follow_playhead: bool,
+    selected_object: Option<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -115,6 +116,7 @@ impl Default for EditorSession {
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
             follow_playhead: false,
+            selected_object: None,
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
@@ -127,6 +129,16 @@ impl Default for EditorSession {
 }
 
 impl EditorSession {
+    #[must_use]
+    pub const fn selected_object(&self) -> Option<ObjectId> {
+        self.selected_object
+    }
+
+    /// Plain click replaces object selection; empty-space click clears it.
+    pub fn select_viewport_object(&mut self, object_id: Option<ObjectId>) {
+        self.selected_object = object_id;
+    }
+
     #[must_use]
     pub const fn playhead(&self) -> ProjectTimeNs {
         self.playhead
@@ -1025,6 +1037,20 @@ mod tests {
             Some(([10.0, 20.0], [30.0, 40.0], true))
         );
         assert!(session.timeline_box_selection().is_none());
+    }
+
+    #[test]
+    fn viewport_plain_click_replaces_and_clears_single_object_selection() {
+        let mut session = EditorSession::default();
+        let a = ObjectId::new(1).expect("id");
+        let b = ObjectId::new(2).expect("id");
+        assert_eq!(session.selected_object(), None);
+        session.select_viewport_object(Some(a));
+        assert_eq!(session.selected_object(), Some(a));
+        session.select_viewport_object(Some(b));
+        assert_eq!(session.selected_object(), Some(b));
+        session.select_viewport_object(None);
+        assert_eq!(session.selected_object(), None);
     }
 
     #[test]
