@@ -445,6 +445,32 @@ impl ProjectEditor {
         self.history.mark_saved();
     }
 
+    /// Adds a new object using the project's monotonic ID allocator.
+    ///
+    /// The new ID is never reused after Undo. On failure both the object and
+    /// the allocator counter are rolled back. Ordinary AddObject commands
+    /// remain available for import/replay with explicitly assigned IDs.
+    pub fn create_object(&mut self, mut object: Object) -> Result<ObjectId, EditError> {
+        let mut allocator = EntityIdAllocator::new(self.project.next_entity_id)?;
+        let id = allocator.allocate_object()?;
+        let previous_next_entity_id = self.project.next_entity_id;
+        object.id = id;
+        self.project.next_entity_id = allocator.next_entity_id();
+        match self.execute(EditCommand::AddObject {
+            object: Box::new(object),
+        }) {
+            Ok(true) => Ok(id),
+            Ok(false) => {
+                self.project.next_entity_id = previous_next_entity_id;
+                Err(EditError::HistoryInvariant("AddObject unexpectedly did not change project"))
+            }
+            Err(error) => {
+                self.project.next_entity_id = previous_next_entity_id;
+                Err(error)
+            }
+        }
+    }
+
     pub fn next_keyframe_id(&self) -> Result<KeyframeId, EditError> {
         let mut allocator = EntityIdAllocator::new(self.project.next_entity_id)?;
         Ok(allocator.allocate_keyframe()?)
