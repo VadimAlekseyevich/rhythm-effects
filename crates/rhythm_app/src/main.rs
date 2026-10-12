@@ -11,7 +11,13 @@ use std::time::Instant;
 use editor_session::EditorSession;
 use editor_ui::DiagnosticsView;
 use gpu::GpuContext;
-use rhythm_core::APP_NAME;
+use rhythm_core::{
+    APP_NAME,
+    animation::Animated,
+    domain::{LinearRgba, Vec2},
+    ids::ObjectId,
+    project::{Object, ObjectContent, RectangleObject, TransformAnimation},
+};
 use rhythm_engine::renderer::Renderer;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -356,6 +362,7 @@ impl ApplicationHandler for RhythmApp {
                     }
 
                     let raw_input = egui_state.take_egui_input(window);
+                    let mut add_rectangle_requested = false;
                     let full_output = egui_context.run_ui(raw_input, |root_ui| {
                         if let Some(diagnostics) = self.diagnostics.as_ref() {
                             editor_ui::draw_editor_shell(
@@ -365,9 +372,50 @@ impl ApplicationHandler for RhythmApp {
                                 diagnostics,
                                 self.composition_texture_id,
                                 self.waveform.as_ref(),
+                                &mut add_rectangle_requested,
                             );
                         }
                     });
+                    if add_rectangle_requested {
+                        let project = self.project_editor.project();
+                        let center = Vec2::new(
+                            project.settings.composition_width as f32 * 0.5,
+                            project.settings.composition_height as f32 * 0.5,
+                        )
+                        .expect("finite composition center");
+                        let object = Object {
+                            id: ObjectId::new(1).expect("nonzero placeholder ID"),
+                            name: format!("Rectangle {}", project.next_entity_id),
+                            visible: true,
+                            locked: false,
+                            transform: TransformAnimation::new(
+                                Animated::new_static(center),
+                                Animated::new_static(
+                                    Vec2::new(1.0, 1.0).expect("finite scale"),
+                                ),
+                                Animated::new_static(0.0),
+                                Animated::new_static(
+                                    Vec2::new(0.5, 0.5).expect("finite anchor"),
+                                ),
+                                Animated::new_static(1.0),
+                            ),
+                            content: ObjectContent::Rectangle(RectangleObject {
+                                size: Animated::new_static(
+                                    Vec2::new(320.0, 180.0).expect("finite rectangle size"),
+                                ),
+                                fill: Animated::new_static(LinearRgba::black_opaque()),
+                                corner_radius: Animated::new_static(0.0),
+                            }),
+                            effects: Vec::new(),
+                        };
+                        match self.project_editor.create_object(object) {
+                            Ok(id) => {
+                                self.session.select_viewport_object(Some(id));
+                                window.request_redraw();
+                            }
+                            Err(error) => warn!(?error, "could not add viewport test Rectangle"),
+                        }
+                    }
                     match self
                         .session
                         .commit_pending_keyframe_move(&mut self.project_editor)
