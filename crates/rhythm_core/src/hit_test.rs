@@ -166,6 +166,131 @@ pub fn hit_test_text(
     rectangle_bounds_hit(local_x, local_y, size)
 }
 
+/// Returns the frontmost selectable object. Composition objects are stored in
+/// painter order, so the last one is topmost. Disabled objects are skipped.
+///
+/// Image and Text require prepared metadata from runtime caches. Missing data
+/// means no hit: this function never guesses bounds or invokes a decoder/shaper.
+/// A plain click's empty-space behavior belongs to EditorSession.
+#[must_use]
+pub fn pick_topmost_object(
+    objects: &[Object],
+    continuous_tick: f64,
+    composition_point: Vec2,
+    image_dimensions: impl Fn(crate::ids::AssetId) -> Option<[u32; 2]>,
+    text_layout: impl Fn(crate::ids::ObjectId) -> Option<TextLayoutBounds>,
+) -> Option<crate::ids::ObjectId> {
+    if !continuous_tick.is_finite() {
+        return None;
+    }
+    objects.iter().rev().find_map(|object| {
+        if !object.visible || object.locked {
+            return None;
+        }
+        let hit = match &object.content {
+            ObjectContent::Rectangle(_) => hit_test_rectangle(object, continuous_tick, composition_point),
+            ObjectContent::Ellipse(_) => hit_test_ellipse(object, continuous_tick, composition_point),
+            ObjectContent::Image(image) => hit_test_image(
+                object,
+                continuous_tick,
+                composition_point,
+                image_dimensions(image.asset).map(|dimensions| (image.asset, dimensions)),
+            ),
+            ObjectContent::Text(_) => hit_test_text(
+                object,
+                continuous_tick,
+                composition_point,
+                text_layout(object.id),
+            ),
+        };
+        hit.then_some(object.id)
+    })
+}
+
+/// Editor-only wireframe kind. The actual composition renderer is separate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutlineKind {
+    Rectangle,
+    Ellipse,
+}
+
+/// Evaluated object geometry reused for selection debug overlays. Positions are
+/// composition pixels, not egui coordinates. Does not draw project content.
+#[derive(Debug, Clone, Copy)]
+pub struct OutlineGeometry {
+    pub kind: OutlineKind,
+    position: Vec2,
+    size: Vec2,
+    scale: Vec2,
+    anchor: Vec2,
+    sin: f64,
+    cos: f64,
+}
+
+impl OutlineGeometry {
+    /// Maps a point expressed as fractions of the local shape size to the
+    /// composition, honoring the same anchor/scale/rotation as the hit test.
+    #[must_use]
+    pub fn point(self, u: f64, v: f64) -> Option<Vec2> {
+        if !u.is_finite() || !v.is_finite() {
+            return None;
+        }
+        let x = (u - f64::from(self.anchor.x()))
+            * f64::from(self.size.x())
+            * f64::from(self.scale.x());
+        let y = (v - f64::from(self.anchor.y()))
+            * f64::from(self.size.y())
+            * f64::from(self.scale.y());
+        let px = f64::from(self.position.x()) + self.cos * x - self.sin * y;
+        let py = f64::from(self.position.y()) + self.sin * x + self.cos * y;
+        if !px.is_finite() || !py.is_finite() {
+            return None;
+        }
+        Vec2::new(px as f32, py as f32).ok()
+    }
+}
+
+/// Geometry for transparent editor-only Rectangle/Ellipse guides until the
+/// actual GPU composition pass is wired. Image/Text need runtime media/layout
+/// metadata, so no false proxy outlines are fabricated for those objects.
+#[must_use]
+pub fn object_outline(object: &Object, continuous_tick: f64) -> Option<OutlineGeometry> {
+    if !continuous_tick.is_finite() {
+        return None;
+    }
+    let (kind, size) = match &object.content {
+        ObjectContent::Rectangle(shape) => (
+            OutlineKind::Rectangle,
+            evaluate_vec2(&shape.size, continuous_tick),
+        ),
+        ObjectContent::Ellipse(shape) => (
+            OutlineKind::Ellipse,
+            evaluate_vec2(&shape.size, continuous_tick),
+        ),
+        _ => return None,
+    };
+    if size.x() <= 0.0 || size.y() <= 0.0 {
+        return None;
+    }
+    let position = evaluate_vec2(&object.transform.position, continuous_tick);
+    let scale = evaluate_vec2(&object.transform.scale, continuous_tick);
+    let anchor = evaluate_vec2(&object.transform.anchor, continuous_tick);
+    let degrees = evaluate_scalar(&object.transform.rotation_degrees, continuous_tick);
+    if scale.x() == 0.0 || scale.y() == 0.0 || !degrees.is_finite() {
+        return None;
+    }
+    let (sin, cos) = f64::from(degrees).to_radians().sin_cos();
+    Some(OutlineGeometry {
+        kind,
+        position,
+        size,
+        scale,
+        anchor,
+        sin,
+        cos,
+    })
+}
+
 fn rectangle_bounds_hit(local_x: f64, local_y: f64, size: Vec2) -> bool {
     // Inclusive edges with minimal tolerance for f64 trigonometric rounding.
     let epsilon_x = f64::from(size.x()).max(1.0) * 1e-9;
@@ -218,7 +343,8 @@ fn inverse_transform_point(
 #[cfg(test)]
 mod tests {
     use super::{
-        TextLayoutBounds, hit_test_ellipse, hit_test_image, hit_test_rectangle, hit_test_text,
+        OutlineKind, TextLayoutBounds, hit_test_ellipse, hit_test_image, hit_test_rectangle,
+        hit_test_text, object_outline, pick_topmost_object,
     };
     use crate::{
         animation::{Animated, Interpolation, Keyframe},
@@ -299,6 +425,87 @@ mod tests {
             min: vec2(min_x, min_y),
             max: vec2(max_x, max_y),
         })
+    }
+
+    #[test]
+    fn frontmost_picking_respects_order_visibility_and_locks() {
+        let mut bottom = rectangle();
+        bottom.id = ObjectId::new(1).expect("id");
+        let mut top = ellipse();
+        top.id = ObjectId::new(2).expect("id");
+        let mut objects = vec![bottom, top];
+        let at = vec2(200.0, 100.0);
+        let pick = |objects: &[Object], point| {
+            pick_topmost_object(objects, 0.0, point, |_| None, |_| None)
+        };
+        assert_eq!(pick(&objects, at), Some(objects[1].id));
+        objects[1].locked = true;
+        assert_eq!(pick(&objects, at), Some(objects[0].id));
+        objects[0].visible = false;
+        assert_eq!(pick(&objects, at), None);
+        objects[1].locked = false;
+        objects[1].visible = false;
+        assert_eq!(pick(&objects, at), None);
+    }
+
+    #[test]
+    fn picker_rejects_ellipse_box_corner_and_selects_rectangle_below() {
+        let bottom = rectangle();
+        let mut top = ellipse();
+        top.id = ObjectId::new(2).expect("id");
+        let point = vec2(249.0, 119.0);
+        assert_eq!(
+            pick_topmost_object(&[bottom.clone(), top], 0.0, point, |_| None, |_| None),
+            Some(bottom.id),
+        );
+        assert_eq!(
+            pick_topmost_object(&[bottom], f64::NAN, point, |_| None, |_| None),
+            None,
+        );
+    }
+
+    #[test]
+    fn picker_requires_prepared_image_and_text_bounds() {
+        let mut image_object = image();
+        image_object.id = ObjectId::new(3).expect("id");
+        let mut text = text_object();
+        text.id = ObjectId::new(4).expect("id");
+        let objects = [image_object, text];
+        let center = vec2(200.0, 100.0);
+        assert_eq!(
+            pick_topmost_object(&objects, 0.0, center, |_| None, |_| None),
+            None,
+        );
+        assert_eq!(
+            pick_topmost_object(&objects, 0.0, center, |_| Some([100, 40]), |_| None),
+            Some(objects[0].id),
+        );
+        assert_eq!(
+            pick_topmost_object(
+                &objects,
+                0.0,
+                center,
+                |_| Some([100, 40]),
+                |_| layout(0.0, 0.0, 100.0, 40.0),
+            ),
+            Some(objects[1].id),
+        );
+    }
+
+    #[test]
+    fn editor_outline_and_cpu_hit_test_share_rotated_mirrored_transform() {
+        let mut rectangle = rectangle();
+        rectangle.transform.scale = Animated::new_static(vec2(-2.0, 0.5));
+        rectangle.transform.rotation_degrees = Animated::new_static(45.0);
+        let geometry = object_outline(&rectangle, 0.0).expect("valid outline");
+        assert_eq!(geometry.kind, OutlineKind::Rectangle);
+        for (u, v) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] {
+            let point = geometry.point(u, v).expect("finite projected corner");
+            assert!(hit_test_rectangle(&rectangle, 0.0, point));
+        }
+        assert!(geometry.point(f64::NAN, 0.0).is_none());
+        assert!(object_outline(&image(), 0.0).is_none());
+        assert!(object_outline(&ellipse(), f64::NAN).is_none());
     }
 
     #[test]
