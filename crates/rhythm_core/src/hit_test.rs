@@ -294,9 +294,11 @@ pub fn object_outline(object: &Object, continuous_tick: f64) -> Option<OutlineGe
 }
 
 fn rectangle_bounds_hit(local_x: f64, local_y: f64, size: Vec2) -> bool {
-    // Inclusive edges with minimal tolerance for f64 trigonometric rounding.
-    let epsilon_x = f64::from(size.x()).max(1.0) * 1e-9;
-    let epsilon_y = f64::from(size.y()).max(1.0) * 1e-9;
+    // Inclusive edges: allow subpixel error when forward-projected wireframe
+    // points round from f64 to f32. A 0.001-pixel floor is invisible at UI
+    // scale, while size-relative tolerance covers very large local shapes.
+    let epsilon_x = (f64::from(size.x()).max(1.0) * 1e-9).max(1e-3);
+    let epsilon_y = (f64::from(size.y()).max(1.0) * 1e-9).max(1e-3);
     local_x >= -epsilon_x
         && local_x <= f64::from(size.x()) + epsilon_x
         && local_y >= -epsilon_y
