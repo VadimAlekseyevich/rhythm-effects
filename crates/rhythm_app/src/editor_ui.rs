@@ -31,8 +31,11 @@ fn composition_point_from_preview(
     pointer: egui::Pos2,
     size: [u32; 2],
 ) -> Option<Vec2> {
-    if !rect.contains(pointer) || rect.width() <= 0.0 || rect.height() <= 0.0
-        || size[0] == 0 || size[1] == 0
+    if !rect.contains(pointer)
+        || rect.width() <= 0.0
+        || rect.height() <= 0.0
+        || size[0] == 0
+        || size[1] == 0
     {
         return None;
     }
@@ -250,10 +253,13 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.heading("Inspector");
             ui.separator();
-            if let Some(object) = session
-                .selected_object()
-                .and_then(|id| project.composition.objects.iter().find(|object| object.id == id))
-            {
+            if let Some(object) = session.selected_object().and_then(|id| {
+                project
+                    .composition
+                    .objects
+                    .iter()
+                    .find(|object| object.id == id)
+            }) {
                 ui.label(format!("Selected: {}", object.name));
                 ui.label(format!("Object ID: {}", object.id.get()));
                 ui.label("Transform controls are not wired yet.");
@@ -328,30 +334,17 @@ mod tests {
 
     #[test]
     fn preview_click_coordinates_include_letterboxed_image_offset() {
-        let rect = egui::Rect::from_min_size(
-            egui::pos2(240.0, 100.0),
-            egui::vec2(960.0, 540.0),
-        );
-        let hit = composition_point_from_preview(
-            rect,
-            egui::pos2(720.0, 370.0),
-            [1920, 1080],
-        )
-        .expect("inside texture");
+        let rect = egui::Rect::from_min_size(egui::pos2(240.0, 100.0), egui::vec2(960.0, 540.0));
+        let hit = composition_point_from_preview(rect, egui::pos2(720.0, 370.0), [1920, 1080])
+            .expect("inside texture");
         assert!((hit.x() - 960.0).abs() < 0.01);
         assert!((hit.y() - 540.0).abs() < 0.01);
-        assert!(composition_point_from_preview(
-            rect,
-            egui::pos2(200.0, 370.0),
-            [1920, 1080],
-        )
-        .is_none());
-        assert!(composition_point_from_preview(
-            rect,
-            egui::pos2(720.0, 370.0),
-            [0, 1080],
-        )
-        .is_none());
+        assert!(
+            composition_point_from_preview(rect, egui::pos2(200.0, 370.0), [1920, 1080],).is_none()
+        );
+        assert!(
+            composition_point_from_preview(rect, egui::pos2(720.0, 370.0), [0, 1080],).is_none()
+        );
     }
 
     #[test]
