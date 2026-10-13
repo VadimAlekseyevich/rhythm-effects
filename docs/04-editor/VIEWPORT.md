@@ -50,7 +50,7 @@ Single click selects topmost unlocked visible object whose hit-test passes.
 
 Click empty space clears object selection.
 
-Ctrl+click toggles.
+Ctrl+click toggles individual object IDs, preserving all other selected objects. Ctrl+click on empty composition leaves selection unchanged; a plain click on empty composition clears it. Multiple selected objects are outlined simultaneously. The Inspector currently shows the most recently selected object as primary, but mixed-value editing remains separate work.
 
 Box selection from empty space selects intersecting visible/unlocked objects.
 
