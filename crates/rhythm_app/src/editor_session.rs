@@ -98,7 +98,7 @@ pub struct EditorSession {
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
     follow_playhead: bool,
-    selected_object: Option<ObjectId>,
+    selected_objects: Vec<ObjectId>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -116,7 +116,7 @@ impl Default for EditorSession {
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
             follow_playhead: false,
-            selected_object: None,
+            selected_objects: Vec::new(),
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
@@ -129,14 +129,47 @@ impl Default for EditorSession {
 }
 
 impl EditorSession {
+    /// The most recently selected object is the primary Inspector focus.
     #[must_use]
-    pub const fn selected_object(&self) -> Option<ObjectId> {
-        self.selected_object
+    pub fn selected_object(&self) -> Option<ObjectId> {
+        self.selected_objects.last().copied()
+    }
+
+    /// Selection is kept in click order, with stable IDs and no duplicates.
+    #[must_use]
+    pub fn selected_objects(&self) -> &[ObjectId] {
+        &self.selected_objects
+    }
+
+    #[must_use]
+    pub fn is_object_selected(&self, object_id: ObjectId) -> bool {
+        self.selected_objects.contains(&object_id)
+    }
+
+    #[must_use]
+    pub fn selected_object_count(&self) -> usize {
+        self.selected_objects.len()
     }
 
     /// Plain click replaces object selection; empty-space click clears it.
     pub fn select_viewport_object(&mut self, object_id: Option<ObjectId>) {
-        self.selected_object = object_id;
+        self.selected_objects.clear();
+        if let Some(object_id) = object_id {
+            self.selected_objects.push(object_id);
+        }
+    }
+
+    /// Ctrl-click toggles one ID without disturbing the other selected objects.
+    /// Empty-space Ctrl-click is a no-op, unlike a plain empty-space click.
+    pub fn toggle_viewport_object(&mut self, object_id: Option<ObjectId>) {
+        let Some(object_id) = object_id else {
+            return;
+        };
+        if let Some(index) = self.selected_objects.iter().position(|id| *id == object_id) {
+            self.selected_objects.remove(index);
+        } else {
+            self.selected_objects.push(object_id);
+        }
     }
 
     #[must_use]
@@ -1051,6 +1084,55 @@ mod tests {
         assert_eq!(session.selected_object(), Some(b));
         session.select_viewport_object(None);
         assert_eq!(session.selected_object(), None);
+    }
+
+    #[test]
+    fn viewport_ctrl_toggle_keeps_other_ids_and_moves_primary_predictably() {
+        let mut session = EditorSession::default();
+        let a = ObjectId::new(11).expect("id");
+        let b = ObjectId::new(7).expect("id");
+        let c = ObjectId::new(9).expect("id");
+
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        session.toggle_viewport_object(Some(c));
+        assert_eq!(session.selected_objects(), &[a, b, c]);
+        assert_eq!(session.selected_object_count(), 3);
+        assert_eq!(session.selected_object(), Some(c));
+        for id in [a, b, c] {
+            assert!(session.is_object_selected(id));
+        }
+
+        // Removing the primary leaves the most recently selected survivor.
+        session.toggle_viewport_object(Some(c));
+        assert_eq!(session.selected_objects(), &[a, b]);
+        assert_eq!(session.selected_object(), Some(b));
+        session.toggle_viewport_object(Some(a));
+        assert_eq!(session.selected_objects(), &[b]);
+        assert_eq!(session.selected_object(), Some(b));
+        session.toggle_viewport_object(Some(b));
+        assert!(session.selected_objects().is_empty());
+        assert_eq!(session.selected_object(), None);
+    }
+
+    #[test]
+    fn viewport_ctrl_click_empty_space_is_noop_and_plain_click_replaces() {
+        let mut session = EditorSession::default();
+        let a = ObjectId::new(2).expect("id");
+        let b = ObjectId::new(3).expect("id");
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        session.toggle_viewport_object(None);
+        assert_eq!(session.selected_objects(), &[a, b]);
+
+        session.select_viewport_object(Some(b));
+        assert_eq!(session.selected_objects(), &[b]);
+        session.toggle_viewport_object(Some(a));
+        assert_eq!(session.selected_objects(), &[b, a]);
+        session.select_viewport_object(None);
+        assert!(session.selected_objects().is_empty());
+        session.toggle_viewport_object(None);
+        assert!(session.selected_objects().is_empty());
     }
 
     #[test]
