@@ -277,11 +277,11 @@ pub fn draw_editor_shell(
             }) {
                 ui.label(format!(
                     "Selected objects: {}",
-                    session.selected_object_count()
+                    session.selected_objects().len()
                 ));
                 ui.label(format!("Primary: {}", object.name));
                 ui.label(format!("Primary ID: {}", object.id.get()));
-                if session.selected_object_count() > 1 {
+                if session.selected_objects().len() > 1 {
                     ui.small("Multi-object transform editing is not wired yet.");
                 } else {
                     ui.label("Transform controls are not wired yet.");
