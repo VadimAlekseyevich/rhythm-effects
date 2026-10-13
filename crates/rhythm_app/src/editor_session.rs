@@ -146,11 +146,6 @@ impl EditorSession {
         self.selected_objects.contains(&object_id)
     }
 
-    #[must_use]
-    pub fn selected_object_count(&self) -> usize {
-        self.selected_objects.len()
-    }
-
     /// Plain click replaces object selection; empty-space click clears it.
     pub fn select_viewport_object(&mut self, object_id: Option<ObjectId>) {
         self.selected_objects.clear();
@@ -1097,7 +1092,7 @@ mod tests {
         session.toggle_viewport_object(Some(b));
         session.toggle_viewport_object(Some(c));
         assert_eq!(session.selected_objects(), &[a, b, c]);
-        assert_eq!(session.selected_object_count(), 3);
+        assert_eq!(session.selected_objects().len(), 3);
         assert_eq!(session.selected_object(), Some(c));
         for id in [a, b, c] {
             assert!(session.is_object_selected(id));
