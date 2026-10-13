@@ -275,7 +275,10 @@ pub fn draw_editor_shell(
                     .iter()
                     .find(|object| object.id == id)
             }) {
-                ui.label(format!("Selected objects: {}", session.selected_object_count()));
+                ui.label(format!(
+                    "Selected objects: {}",
+                    session.selected_object_count()
+                ));
                 ui.label(format!("Primary: {}", object.name));
                 ui.label(format!("Primary ID: {}", object.id.get()));
                 if session.selected_object_count() > 1 {
