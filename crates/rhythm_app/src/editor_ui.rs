@@ -5,6 +5,7 @@ use crate::{
 use rhythm_core::{
     domain::Vec2,
     hit_test::{OutlineKind, object_outline, pick_topmost_object},
+    ids::ObjectId,
     project::Project,
     time::ProjectTimeNs,
 };
@@ -42,6 +43,15 @@ fn composition_point_from_preview(
     let u = (pointer.x - rect.min.x) / rect.width();
     let v = (pointer.y - rect.min.y) / rect.height();
     Vec2::new(u * size[0] as f32, v * size[1] as f32).ok()
+}
+
+/// Single dispatch point for viewport and Objects-panel click semantics.
+fn apply_object_click(session: &mut EditorSession, picked: Option<ObjectId>, ctrl: bool) {
+    if ctrl {
+        session.toggle_viewport_object(picked);
+    } else {
+        session.select_viewport_object(picked);
+    }
 }
 
 /// Transparent editor-only object outlines, visibly distinct from rendered output.
@@ -242,11 +252,11 @@ pub fn draw_editor_shell(
                     .on_hover_text("Click to select; Ctrl+click to toggle selection")
                     .clicked()
                 {
-                    if ui.input(|input| input.modifiers.ctrl) {
-                        session.toggle_viewport_object(Some(object.id));
-                    } else {
-                        session.select_viewport_object(Some(object.id));
-                    }
+                    apply_object_click(
+                        session,
+                        Some(object.id),
+                        ui.input(|input| input.modifiers.ctrl),
+                    );
                 }
             }
             ui.take_available_space();
@@ -330,11 +340,7 @@ pub fn draw_editor_shell(
                         |_| None, // No prepared image dimensions cache yet.
                         |_| None, // No composition font-layout cache yet.
                     );
-                    if ui.input(|input| input.modifiers.ctrl) {
-                        session.toggle_viewport_object(picked);
-                    } else {
-                        session.select_viewport_object(picked);
-                    }
+                    apply_object_click(session, picked, ui.input(|input| input.modifiers.ctrl));
                 }
             } else {
                 ui.label("Composition preview unavailable");
@@ -345,7 +351,28 @@ pub fn draw_editor_shell(
 
 #[cfg(test)]
 mod tests {
-    use super::{composition_point_from_preview, fit_composition_preview};
+    use super::{apply_object_click, composition_point_from_preview, fit_composition_preview};
+    use crate::editor_session::EditorSession;
+    use rhythm_core::ids::ObjectId;
+
+    #[test]
+    fn canvas_and_list_clicks_share_ctrl_toggle_semantics() {
+        let a = ObjectId::new(10).expect("object");
+        let b = ObjectId::new(11).expect("object");
+        let mut session = EditorSession::default();
+        apply_object_click(&mut session, Some(a), false);
+        apply_object_click(&mut session, Some(b), true);
+        assert_eq!(session.selected_objects(), &[a, b]);
+
+        apply_object_click(&mut session, None, true);
+        assert_eq!(session.selected_objects(), &[a, b]);
+        apply_object_click(&mut session, Some(a), true);
+        assert_eq!(session.selected_objects(), &[b]);
+
+        apply_object_click(&mut session, None, false);
+        assert_eq!(session.selected_object(), None);
+        assert!(session.selected_objects().is_empty());
+    }
 
     #[test]
     fn preview_click_coordinates_include_letterboxed_image_offset() {
