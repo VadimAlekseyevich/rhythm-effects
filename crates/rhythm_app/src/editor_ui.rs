@@ -63,7 +63,7 @@ fn draw_editor_outlines(
         let Some(geometry) = object_outline(object, continuous_tick) else {
             continue;
         };
-        let selected = session.selected_object() == Some(object.id);
+        let selected = session.is_object_selected(object.id);
         let stroke = egui::Stroke::new(
             if selected { 2.5 } else { 1.0 },
             if selected {
@@ -238,10 +238,15 @@ pub fn draw_editor_shell(
                     object.name,
                 );
                 if ui
-                    .selectable_label(session.selected_object() == Some(object.id), label)
+                    .selectable_label(session.is_object_selected(object.id), label)
+                    .on_hover_text("Click to select; Ctrl+click to toggle selection")
                     .clicked()
                 {
-                    session.select_viewport_object(Some(object.id));
+                    if ui.input(|input| input.modifiers.ctrl) {
+                        session.toggle_viewport_object(Some(object.id));
+                    } else {
+                        session.select_viewport_object(Some(object.id));
+                    }
                 }
             }
             ui.take_available_space();
@@ -260,9 +265,14 @@ pub fn draw_editor_shell(
                     .iter()
                     .find(|object| object.id == id)
             }) {
-                ui.label(format!("Selected: {}", object.name));
-                ui.label(format!("Object ID: {}", object.id.get()));
-                ui.label("Transform controls are not wired yet.");
+                ui.label(format!("Selected objects: {}", session.selected_object_count()));
+                ui.label(format!("Primary: {}", object.name));
+                ui.label(format!("Primary ID: {}", object.id.get()));
+                if session.selected_object_count() > 1 {
+                    ui.small("Multi-object transform editing is not wired yet.");
+                } else {
+                    ui.label("Transform controls are not wired yet.");
+                }
             } else {
                 ui.label("No object selected.");
             }
@@ -282,6 +292,7 @@ pub fn draw_editor_shell(
     egui::CentralPanel::default().show(ui, |ui| {
         ui.heading("Viewport");
         ui.small("Editor-only wireframes; actual object GPU rendering is not wired yet.");
+        ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.separator();
         ui.centered_and_justified(|ui| {
             if let Some(texture_id) = composition_texture_id {
@@ -319,7 +330,11 @@ pub fn draw_editor_shell(
                         |_| None, // No prepared image dimensions cache yet.
                         |_| None, // No composition font-layout cache yet.
                     );
-                    session.select_viewport_object(picked);
+                    if ui.input(|input| input.modifiers.ctrl) {
+                        session.toggle_viewport_object(picked);
+                    } else {
+                        session.select_viewport_object(picked);
+                    }
                 }
             } else {
                 ui.label("Composition preview unavailable");
