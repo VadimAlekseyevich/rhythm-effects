@@ -48,11 +48,7 @@ fn composition_point_from_preview(
 /// Maps a pointer that can leave the preview during dragging back to its
 /// nearest point inside the displayed image. Only used once the drag began
 /// inside the composition; letterbox chrome cannot start marquee selection.
-fn clamped_drag_point(
-    rect: egui::Rect,
-    pointer: egui::Pos2,
-    size: [u32; 2],
-) -> Option<Vec2> {
+fn clamped_drag_point(rect: egui::Rect, pointer: egui::Pos2, size: [u32; 2]) -> Option<Vec2> {
     let position = egui::pos2(
         pointer.x.clamp(rect.min.x, rect.max.x),
         pointer.y.clamp(rect.min.y, rect.max.y),
@@ -68,13 +64,7 @@ fn preview_point(rect: egui::Rect, point: Vec2, size: [u32; 2]) -> egui::Pos2 {
     )
 }
 
-fn draw_marquee(
-    ui: &egui::Ui,
-    preview: egui::Rect,
-    start: Vec2,
-    current: Vec2,
-    size: [u32; 2],
-) {
+fn draw_marquee(ui: &egui::Ui, preview: egui::Rect, start: Vec2, current: Vec2, size: [u32; 2]) {
     let rect = egui::Rect::from_two_pos(
         preview_point(preview, start, size),
         preview_point(preview, current, size),
@@ -390,15 +380,18 @@ pub fn draw_editor_shell(
                     && let Some(pointer) = response.interact_pointer_pos()
                 {
                     let start_pointer = pointer - response.drag_delta();
-                    if let Some(start) =
-                        composition_point_from_preview(response.rect, start_pointer, composition_size)
-                        && pick_topmost_object(
-                            &project.composition.objects,
-                            tick,
-                            start,
-                            |_| None,
-                            |_| None,
-                        ).is_none()
+                    if let Some(start) = composition_point_from_preview(
+                        response.rect,
+                        start_pointer,
+                        composition_size,
+                    ) && pick_topmost_object(
+                        &project.composition.objects,
+                        tick,
+                        start,
+                        |_| None,
+                        |_| None,
+                    )
+                    .is_none()
                     {
                         session.begin_viewport_box_selection(
                             start,
@@ -482,13 +475,11 @@ mod tests {
         let round_trip = preview_point(rect, mapped, size);
         assert!((round_trip.x - inside.x).abs() < 0.01);
         assert!((round_trip.y - inside.y).abs() < 0.01);
-        let clamped = clamped_drag_point(rect, egui::pos2(9999.0, 9999.0), size)
-            .expect("clamped to image");
+        let clamped =
+            clamped_drag_point(rect, egui::pos2(9999.0, 9999.0), size).expect("clamped to image");
         assert!((clamped.x() - 1920.0).abs() < 0.01);
         assert!((clamped.y() - 1080.0).abs() < 0.01);
-        assert!(composition_point_from_preview(
-            rect, egui::pos2(9999.0, 9999.0), size
-        ).is_none());
+        assert!(composition_point_from_preview(rect, egui::pos2(9999.0, 9999.0), size).is_none());
     }
 
     #[test]
