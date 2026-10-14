@@ -211,6 +211,142 @@ pub fn pick_topmost_object(
     })
 }
 
+/// Returns every visible, unlocked object intersecting the drag marquee.
+///
+/// Bounds are in composition pixels (opposite corners, in either drag direction).
+/// The box is inverse-transformed into each object's local coordinate system,
+/// so rotation, negative/nonuniform scale, and anchor match click picking.
+/// Rectangle/Image/Text use exact convex polygon overlap; Ellipse uses an exact
+/// ellipse-versus-parallelogram intersection, not a sampled bounding box.
+/// Missing runtime image/text geometry is skipped, never guessed.
+/// IDs are returned in painter order; no per-click decoding or shaping.
+#[must_use]
+pub fn select_objects_in_box(
+    objects: &[Object],
+    continuous_tick: f64,
+    start: Vec2,
+    end: Vec2,
+    image_dimensions: impl Fn(crate::ids::AssetId) -> Option<[u32; 2]>,
+    text_layout: impl Fn(crate::ids::ObjectId) -> Option<TextLayoutBounds>,
+) -> Vec<crate::ids::ObjectId> {
+    if !continuous_tick.is_finite() || start.x() == end.x() || start.y() == end.y() {
+        return Vec::new();
+    }
+    let min_x = start.x().min(end.x());
+    let min_y = start.y().min(end.y());
+    let max_x = start.x().max(end.x());
+    let max_y = start.y().max(end.y());
+    let corners = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)];
+
+    objects
+        .iter()
+        .filter_map(|object| {
+            if !object.visible || object.locked {
+                return None;
+            }
+            let (size, ellipse) = match &object.content {
+                ObjectContent::Rectangle(shape) => {
+                    (evaluate_vec2(&shape.size, continuous_tick), false)
+                }
+                ObjectContent::Ellipse(shape) => {
+                    (evaluate_vec2(&shape.size, continuous_tick), true)
+                }
+                ObjectContent::Image(image) => {
+                    let [width, height] = image_dimensions(image.asset)?;
+                    (Vec2::new(width as f32, height as f32).ok()?, false)
+                }
+                ObjectContent::Text(_) => {
+                    let bounds = text_layout(object.id)?;
+                    let width = bounds.max.x() - bounds.min.x();
+                    let height = bounds.max.y() - bounds.min.y();
+                    (Vec2::new(width, height).ok()?, false)
+                }
+            };
+            if size.x() <= 0.0 || size.y() <= 0.0 {
+                return None;
+            }
+            let mut local = [(0.0, 0.0); 4];
+            for (i, &(x, y)) in corners.iter().enumerate() {
+                let point = Vec2::new(x, y).ok()?;
+                let (lx, ly) =
+                    inverse_transform_point(object, size, continuous_tick, point)?;
+                local[i] = (lx / f64::from(size.x()), ly / f64::from(size.y()));
+            }
+            let hit = if ellipse {
+                local_box_intersects_ellipse(&local)
+            } else {
+                local_box_intersects_rectangle(&local)
+            };
+            hit.then_some(object.id)
+        })
+        .collect()
+}
+
+/// Separating-axis theorem: transformed marquee quadrilateral against a unit
+/// local rectangle. Handles edge-only and containment intersections exactly.
+fn local_box_intersects_rectangle(box_corners: &[(f64, f64); 4]) -> bool {
+    const UNIT_RECT: [(f64, f64); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+    for (x, y) in [(1.0, 0.0), (0.0, 1.0)]
+        .into_iter()
+        .chain((0..4).map(|i| {
+            let a = box_corners[i];
+            let b = box_corners[(i + 1) % 4];
+            (a.1 - b.1, b.0 - a.0)
+        }))
+    {
+        let project = |point: (f64, f64)| point.0 * x + point.1 * y;
+        let a_min = box_corners.iter().map(|&p| project(p)).fold(f64::INFINITY, f64::min);
+        let a_max = box_corners.iter().map(|&p| project(p)).fold(f64::NEG_INFINITY, f64::max);
+        let b_min = UNIT_RECT.iter().map(|&p| project(p)).fold(f64::INFINITY, f64::min);
+        let b_max = UNIT_RECT.iter().map(|&p| project(p)).fold(f64::NEG_INFINITY, f64::max);
+        if a_max < b_min - 1e-9 || b_max < a_min - 1e-9 {
+            return false;
+        }
+    }
+    true
+}
+
+/// An ellipse overlaps the marquee when an inverse-transformed box corner is
+/// inside it, its center is inside the box, or any box edge touches the curve.
+/// The nearest point on a segment to the unit circle is analytically computed.
+fn local_box_intersects_ellipse(box_corners: &[(f64, f64); 4]) -> bool {
+    let polygon = box_corners.map(|(x, y)| ((x - 0.5) * 2.0, (y - 0.5) * 2.0));
+    if polygon.iter().any(|(x, y)| x * x + y * y <= 1.0 + 1e-9) {
+        return true;
+    }
+
+    // Does the quadrilateral contain the ellipse center (origin)?
+    let mut positive = false;
+    let mut negative = false;
+    for i in 0..4 {
+        let a = polygon[i];
+        let b = polygon[(i + 1) % 4];
+        let cross = (b.0 - a.0) * -a.1 - (b.1 - a.1) * -a.0;
+        if cross > 1e-9 {
+            positive = true;
+        } else if cross < -1e-9 {
+            negative = true;
+        }
+    }
+    if !(positive && negative) {
+        return true;
+    }
+
+    polygon.iter().enumerate().any(|(i, &a)| {
+        let b = polygon[(i + 1) % 4];
+        let dx = b.0 - a.0;
+        let dy = b.1 - a.1;
+        let length_sq = dx * dx + dy * dy;
+        if length_sq <= 0.0 {
+            return false;
+        }
+        let t = (-(a.0 * dx + a.1 * dy) / length_sq).clamp(0.0, 1.0);
+        let x = a.0 + t * dx;
+        let y = a.1 + t * dy;
+        x * x + y * y <= 1.0 + 1e-9
+    })
+}
+
 /// Editor-only wireframe kind. The actual composition renderer is separate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutlineKind {
@@ -348,7 +484,7 @@ fn inverse_transform_point(
 mod tests {
     use super::{
         OutlineKind, TextLayoutBounds, hit_test_ellipse, hit_test_image, hit_test_rectangle,
-        hit_test_text, object_outline, pick_topmost_object,
+        hit_test_text, object_outline, pick_topmost_object, select_objects_in_box,
     };
     use crate::{
         animation::{Animated, Interpolation, Keyframe},
@@ -429,6 +565,89 @@ mod tests {
             min: vec2(min_x, min_y),
             max: vec2(max_x, max_y),
         })
+    }
+
+    #[test]
+    fn marquee_selects_contained_overlapping_and_edge_touching_rectangles() {
+        let object = rectangle();
+        let objects = [object.clone()];
+        let pick = |start, end| select_objects_in_box(
+            &objects, 0.0, start, end, |_| None, |_| None,
+        );
+        assert_eq!(pick(vec2(180.0, 90.0), vec2(220.0, 110.0)), vec![object.id]);
+        assert_eq!(pick(vec2(0.0, 0.0), vec2(1000.0, 500.0)), vec![object.id]);
+        assert_eq!(pick(vec2(250.0, 100.0), vec2(270.0, 110.0)), vec![object.id]);
+        assert_eq!(pick(vec2(270.0, 100.0), vec2(250.0, 90.0)), vec![object.id]);
+        assert!(pick(vec2(251.0, 121.0), vec2(300.0, 150.0)).is_empty());
+        assert!(pick(vec2(200.0, 100.0), vec2(200.0, 130.0)).is_empty());
+    }
+
+    #[test]
+    fn marquee_handles_rotated_mirrored_rectangle_with_edge_only_intersection() {
+        let mut object = rectangle();
+        object.transform.rotation_degrees = Animated::new_static(45.0);
+        object.transform.scale = Animated::new_static(vec2(-2.0, 0.5));
+        let guide = object_outline(&object, 0.0).expect("valid geometry");
+        let corner = guide.point(0.0, 0.0).expect("valid corner");
+        let objects = [object];
+        // A small box around a rotated corner intersects despite its center
+        // being outside the rectangle.
+        assert_eq!(select_objects_in_box(
+            &objects, 0.0,
+            vec2(corner.x() - 2.0, corner.y() - 2.0),
+            vec2(corner.x() + 2.0, corner.y() + 2.0), |_| None, |_| None,
+        ), vec![objects[0].id]);
+        assert!(select_objects_in_box(
+            &objects, 0.0, vec2(0.0, 0.0), vec2(20.0, 20.0),
+            |_| None, |_| None,
+        ).is_empty());
+    }
+
+    #[test]
+    fn marquee_ellipse_uses_curve_not_bounding_rectangle() {
+        let mut object = ellipse();
+        object.id = ObjectId::new(12).expect("id");
+        let objects = [object];
+        let pick = |a, b| select_objects_in_box(
+            &objects, 0.0, a, b, |_| None, |_| None,
+        );
+        // The tiny selection sits in a bounding-box corner outside ellipse.
+        assert!(pick(vec2(246.0, 116.0), vec2(249.0, 119.0)).is_empty());
+        assert_eq!(pick(vec2(190.0, 95.0), vec2(210.0, 105.0)), vec![objects[0].id]);
+        // Narrow box crosses elliptical curve with neither its endpoints
+        // nor the ellipse center lying inside the marquee.
+        assert_eq!(pick(vec2(249.0, 98.0), vec2(252.0, 102.0)), vec![objects[0].id]);
+        assert_eq!(pick(vec2(140.0, 75.0), vec2(260.0, 125.0)), vec![objects[0].id]);
+    }
+
+    #[test]
+    fn marquee_filters_hidden_locked_and_missing_media_without_guessing() {
+        let mut rect = rectangle();
+        rect.id = ObjectId::new(11).expect("id");
+        let mut hidden = rectangle();
+        hidden.id = ObjectId::new(12).expect("id");
+        hidden.visible = false;
+        let mut locked = ellipse();
+        locked.id = ObjectId::new(13).expect("id");
+        locked.locked = true;
+        let mut image = image();
+        image.id = ObjectId::new(14).expect("id");
+        let mut text = text_object();
+        text.id = ObjectId::new(15).expect("id");
+        let objects = [rect, hidden, locked, image, text];
+        let a = vec2(170.0, 85.0);
+        let b = vec2(230.0, 115.0);
+        assert_eq!(select_objects_in_box(
+            &objects, 0.0, a, b, |_| None, |_| None,
+        ), vec![objects[0].id]);
+        assert_eq!(select_objects_in_box(
+            &objects, 0.0, a, b, |_| Some([100, 40]),
+            |_| layout(0.0, 0.0, 100.0, 40.0),
+        ), vec![objects[0].id, objects[3].id, objects[4].id]);
+        assert!(select_objects_in_box(
+            &objects, f64::NAN, a, b, |_| Some([100, 40]),
+            |_| layout(0.0, 0.0, 100.0, 40.0),
+        ).is_empty());
     }
 
     #[test]
