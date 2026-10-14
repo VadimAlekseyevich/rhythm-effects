@@ -643,10 +643,10 @@ mod tests {
             pick(vec2(190.0, 95.0), vec2(210.0, 105.0)),
             vec![objects[0].id]
         );
-        // Narrow box crosses elliptical curve with neither its endpoints
-        // nor the ellipse center lying inside the marquee.
+        // The narrow strip crosses the curve with ALL FOUR corners outside,
+        // while the ellipse center is outside the marquee too.
         assert_eq!(
-            pick(vec2(249.0, 98.0), vec2(252.0, 102.0)),
+            pick(vec2(248.0, 60.0), vec2(249.0, 140.0)),
             vec![objects[0].id]
         );
         assert_eq!(
