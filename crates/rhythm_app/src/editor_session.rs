@@ -1164,7 +1164,10 @@ mod tests {
         session.begin_viewport_box_selection(start, true);
         session.update_viewport_box_selection(end);
         assert_eq!(session.viewport_box_selection(), Some((start, end, true)));
-        assert_eq!(session.take_viewport_box_selection(), Some((start, end, true)));
+        assert_eq!(
+            session.take_viewport_box_selection(),
+            Some((start, end, true))
+        );
         assert!(session.viewport_box_selection().is_none());
     }
 
