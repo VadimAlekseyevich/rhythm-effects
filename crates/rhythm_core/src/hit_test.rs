@@ -236,7 +236,12 @@ pub fn select_objects_in_box(
     let min_y = start.y().min(end.y());
     let max_x = start.x().max(end.x());
     let max_y = start.y().max(end.y());
-    let corners = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)];
+    let corners = [
+        (min_x, min_y),
+        (max_x, min_y),
+        (max_x, max_y),
+        (min_x, max_y),
+    ];
 
     objects
         .iter()
@@ -268,8 +273,7 @@ pub fn select_objects_in_box(
             let mut local = [(0.0, 0.0); 4];
             for (i, &(x, y)) in corners.iter().enumerate() {
                 let point = Vec2::new(x, y).ok()?;
-                let (lx, ly) =
-                    inverse_transform_point(object, size, continuous_tick, point)?;
+                let (lx, ly) = inverse_transform_point(object, size, continuous_tick, point)?;
                 local[i] = (lx / f64::from(size.x()), ly / f64::from(size.y()));
             }
             let hit = if ellipse {
@@ -286,19 +290,28 @@ pub fn select_objects_in_box(
 /// local rectangle. Handles edge-only and containment intersections exactly.
 fn local_box_intersects_rectangle(box_corners: &[(f64, f64); 4]) -> bool {
     const UNIT_RECT: [(f64, f64); 4] = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
-    for (x, y) in [(1.0, 0.0), (0.0, 1.0)]
-        .into_iter()
-        .chain((0..4).map(|i| {
-            let a = box_corners[i];
-            let b = box_corners[(i + 1) % 4];
-            (a.1 - b.1, b.0 - a.0)
-        }))
-    {
+    for (x, y) in [(1.0, 0.0), (0.0, 1.0)].into_iter().chain((0..4).map(|i| {
+        let a = box_corners[i];
+        let b = box_corners[(i + 1) % 4];
+        (a.1 - b.1, b.0 - a.0)
+    })) {
         let project = |point: (f64, f64)| point.0 * x + point.1 * y;
-        let a_min = box_corners.iter().map(|&p| project(p)).fold(f64::INFINITY, f64::min);
-        let a_max = box_corners.iter().map(|&p| project(p)).fold(f64::NEG_INFINITY, f64::max);
-        let b_min = UNIT_RECT.iter().map(|&p| project(p)).fold(f64::INFINITY, f64::min);
-        let b_max = UNIT_RECT.iter().map(|&p| project(p)).fold(f64::NEG_INFINITY, f64::max);
+        let a_min = box_corners
+            .iter()
+            .map(|&p| project(p))
+            .fold(f64::INFINITY, f64::min);
+        let a_max = box_corners
+            .iter()
+            .map(|&p| project(p))
+            .fold(f64::NEG_INFINITY, f64::max);
+        let b_min = UNIT_RECT
+            .iter()
+            .map(|&p| project(p))
+            .fold(f64::INFINITY, f64::min);
+        let b_max = UNIT_RECT
+            .iter()
+            .map(|&p| project(p))
+            .fold(f64::NEG_INFINITY, f64::max);
         if a_max < b_min - 1e-9 || b_max < a_min - 1e-9 {
             return false;
         }
@@ -571,12 +584,14 @@ mod tests {
     fn marquee_selects_contained_overlapping_and_edge_touching_rectangles() {
         let object = rectangle();
         let objects = [object.clone()];
-        let pick = |start, end| select_objects_in_box(
-            &objects, 0.0, start, end, |_| None, |_| None,
-        );
+        let pick =
+            |start, end| select_objects_in_box(&objects, 0.0, start, end, |_| None, |_| None);
         assert_eq!(pick(vec2(180.0, 90.0), vec2(220.0, 110.0)), vec![object.id]);
         assert_eq!(pick(vec2(0.0, 0.0), vec2(1000.0, 500.0)), vec![object.id]);
-        assert_eq!(pick(vec2(250.0, 100.0), vec2(270.0, 110.0)), vec![object.id]);
+        assert_eq!(
+            pick(vec2(250.0, 100.0), vec2(270.0, 110.0)),
+            vec![object.id]
+        );
         assert_eq!(pick(vec2(270.0, 100.0), vec2(250.0, 90.0)), vec![object.id]);
         assert!(pick(vec2(251.0, 121.0), vec2(300.0, 150.0)).is_empty());
         assert!(pick(vec2(200.0, 100.0), vec2(200.0, 130.0)).is_empty());
@@ -592,15 +607,28 @@ mod tests {
         let objects = [object];
         // A small box around a rotated corner intersects despite its center
         // being outside the rectangle.
-        assert_eq!(select_objects_in_box(
-            &objects, 0.0,
-            vec2(corner.x() - 2.0, corner.y() - 2.0),
-            vec2(corner.x() + 2.0, corner.y() + 2.0), |_| None, |_| None,
-        ), vec![objects[0].id]);
-        assert!(select_objects_in_box(
-            &objects, 0.0, vec2(0.0, 0.0), vec2(20.0, 20.0),
-            |_| None, |_| None,
-        ).is_empty());
+        assert_eq!(
+            select_objects_in_box(
+                &objects,
+                0.0,
+                vec2(corner.x() - 2.0, corner.y() - 2.0),
+                vec2(corner.x() + 2.0, corner.y() + 2.0),
+                |_| None,
+                |_| None,
+            ),
+            vec![objects[0].id]
+        );
+        assert!(
+            select_objects_in_box(
+                &objects,
+                0.0,
+                vec2(0.0, 0.0),
+                vec2(20.0, 20.0),
+                |_| None,
+                |_| None,
+            )
+            .is_empty()
+        );
     }
 
     #[test]
@@ -608,16 +636,23 @@ mod tests {
         let mut object = ellipse();
         object.id = ObjectId::new(12).expect("id");
         let objects = [object];
-        let pick = |a, b| select_objects_in_box(
-            &objects, 0.0, a, b, |_| None, |_| None,
-        );
+        let pick = |a, b| select_objects_in_box(&objects, 0.0, a, b, |_| None, |_| None);
         // The tiny selection sits in a bounding-box corner outside ellipse.
         assert!(pick(vec2(246.0, 116.0), vec2(249.0, 119.0)).is_empty());
-        assert_eq!(pick(vec2(190.0, 95.0), vec2(210.0, 105.0)), vec![objects[0].id]);
+        assert_eq!(
+            pick(vec2(190.0, 95.0), vec2(210.0, 105.0)),
+            vec![objects[0].id]
+        );
         // Narrow box crosses elliptical curve with neither its endpoints
         // nor the ellipse center lying inside the marquee.
-        assert_eq!(pick(vec2(249.0, 98.0), vec2(252.0, 102.0)), vec![objects[0].id]);
-        assert_eq!(pick(vec2(140.0, 75.0), vec2(260.0, 125.0)), vec![objects[0].id]);
+        assert_eq!(
+            pick(vec2(249.0, 98.0), vec2(252.0, 102.0)),
+            vec![objects[0].id]
+        );
+        assert_eq!(
+            pick(vec2(140.0, 75.0), vec2(260.0, 125.0)),
+            vec![objects[0].id]
+        );
     }
 
     #[test]
@@ -637,17 +672,32 @@ mod tests {
         let objects = [rect, hidden, locked, image, text];
         let a = vec2(170.0, 85.0);
         let b = vec2(230.0, 115.0);
-        assert_eq!(select_objects_in_box(
-            &objects, 0.0, a, b, |_| None, |_| None,
-        ), vec![objects[0].id]);
-        assert_eq!(select_objects_in_box(
-            &objects, 0.0, a, b, |_| Some([100, 40]),
-            |_| layout(0.0, 0.0, 100.0, 40.0),
-        ), vec![objects[0].id, objects[3].id, objects[4].id]);
-        assert!(select_objects_in_box(
-            &objects, f64::NAN, a, b, |_| Some([100, 40]),
-            |_| layout(0.0, 0.0, 100.0, 40.0),
-        ).is_empty());
+        assert_eq!(
+            select_objects_in_box(&objects, 0.0, a, b, |_| None, |_| None,),
+            vec![objects[0].id]
+        );
+        assert_eq!(
+            select_objects_in_box(
+                &objects,
+                0.0,
+                a,
+                b,
+                |_| Some([100, 40]),
+                |_| layout(0.0, 0.0, 100.0, 40.0),
+            ),
+            vec![objects[0].id, objects[3].id, objects[4].id]
+        );
+        assert!(
+            select_objects_in_box(
+                &objects,
+                f64::NAN,
+                a,
+                b,
+                |_| Some([100, 40]),
+                |_| layout(0.0, 0.0, 100.0, 40.0),
+            )
+            .is_empty()
+        );
     }
 
     #[test]
