@@ -52,7 +52,9 @@ Click empty space clears object selection.
 
 Ctrl+click toggles individual object IDs, preserving all other selected objects. Ctrl+click on empty composition leaves selection unchanged; a plain click on empty composition clears it. Multiple selected objects are outlined simultaneously. The Inspector currently shows the most recently selected object as primary, but mixed-value editing remains separate work.
 
-Box selection from empty space selects intersecting visible/unlocked objects.
+Box selection from empty space selects intersecting visible/unlocked objects. A drag starts only when the initial point misses every selectable object; beginning a drag on an object is reserved for its move gizmo. The displayed marquee is clipped to the fitted composition texture; pointer motion beyond its edges clamps to composition bounds. An ordinary marquee replaces the selection, and Ctrl-marquee toggles intersected objects in painter order. A zero-area marquee yields no hits, without fabricating a rectangle.
+
+AI-168 uses pure CPU affine-aware intersection: transformed Rectangle and Image/Text rectangles use convex polygon overlap, and Ellipse uses the exact ellipse/segment intersection rather than a bounding-box shortcut or a sample polygon. Image/Text remain ineligible in the current UI until their runtime bounds caches are connected; absent metadata never means a guessed hit. Both the preview overlay and the hit test use the same composition coordinate mapping.
 
 ## 7. Hit testing
 
