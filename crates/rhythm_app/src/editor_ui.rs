@@ -4,7 +4,7 @@ use crate::{
 };
 use rhythm_core::{
     domain::Vec2,
-    hit_test::{OutlineKind, object_outline, pick_topmost_object},
+    hit_test::{OutlineKind, object_outline, pick_topmost_object, select_objects_in_box},
     ids::ObjectId,
     project::Project,
     time::ProjectTimeNs,
@@ -43,6 +43,49 @@ fn composition_point_from_preview(
     let u = (pointer.x - rect.min.x) / rect.width();
     let v = (pointer.y - rect.min.y) / rect.height();
     Vec2::new(u * size[0] as f32, v * size[1] as f32).ok()
+}
+
+/// Maps a pointer that can leave the preview during dragging back to its
+/// nearest point inside the displayed image. Only used once the drag began
+/// inside the composition; letterbox chrome cannot start marquee selection.
+fn clamped_drag_point(rect: egui::Rect, pointer: egui::Pos2, size: [u32; 2]) -> Option<Vec2> {
+    let position = egui::pos2(
+        pointer.x.clamp(rect.min.x, rect.max.x),
+        pointer.y.clamp(rect.min.y, rect.max.y),
+    );
+    composition_point_from_preview(rect, position, size)
+}
+
+/// Converts composition pixels into displayed preview logical points.
+fn preview_point(rect: egui::Rect, point: Vec2, size: [u32; 2]) -> egui::Pos2 {
+    egui::pos2(
+        rect.min.x + point.x() * rect.width() / size[0] as f32,
+        rect.min.y + point.y() * rect.height() / size[1] as f32,
+    )
+}
+
+fn draw_marquee(ui: &egui::Ui, preview: egui::Rect, start: Vec2, current: Vec2, size: [u32; 2]) {
+    let rect = egui::Rect::from_two_pos(
+        preview_point(preview, start, size),
+        preview_point(preview, current, size),
+    );
+    let painter = ui.painter().with_clip_rect(preview);
+    painter.rect_filled(
+        rect,
+        0.0,
+        egui::Color32::from_rgba_unmultiplied(95, 185, 240, 26),
+    );
+    let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(130, 210, 255));
+    painter.add(egui::Shape::line(
+        vec![
+            rect.left_top(),
+            rect.right_top(),
+            rect.right_bottom(),
+            rect.left_bottom(),
+            rect.left_top(),
+        ],
+        stroke,
+    ));
 }
 
 /// Single dispatch point for viewport and Objects-panel click semantics.
@@ -306,6 +349,7 @@ pub fn draw_editor_shell(
         ui.heading("Viewport");
         ui.small("Editor-only wireframes; actual object GPU rendering is not wired yet.");
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
+        ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
         ui.separator();
         ui.centered_and_justified(|ui| {
             if let Some(texture_id) = composition_texture_id {
@@ -316,7 +360,7 @@ pub fn draw_editor_shell(
                         egui::vec2(1920.0, 1080.0),
                     ))
                     .fit_to_exact_size(preview_size)
-                    .sense(egui::Sense::click()),
+                    .sense(egui::Sense::click_and_drag()),
                 );
                 // Static objects remain pickable in projects without a tempo map.
                 // No audio-clock or timeline playback is inferred.
@@ -325,6 +369,67 @@ pub fn draw_editor_shell(
                     .continuous_tick_position(session.playhead())
                     .unwrap_or(0.0);
                 draw_editor_outlines(ui, response.rect, session, project, tick);
+                let composition_size = [
+                    project.settings.composition_width,
+                    project.settings.composition_height,
+                ];
+                // A marquee can only begin with the mouse pressed on empty
+                // composition geometry. Drags begun on an object are reserved
+                // for the future move gizmo, not misinterpreted as box selection.
+                if response.drag_started_by(egui::PointerButton::Primary)
+                    && let Some(pointer) = response.interact_pointer_pos()
+                {
+                    let start_pointer = pointer - response.drag_delta();
+                    if let Some(start) = composition_point_from_preview(
+                        response.rect,
+                        start_pointer,
+                        composition_size,
+                    ) && pick_topmost_object(
+                        &project.composition.objects,
+                        tick,
+                        start,
+                        |_| None,
+                        |_| None,
+                    )
+                    .is_none()
+                    {
+                        session.begin_viewport_box_selection(
+                            start,
+                            ui.input(|input| input.modifiers.ctrl),
+                        );
+                    }
+                }
+                if response.dragged_by(egui::PointerButton::Primary)
+                    && let Some(pointer) = response.interact_pointer_pos()
+                    && let Some(current) =
+                        clamped_drag_point(response.rect, pointer, composition_size)
+                {
+                    session.update_viewport_box_selection(current);
+                }
+                if response.drag_stopped_by(egui::PointerButton::Primary) {
+                    if let Some(pointer) = response.interact_pointer_pos()
+                        && let Some(current) =
+                            clamped_drag_point(response.rect, pointer, composition_size)
+                    {
+                        session.update_viewport_box_selection(current);
+                    }
+                    if let Some((start, current, ctrl_toggle)) =
+                        session.take_viewport_box_selection()
+                    {
+                        let picked = select_objects_in_box(
+                            &project.composition.objects,
+                            tick,
+                            start,
+                            current,
+                            |_| None, // No image intrinsic metadata cache yet.
+                            |_| None, // No composition font-layout cache yet.
+                        );
+                        session.apply_viewport_box_selection(picked, ctrl_toggle);
+                    }
+                }
+                if let Some((start, current, _)) = session.viewport_box_selection() {
+                    draw_marquee(ui, response.rect, start, current, composition_size);
+                }
                 if response.clicked()
                     && let Some(pointer) = response.interact_pointer_pos()
                     && let Some(point) = composition_point_from_preview(
@@ -354,9 +459,28 @@ pub fn draw_editor_shell(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_object_click, composition_point_from_preview, fit_composition_preview};
+    use super::{
+        apply_object_click, clamped_drag_point, composition_point_from_preview,
+        fit_composition_preview, preview_point,
+    };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
+
+    #[test]
+    fn marquee_uses_preview_coordinate_mapping_and_clamps_outside_drag() {
+        let rect = egui::Rect::from_min_size(egui::pos2(200.0, 100.0), egui::vec2(960.0, 540.0));
+        let size = [1920, 1080];
+        let inside = egui::pos2(440.0, 235.0);
+        let mapped = composition_point_from_preview(rect, inside, size).expect("inside");
+        let round_trip = preview_point(rect, mapped, size);
+        assert!((round_trip.x - inside.x).abs() < 0.01);
+        assert!((round_trip.y - inside.y).abs() < 0.01);
+        let clamped =
+            clamped_drag_point(rect, egui::pos2(9999.0, 9999.0), size).expect("clamped to image");
+        assert!((clamped.x() - 1920.0).abs() < 0.01);
+        assert!((clamped.y() - 1080.0).abs() < 0.01);
+        assert!(composition_point_from_preview(rect, egui::pos2(9999.0, 9999.0), size).is_none());
+    }
 
     #[test]
     fn canvas_and_list_clicks_share_ctrl_toggle_semantics() {

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use rhythm_core::{
     animation::EasingPreset,
+    domain::Vec2,
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
@@ -41,6 +42,13 @@ impl PreviewQuality {
 struct TimelineBoxSelection {
     start: [f32; 2],
     current: [f32; 2],
+    ctrl_toggle: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportBoxSelection {
+    start: Vec2,
+    current: Vec2,
     ctrl_toggle: bool,
 }
 
@@ -99,6 +107,7 @@ pub struct EditorSession {
     timeline_view: Option<TimelineView>,
     follow_playhead: bool,
     selected_objects: Vec<ObjectId>,
+    viewport_box_selection: Option<ViewportBoxSelection>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -117,6 +126,7 @@ impl Default for EditorSession {
             timeline_view: None,
             follow_playhead: false,
             selected_objects: Vec::new(),
+            viewport_box_selection: None,
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
@@ -164,6 +174,52 @@ impl EditorSession {
             self.selected_objects.remove(index);
         } else {
             self.selected_objects.push(object_id);
+        }
+    }
+
+    /// The marquee starts only when dragging from empty composition space.
+    pub fn begin_viewport_box_selection(&mut self, start: Vec2, ctrl_toggle: bool) {
+        self.viewport_box_selection = Some(ViewportBoxSelection {
+            start,
+            current: start,
+            ctrl_toggle,
+        });
+    }
+
+    pub fn update_viewport_box_selection(&mut self, current: Vec2) {
+        if let Some(box_selection) = self.viewport_box_selection.as_mut() {
+            box_selection.current = current;
+        }
+    }
+
+    #[must_use]
+    pub fn viewport_box_selection(&self) -> Option<(Vec2, Vec2, bool)> {
+        self.viewport_box_selection
+            .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
+    }
+
+    pub fn take_viewport_box_selection(&mut self) -> Option<(Vec2, Vec2, bool)> {
+        self.viewport_box_selection
+            .take()
+            .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
+    }
+
+    /// Applies a completed marquee's painter-ordered IDs.
+    /// A plain box replaces, Ctrl-box toggles each intersected ID.
+    pub fn apply_viewport_box_selection(
+        &mut self,
+        ids: impl IntoIterator<Item = ObjectId>,
+        ctrl_toggle: bool,
+    ) {
+        if !ctrl_toggle {
+            self.selected_objects.clear();
+        }
+        for id in ids {
+            if ctrl_toggle {
+                self.toggle_viewport_object(Some(id));
+            } else if !self.selected_objects.contains(&id) {
+                self.selected_objects.push(id);
+            }
         }
     }
 
@@ -1079,6 +1135,40 @@ mod tests {
         assert_eq!(session.selected_object(), Some(b));
         session.select_viewport_object(None);
         assert_eq!(session.selected_object(), None);
+    }
+
+    #[test]
+    fn viewport_marquee_replaces_or_toggles_and_preserves_order() {
+        let a = ObjectId::new(1).expect("id");
+        let b = ObjectId::new(2).expect("id");
+        let c = ObjectId::new(3).expect("id");
+        let mut session = EditorSession::default();
+        session.select_viewport_object(Some(a));
+        session.apply_viewport_box_selection([b, c, b], false);
+        assert_eq!(session.selected_objects(), &[b, c]);
+        assert_eq!(session.selected_object(), Some(c));
+
+        session.apply_viewport_box_selection([c, a], true);
+        assert_eq!(session.selected_objects(), &[b, a]);
+        assert_eq!(session.selected_object(), Some(a));
+        session.apply_viewport_box_selection([], false);
+        assert!(session.selected_objects().is_empty());
+    }
+
+    #[test]
+    fn viewport_box_drag_state_tracks_coordinates_and_clears_on_commit() {
+        let mut session = EditorSession::default();
+        let start = rhythm_core::domain::Vec2::new(10.0, 20.0).expect("point");
+        let end = rhythm_core::domain::Vec2::new(50.0, 80.0).expect("point");
+        assert!(session.viewport_box_selection().is_none());
+        session.begin_viewport_box_selection(start, true);
+        session.update_viewport_box_selection(end);
+        assert_eq!(session.viewport_box_selection(), Some((start, end, true)));
+        assert_eq!(
+            session.take_viewport_box_selection(),
+            Some((start, end, true))
+        );
+        assert!(session.viewport_box_selection().is_none());
     }
 
     #[test]
