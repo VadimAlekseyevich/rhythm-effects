@@ -15,6 +15,34 @@ use rhythm_core::{
     },
 };
 
+/// Apply live pointer updates through the existing ProjectEditor transaction.
+/// Only the final Commit records one undo entry; errors cancel the transaction.
+pub fn apply_viewport_position_actions(
+    editor: &mut ProjectEditor,
+    actions: impl IntoIterator<Item = ViewportPositionAction>,
+) -> Result<bool, EditError> {
+    let mut repaint = false;
+    for action in actions {
+        let result = match action {
+            ViewportPositionAction::Begin(id) => {
+                editor.begin_position_transaction(id).map(|()| false)
+            }
+            ViewportPositionAction::Update(position) => {
+                editor.update_position_transaction(position).map(|()| true)
+            }
+            ViewportPositionAction::Commit => editor.commit_transaction(),
+        };
+        match result {
+            Ok(changed) => repaint |= changed,
+            Err(error) => {
+                let _ = editor.cancel_transaction();
+                return Err(error);
+            }
+        }
+    }
+    Ok(repaint)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreviewQuality {
     #[default]
@@ -43,6 +71,19 @@ struct TimelineBoxSelection {
     start: [f32; 2],
     current: [f32; 2],
     ctrl_toggle: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewportPositionAction {
+    Begin(ObjectId),
+    Update(Vec2),
+    Commit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportPositionDrag {
+    start: Vec2,
+    base_position: Vec2,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -108,6 +149,7 @@ pub struct EditorSession {
     follow_playhead: bool,
     selected_objects: Vec<ObjectId>,
     viewport_box_selection: Option<ViewportBoxSelection>,
+    viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_pan_points: [f32; 2],
     viewport_zoom: f32,
     viewport_pan_origin: Option<[f32; 2]>,
@@ -130,6 +172,7 @@ impl Default for EditorSession {
             follow_playhead: false,
             selected_objects: Vec::new(),
             viewport_box_selection: None,
+            viewport_position_drag: None,
             viewport_pan_points: [0.0, 0.0],
             viewport_zoom: 1.0,
             viewport_pan_origin: None,
@@ -181,6 +224,49 @@ impl EditorSession {
         } else {
             self.selected_objects.push(object_id);
         }
+    }
+
+    /// Absolute position updates are computed from the original mouse-down
+    /// composition point, preventing frame-to-frame drift.
+    pub fn begin_viewport_position_drag(&mut self, start: Vec2, base_position: Vec2) -> bool {
+        if self.viewport_position_drag.is_some() {
+            return false;
+        }
+        self.viewport_position_drag = Some(ViewportPositionDrag {
+            start,
+            base_position,
+        });
+        true
+    }
+
+    #[must_use]
+    pub fn update_viewport_position_drag(&self, pointer: Vec2) -> Option<Vec2> {
+        let drag = self.viewport_position_drag?;
+        let x =
+            f64::from(drag.base_position.x()) + f64::from(pointer.x()) - f64::from(drag.start.x());
+        let y =
+            f64::from(drag.base_position.y()) + f64::from(pointer.y()) - f64::from(drag.start.y());
+        if !x.is_finite()
+            || !y.is_finite()
+            || x.abs() > f64::from(f32::MAX)
+            || y.abs() > f64::from(f32::MAX)
+        {
+            return None;
+        }
+        Vec2::new(x as f32, y as f32).ok()
+    }
+
+    pub fn finish_viewport_position_drag(&mut self) -> bool {
+        self.viewport_position_drag.take().is_some()
+    }
+
+    pub fn cancel_viewport_position_drag(&mut self) -> bool {
+        self.viewport_position_drag.take().is_some()
+    }
+
+    #[must_use]
+    pub const fn viewport_position_drag_active(&self) -> bool {
+        self.viewport_position_drag.is_some()
     }
 
     /// Camera-only translation in egui logical points, never Project pixels.
@@ -1188,7 +1274,10 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSession, KeyframeDragMember, PreviewQuality};
+    use super::{
+        EditorSession, KeyframeDragMember, PreviewQuality, ViewportPositionAction,
+        apply_viewport_position_actions,
+    };
     use rhythm_core::{
         domain::Vec2,
         ids::{KeyframeId, ObjectId},
@@ -1484,6 +1573,113 @@ mod tests {
         session.end_viewport_pan();
         session.update_viewport_pan([0.0, 0.0]);
         assert_eq!(session.viewport_pan_points(), [1_000_000.0, -1_000_000.0]);
+    }
+
+    #[test]
+    fn position_drag_computes_absolute_delta_and_can_be_cancelled() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_position_drag(v(20.0, 10.0), v(300.0, 200.0)));
+        assert!(!session.begin_viewport_position_drag(v(0.0, 0.0), v(0.0, 0.0)));
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0)),
+            Some(v(325.0, 195.0))
+        );
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0)),
+            Some(v(325.0, 195.0))
+        );
+        assert!(session.cancel_viewport_position_drag());
+        assert!(!session.cancel_viewport_position_drag());
+        assert_eq!(session.update_viewport_position_drag(v(80.0, 90.0)), None);
+    }
+
+    #[test]
+    fn position_drag_multiple_updates_create_one_undo_entry() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::LinearRgba,
+            editor::ProjectEditor,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut project = Project::new(
+            "drag",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let id = ObjectId::new(1).expect("id");
+        project.composition.objects.push(Object {
+            id,
+            name: "Move".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(300.0, 200.0)),
+                Animated::new_static(v(1.0, 1.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(100.0, 50.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let current = |editor: &ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value()
+        };
+        assert!(
+            !apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Begin(id)])
+                .expect("begin")
+        );
+        assert!(
+            apply_viewport_position_actions(
+                &mut editor,
+                [ViewportPositionAction::Update(v(320.0, 210.0))]
+            )
+            .expect("update")
+        );
+        assert!(
+            apply_viewport_position_actions(
+                &mut editor,
+                [ViewportPositionAction::Update(v(340.0, 230.0))]
+            )
+            .expect("update")
+        );
+        assert_eq!(editor.history_len(), 0);
+        assert!(
+            apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Commit])
+                .expect("commit")
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(current(&editor), v(340.0, 230.0));
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(current(&editor), v(300.0, 200.0));
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(current(&editor), v(340.0, 230.0));
+
+        apply_viewport_position_actions(
+            &mut editor,
+            [
+                ViewportPositionAction::Begin(id),
+                ViewportPositionAction::Update(v(700.0, 700.0)),
+            ],
+        )
+        .expect("next drag");
+        assert!(editor.cancel_transaction().expect("Escape"));
+        assert_eq!(current(&editor), v(340.0, 230.0));
+        assert_eq!(editor.history_len(), 1);
     }
 
     #[test]
