@@ -8,8 +8,8 @@ mod timeline;
 use std::sync::Arc;
 use std::time::Instant;
 
-use editor_session::{EditorSession, ViewportPositionAction, apply_viewport_position_actions};
-use editor_ui::DiagnosticsView;
+use editor_session::{EditorSession, apply_viewport_position_actions};
+use editor_ui::{DiagnosticsView, EditorUiActions};
 use gpu::GpuContext;
 use rhythm_core::{
     APP_NAME,
@@ -375,8 +375,7 @@ impl ApplicationHandler for RhythmApp {
                     }
 
                     let raw_input = egui_state.take_egui_input(window);
-                    let mut add_rectangle_requested = false;
-                    let mut viewport_position_actions = Vec::<ViewportPositionAction>::new();
+                    let mut ui_actions = EditorUiActions::default();
                     let full_output = egui_context.run_ui(raw_input, |root_ui| {
                         if let Some(diagnostics) = self.diagnostics.as_ref() {
                             editor_ui::draw_editor_shell(
@@ -386,15 +385,14 @@ impl ApplicationHandler for RhythmApp {
                                 diagnostics,
                                 self.composition_texture_id,
                                 self.waveform.as_ref(),
-                                &mut add_rectangle_requested,
-                                &mut viewport_position_actions,
+                                &mut ui_actions,
                             );
                         }
                     });
-                    if !viewport_position_actions.is_empty() {
+                    if !ui_actions.viewport_position_actions.is_empty() {
                         match apply_viewport_position_actions(
                             &mut self.project_editor,
-                            viewport_position_actions,
+                            ui_actions.viewport_position_actions,
                         ) {
                             Ok(true) => window.request_redraw(),
                             Ok(false) => {}
@@ -404,7 +402,7 @@ impl ApplicationHandler for RhythmApp {
                             }
                         }
                     }
-                    if add_rectangle_requested {
+                    if ui_actions.add_rectangle_requested {
                         let project = self.project_editor.project();
                         let center = Vec2::new(
                             project.settings.composition_width as f32 * 0.5,
