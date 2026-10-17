@@ -264,7 +264,9 @@ impl EditorSession {
         let (min, max) = bounds;
         let min = [f64::from(min.x()), f64::from(min.y())];
         let max = [f64::from(max.x()), f64::from(max.y())];
-        if (0..2).any(|axis| !min[axis].is_finite() || !max[axis].is_finite() || max[axis] <= min[axis]) {
+        if (0..2)
+            .any(|axis| !min[axis].is_finite() || !max[axis].is_finite() || max[axis] <= min[axis])
+        {
             return false;
         }
         let units = [
@@ -1313,22 +1315,40 @@ mod tests {
         let a = Vec2::new(200.0, 100.0).expect("position");
         let b = Vec2::new(300.0, 180.0).expect("position");
         assert!(!session.frame_viewport_bounds(
-            (a, a), [1000.0, 600.0], [1000.0, 562.5], [1920, 1080],
+            (a, a),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
         ));
         assert!(!session.frame_viewport_bounds(
-            (b, a), [1000.0, 600.0], [1000.0, 562.5], [1920, 1080],
+            (b, a),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
         ));
         assert!(!session.frame_viewport_bounds(
-            (a, b), [0.0, 600.0], [1000.0, 562.5], [1920, 1080],
+            (a, b),
+            [0.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
         ));
         assert!(!session.frame_viewport_bounds(
-            (a, b), [1000.0, f32::NAN], [1000.0, 562.5], [1920, 1080],
+            (a, b),
+            [1000.0, f32::NAN],
+            [1000.0, 562.5],
+            [1920, 1080],
         ));
         assert!(!session.frame_viewport_bounds(
-            (a, b), [1000.0, 600.0], [0.0, 562.5], [1920, 1080],
+            (a, b),
+            [1000.0, 600.0],
+            [0.0, 562.5],
+            [1920, 1080],
         ));
         assert!(!session.frame_viewport_bounds(
-            (a, b), [1000.0, 600.0], [1000.0, 562.5], [0, 1080],
+            (a, b),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [0, 1080],
         ));
         assert_eq!(session.viewport_zoom(), 1.0);
         assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
