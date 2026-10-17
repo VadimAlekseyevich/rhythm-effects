@@ -1188,6 +1188,7 @@ impl EditorSession {
 mod tests {
     use super::{EditorSession, KeyframeDragMember, PreviewQuality};
     use rhythm_core::{
+        domain::Vec2,
         ids::{KeyframeId, ObjectId},
         property::AnimatableProperty,
         time::{
