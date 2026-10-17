@@ -898,7 +898,8 @@ mod tests {
                     Interpolation::Linear,
                 ),
             ],
-        ).expect("valid animation");
+        )
+        .expect("valid animation");
         let animated_geometry = object_outline(&animated, 480.0).expect("evaluated");
         assert_eq!(animated_geometry.anchor_position(), vec2(200.0, 150.0));
         assert_eq!(
