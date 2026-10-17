@@ -393,7 +393,8 @@ pub fn draw_editor_shell(
                 }
 
                 let preview_size = fit_composition_preview(canvas.size());
-                let preview = panned_preview_rect(canvas, preview_size, session.viewport_pan_points());
+                let preview =
+                    panned_preview_rect(canvas, preview_size, session.viewport_pan_points());
                 ui.painter().with_clip_rect(canvas).image(
                     texture_id,
                     preview,
@@ -420,18 +421,16 @@ pub fn draw_editor_shell(
                     let start_pointer = ui
                         .input(|input| input.pointer.press_origin())
                         .unwrap_or(pointer);
-                    if let Some(start) = composition_point_from_preview(
-                        preview,
-                        start_pointer,
-                        composition_size,
-                    ) && pick_topmost_object(
-                        &project.composition.objects,
-                        tick,
-                        start,
-                        |_| None,
-                        |_| None,
-                    )
-                    .is_none()
+                    if let Some(start) =
+                        composition_point_from_preview(preview, start_pointer, composition_size)
+                        && pick_topmost_object(
+                            &project.composition.objects,
+                            tick,
+                            start,
+                            |_| None,
+                            |_| None,
+                        )
+                        .is_none()
                     {
                         session.begin_viewport_box_selection(
                             start,
@@ -441,8 +440,7 @@ pub fn draw_editor_shell(
                 }
                 if response.dragged_by(egui::PointerButton::Primary)
                     && let Some(pointer) = response.interact_pointer_pos()
-                    && let Some(current) =
-                        clamped_drag_point(preview, pointer, composition_size)
+                    && let Some(current) = clamped_drag_point(preview, pointer, composition_size)
                 {
                     session.update_viewport_box_selection(current);
                 }
@@ -508,10 +506,7 @@ mod tests {
 
     #[test]
     fn camera_pan_shifts_image_and_hit_coordinates_together() {
-        let canvas = egui::Rect::from_min_size(
-            egui::pos2(100.0, 100.0),
-            egui::vec2(1000.0, 800.0),
-        );
+        let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(1000.0, 800.0));
         let fitted = fit_composition_preview(canvas.size());
         let initial = panned_preview_rect(canvas, fitted, [0.0, 0.0]);
         let shifted = panned_preview_rect(canvas, fitted, [90.0, -70.0]);
@@ -522,21 +517,22 @@ mod tests {
             .expect("panned image center");
         assert!((center.x() - 960.0).abs() < 0.01);
         assert!((center.y() - 540.0).abs() < 0.01);
-        let earlier_center = composition_point_from_preview(shifted, initial.center(), [1920, 1080])
-            .expect("image overlaps canvas center");
+        let earlier_center =
+            composition_point_from_preview(shifted, initial.center(), [1920, 1080])
+                .expect("image overlaps canvas center");
         assert!(earlier_center.x() < 960.0);
         assert!(earlier_center.y() > 540.0);
     }
 
     #[test]
     fn resetting_pan_can_recenter_an_offscreen_composition() {
-        let canvas = egui::Rect::from_min_size(
-            egui::pos2(100.0, 100.0),
-            egui::vec2(800.0, 450.0),
-        );
+        let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(800.0, 450.0));
         let size = fit_composition_preview(canvas.size());
         assert!(!panned_preview_rect(canvas, size, [2000.0, 0.0]).intersects(canvas));
-        assert_eq!(panned_preview_rect(canvas, size, [0.0, 0.0]).center(), canvas.center());
+        assert_eq!(
+            panned_preview_rect(canvas, size, [0.0, 0.0]).center(),
+            canvas.center()
+        );
     }
 
     #[test]
