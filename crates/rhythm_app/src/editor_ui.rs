@@ -1,5 +1,5 @@
 use crate::{
-    editor_session::{EditorSession, PreviewQuality},
+    editor_session::{EditorSession, PreviewQuality, ViewportPositionAction},
     timeline::{draw_easing_preset_menu, draw_timeline},
 };
 use rhythm_core::{
@@ -42,6 +42,26 @@ fn composition_point_from_preview(
     let u = (pointer.x - rect.min.x) / rect.width();
     let v = (pointer.y - rect.min.y) / rect.height();
     Vec2::new(u * size[0] as f32, v * size[1] as f32).ok()
+}
+
+/// Use the exact preview camera for unbounded object moves. Unlike marquee,
+/// Position drags may extend beyond the composition boundary.
+fn unbounded_composition_point(
+    rect: egui::Rect,
+    pointer: egui::Pos2,
+    size: [u32; 2],
+) -> Option<Vec2> {
+    if !pointer.x.is_finite()
+        || !pointer.y.is_finite()
+        || rect.width() <= 0.0
+        || rect.height() <= 0.0
+        || size.contains(&0)
+    {
+        return None;
+    }
+    let x = (pointer.x - rect.min.x) / rect.width() * size[0] as f32;
+    let y = (pointer.y - rect.min.y) / rect.height() * size[1] as f32;
+    Vec2::new(x, y).ok()
 }
 
 /// Maps a pointer that can leave the preview during dragging back to its
@@ -361,6 +381,7 @@ pub fn draw_editor_shell(
     composition_texture_id: Option<egui::TextureId>,
     waveform: Option<&rhythm_engine::waveform::WaveformData>,
     add_rectangle_requested: &mut bool,
+    viewport_position_actions: &mut Vec<ViewportPositionAction>,
 ) {
     egui::Panel::top("transport_rhythm")
         .exact_size(54.0)
@@ -510,6 +531,7 @@ pub fn draw_editor_shell(
         );
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
+        ui.small("Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
         let mut frame_selection_requested = false;
         ui.horizontal(|ui| {
@@ -597,39 +619,77 @@ pub fn draw_editor_shell(
                 // No audio-clock or timeline playback is inferred.
                 draw_editor_outlines(ui, preview, canvas, session, project, tick);
                 draw_selection_overlays(ui, preview, canvas, session, project, tick);
-                // A marquee can only begin with the mouse pressed on empty
-                // composition geometry. Drags begun on an object are reserved
-                // for the future move gizmo, not misinterpreted as box selection.
+                // An object drag edits exactly one *static* Position with an
+                // existing ProjectEditor transaction. A drag from empty
+                // composition space is a marquee. Ctrl and multi-object
+                // drags are reserved for dedicated later interactions.
                 if response.drag_started_by(egui::PointerButton::Primary)
                     && let Some(pointer) = response.interact_pointer_pos()
                 {
-                    let start_pointer = ui
+                    let origin = ui
                         .input(|input| input.pointer.press_origin())
                         .unwrap_or(pointer);
                     if let Some(start) =
-                        composition_point_from_preview(preview, start_pointer, composition_size)
-                        && pick_topmost_object(
+                        composition_point_from_preview(preview, origin, composition_size)
+                    {
+                        let picked = pick_topmost_object(
                             &project.composition.objects,
                             tick,
                             start,
                             |_| None,
                             |_| None,
-                        )
-                        .is_none()
-                    {
-                        session.begin_viewport_box_selection(
-                            start,
-                            ui.input(|input| input.modifiers.ctrl),
                         );
+                        if let Some(id) = picked {
+                            if !ui.input(|input| input.modifiers.ctrl)
+                                && session.selected_objects().len() <= 1
+                                && let Some(object) = project
+                                    .composition
+                                    .objects
+                                    .iter()
+                                    .find(|object| object.id == id)
+                                && object.transform.position.keyframes().is_empty()
+                                && session.begin_viewport_position_drag(
+                                    start,
+                                    *object.transform.position.base_value(),
+                                )
+                            {
+                                session.select_viewport_object(Some(id));
+                                viewport_position_actions.push(ViewportPositionAction::Begin(id));
+                            }
+                        } else {
+                            session.begin_viewport_box_selection(
+                                start,
+                                ui.input(|input| input.modifiers.ctrl),
+                            );
+                        }
                     }
                 }
                 if response.dragged_by(egui::PointerButton::Primary)
                     && let Some(pointer) = response.interact_pointer_pos()
-                    && let Some(current) = clamped_drag_point(preview, pointer, composition_size)
                 {
-                    session.update_viewport_box_selection(current);
+                    if let Some(point) =
+                        unbounded_composition_point(preview, pointer, composition_size)
+                        && let Some(position) = session.update_viewport_position_drag(point)
+                    {
+                        viewport_position_actions.push(ViewportPositionAction::Update(position));
+                    }
+                    if let Some(current) = clamped_drag_point(preview, pointer, composition_size) {
+                        session.update_viewport_box_selection(current);
+                    }
                 }
                 if response.drag_stopped_by(egui::PointerButton::Primary) {
+                    if session.viewport_position_drag_active() {
+                        if let Some(pointer) = response.interact_pointer_pos()
+                            && let Some(point) =
+                                unbounded_composition_point(preview, pointer, composition_size)
+                            && let Some(position) = session.update_viewport_position_drag(point)
+                        {
+                            viewport_position_actions.push(ViewportPositionAction::Update(position));
+                        }
+                        if session.finish_viewport_position_drag() {
+                            viewport_position_actions.push(ViewportPositionAction::Commit);
+                        }
+                    }
                     if let Some(pointer) = response.interact_pointer_pos()
                         && let Some(current) =
                             clamped_drag_point(preview, pointer, composition_size)
@@ -685,6 +745,7 @@ mod tests {
     use super::{
         apply_object_click, clamped_drag_point, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
+        unbounded_composition_point,
         selection_rect_on_preview,
     };
     use crate::editor_session::EditorSession;
@@ -880,6 +941,32 @@ mod tests {
             panned_preview_rect(canvas, size, [0.0, 0.0]).center(),
             canvas.center()
         );
+    }
+
+    #[test]
+    fn position_drag_pointer_mapping_respects_pan_zoom_and_allows_outside() {
+        let canvas = egui::Rect::from_min_size(
+            egui::pos2(300.0, 120.0),
+            egui::vec2(960.0, 540.0),
+        );
+        let preview = panned_preview_rect(
+            canvas,
+            egui::vec2(960.0, 540.0) * 2.0,
+            [90.0, -40.0],
+        );
+        let start = egui::pos2(550.0, 250.0);
+        let end = egui::pos2(610.0, 290.0);
+        let a = unbounded_composition_point(preview, start, [1920, 1080])
+            .expect("drag origin");
+        let b = unbounded_composition_point(preview, end, [1920, 1080])
+            .expect("drag target");
+        assert!((b.x() - a.x() - 60.0).abs() < 0.01);
+        assert!((b.y() - a.y() - 40.0).abs() < 0.01);
+        assert!(unbounded_composition_point(
+            preview,
+            egui::pos2(-1000.0, -1000.0),
+            [1920, 1080],
+        ).is_some());
     }
 
     #[test]
