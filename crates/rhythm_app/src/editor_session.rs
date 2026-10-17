@@ -205,8 +205,7 @@ impl EditorSession {
         const MAX_PAN_POINTS: f64 = 1_000_000.0;
         for axis in 0..2 {
             let value = f64::from(origin[axis]) + f64::from(total_delta[axis]);
-            self.viewport_pan_points[axis] =
-                value.clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32;
+            self.viewport_pan_points[axis] = value.clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32;
         }
     }
 
