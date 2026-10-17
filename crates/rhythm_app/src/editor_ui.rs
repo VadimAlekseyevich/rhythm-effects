@@ -393,11 +393,7 @@ pub fn draw_editor_shell(
                 }
 
                 let preview_size = fit_composition_preview(canvas.size());
-                let preview = panned_preview_rect(
-                    canvas,
-                    preview_size,
-                    session.viewport_pan_points(),
-                );
+                let preview = panned_preview_rect(canvas, preview_size, session.viewport_pan_points());
                 ui.painter().with_clip_rect(canvas).image(
                     texture_id,
                     preview,
@@ -421,7 +417,9 @@ pub fn draw_editor_shell(
                 if response.drag_started_by(egui::PointerButton::Primary)
                     && let Some(pointer) = response.interact_pointer_pos()
                 {
-                    let start_pointer = ui.input(|input| input.pointer.press_origin()).unwrap_or(pointer);
+                    let start_pointer = ui
+                        .input(|input| input.pointer.press_origin())
+                        .unwrap_or(pointer);
                     if let Some(start) = composition_point_from_preview(
                         preview,
                         start_pointer,
@@ -495,7 +493,7 @@ pub fn draw_editor_shell(
             } else {
                 ui.label("Composition preview unavailable");
             }
-}
+        }
     });
 }
 
@@ -503,8 +501,7 @@ pub fn draw_editor_shell(
 mod tests {
     use super::{
         apply_object_click, clamped_drag_point, composition_point_from_preview,
-        panned_preview_rect,
-        fit_composition_preview, preview_point,
+        fit_composition_preview, panned_preview_rect, preview_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
