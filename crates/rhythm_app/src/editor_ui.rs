@@ -661,7 +661,9 @@ pub fn draw_editor_shell(
                                 )
                             {
                                 session.select_viewport_object(Some(id));
-                                actions.viewport_position_actions.push(ViewportPositionAction::Begin(id));
+                                actions
+                                    .viewport_position_actions
+                                    .push(ViewportPositionAction::Begin(id));
                             }
                         } else {
                             session.begin_viewport_box_selection(
@@ -678,7 +680,9 @@ pub fn draw_editor_shell(
                         unbounded_composition_point(preview, pointer, composition_size)
                         && let Some(position) = session.update_viewport_position_drag(point)
                     {
-                        actions.viewport_position_actions.push(ViewportPositionAction::Update(position));
+                        actions
+                            .viewport_position_actions
+                            .push(ViewportPositionAction::Update(position));
                     }
                     if let Some(current) = clamped_drag_point(preview, pointer, composition_size) {
                         session.update_viewport_box_selection(current);
@@ -691,11 +695,14 @@ pub fn draw_editor_shell(
                                 unbounded_composition_point(preview, pointer, composition_size)
                             && let Some(position) = session.update_viewport_position_drag(point)
                         {
-                            actions.viewport_position_actions
+                            actions
+                                .viewport_position_actions
                                 .push(ViewportPositionAction::Update(position));
                         }
                         if session.finish_viewport_position_drag() {
-                            actions.viewport_position_actions.push(ViewportPositionAction::Commit);
+                            actions
+                                .viewport_position_actions
+                                .push(ViewportPositionAction::Commit);
                         }
                     }
                     if let Some(pointer) = response.interact_pointer_pos()
