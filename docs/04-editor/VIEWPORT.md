@@ -120,7 +120,9 @@ Shift constrains dominant movement axis.
 
 One drag = one history transaction.
 
-Animated Position follows per-property keyframing semantics: at an animated property without a key at current playhead, direct manipulation creates/updates the nearest-grid key and resolves playhead there.
+**AI-173 implementation scope:** primary mouse drag starting on the topmost visible, unlocked Rectangle or Ellipse edits its **static** Position base value. It converts pointer motion through the current pan/zoom preview rectangle and applies an absolute composition-space delta from the original press, without frame accumulation or moving the camera. The existing `ProjectEditor::begin_position_transaction/update_position_transaction/commit_transaction` flow provides live preview and exactly one Undo step; zero movement is a no-op. Escape and focus loss roll back the in-progress transaction. Dragging empty space remains box selection, and Ctrl/locked-object interactions keep their existing behavior. While the user has multiple objects selected, this task does not start a single-object move (AI-179 handles group move). An animated Position is deliberately not edited as `base_value` (AI-180). Shift axis lock is reserved for AI-174. Only editor wireframes are visible until actual object GPU rendering exists.
+
+Animated Position follows per-property keyframing semantics: at an animated property without a key at current playhead, direct manipulation creates/updates the nearest-grid key and resolves playhead there. This behavior remains **unimplemented** in AI-173 (tracked as AI-180).
 
 ## 11. Scale gizmo
 
