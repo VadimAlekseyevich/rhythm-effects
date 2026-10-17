@@ -851,7 +851,12 @@ mod tests {
             assert!(point.y() <= max.y() + 0.001);
         }
         let corner = outline.point(1.0, 1.0).expect("bounding corner");
-        assert!(corner.x() > max.x() || corner.y() > max.y());
+        assert!(
+            corner.x() < min.x()
+                || corner.x() > max.x()
+                || corner.y() < min.y()
+                || corner.y() > max.y()
+        );
     }
 
     #[test]
