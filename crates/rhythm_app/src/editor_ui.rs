@@ -589,7 +589,64 @@ mod tests {
     fn fit_respects_non_widescreen_composition_dimensions() {
         let portrait = fit_composition_preview(egui::vec2(1000.0, 400.0), [1080, 1920]);
         assert!((portrait.x / portrait.y - 1080.0 / 1920.0).abs() < 0.0001);
-        assert!(fit_composition_preview(egui::vec2(1000.0, 400.0), [0, 1080]).is_zero());
+        assert_eq!(
+            fit_composition_preview(egui::vec2(1000.0, 400.0), [0, 1080]),
+            egui::Vec2::ZERO
+        );
+    }
+
+    #[test]
+    fn selected_outline_union_skips_hidden_and_unavailable_objects() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
+            },
+            time::{GridOffsetNs, TempoMap},
+        };
+        let mut project = Project::new(
+            "Frame selection",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let id = ObjectId::new(1).expect("id");
+        let mut rectangle = Object {
+            id,
+            name: "Visible".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(Vec2::new(960.0, 540.0).expect("position")),
+                Animated::new_static(Vec2::new(1.0, 1.0).expect("scale")),
+                Animated::new_static(0.0),
+                Animated::new_static(Vec2::new(0.5, 0.5).expect("anchor")),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(Vec2::new(400.0, 200.0).expect("size")),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        };
+        let mut hidden = rectangle.clone();
+        hidden.id = ObjectId::new(2).expect("id");
+        hidden.visible = false;
+        hidden.transform.position =
+            Animated::new_static(Vec2::new(200.0, 200.0).expect("position"));
+        project.composition.objects.push(rectangle.clone());
+        project.composition.objects.push(hidden);
+        let mut session = EditorSession::default();
+        session.select_viewport_object(Some(id));
+        session.toggle_viewport_object(Some(ObjectId::new(2).expect("id")));
+        let (min, max) = selected_outline_bounds(&project, &session, 0.0).expect("outline union");
+        assert_eq!(min, Vec2::new(760.0, 440.0).expect("min"));
+        assert_eq!(max, Vec2::new(1160.0, 640.0).expect("max"));
+
+        rectangle.visible = false;
+        project.composition.objects[0] = rectangle;
+        assert!(selected_outline_bounds(&project, &session, 0.0).is_none());
     }
 
     #[test]
