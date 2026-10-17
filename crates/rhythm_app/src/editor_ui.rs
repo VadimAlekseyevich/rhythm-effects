@@ -10,18 +10,20 @@ use rhythm_core::{
     time::ProjectTimeNs,
 };
 
-fn fit_composition_preview(available: egui::Vec2) -> egui::Vec2 {
-    const COMPOSITION_ASPECT: f32 = 1920.0 / 1080.0;
-
-    if available.x <= 0.0 || available.y <= 0.0 {
+fn fit_composition_preview(available: egui::Vec2, composition_size: [u32; 2]) -> egui::Vec2 {
+    if available.x <= 0.0
+        || available.y <= 0.0
+        || composition_size.contains(&0)
+    {
         return egui::Vec2::ZERO;
     }
 
+    let composition_aspect = composition_size[0] as f32 / composition_size[1] as f32;
     let available_aspect = available.x / available.y;
-    if available_aspect > COMPOSITION_ASPECT {
-        egui::vec2(available.y * COMPOSITION_ASPECT, available.y)
+    if available_aspect > composition_aspect {
+        egui::vec2(available.y * composition_aspect, available.y)
     } else {
-        egui::vec2(available.x, available.x / COMPOSITION_ASPECT)
+        egui::vec2(available.x, available.x / composition_aspect)
     }
 }
 
@@ -105,6 +107,41 @@ fn draw_marquee(
         ],
         stroke,
     ));
+}
+
+/// Union of visible, selected Rectangle/Ellipse outlines in composition
+/// space. Image and Text require runtime bounds which are not available yet;
+/// never fabricate selection bounds for those object kinds.
+fn selected_outline_bounds(
+    project: &Project,
+    session: &EditorSession,
+    continuous_tick: f64,
+) -> Option<(Vec2, Vec2)> {
+    let mut bounds: Option<(f32, f32, f32, f32)> = None;
+    for object in &project.composition.objects {
+        if !object.visible || !session.is_object_selected(object.id) {
+            continue;
+        }
+        let Some((min, max)) =
+            object_outline(object, continuous_tick).and_then(|shape| shape.composition_bounds())
+        else {
+            continue;
+        };
+        bounds = Some(match bounds {
+            Some((x0, y0, x1, y1)) => (
+                x0.min(min.x()),
+                y0.min(min.y()),
+                x1.max(max.x()),
+                y1.max(max.y()),
+            ),
+            None => (min.x(), min.y(), max.x(), max.y()),
+        });
+    }
+    let (min_x, min_y, max_x, max_y) = bounds?;
+    Some((
+        Vec2::new(min_x, min_y).ok()?,
+        Vec2::new(max_x, max_y).ok()?,
+    ))
 }
 
 /// Single dispatch point for viewport and Objects-panel click semantics.
@@ -371,9 +408,24 @@ pub fn draw_editor_shell(
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
-        if ui.small_button("Reset View").clicked() {
-            session.reset_viewport_camera();
-        }
+        let mut frame_selection_requested = false;
+        ui.horizontal(|ui| {
+            if ui.button("Fit Composition").clicked() {
+                session.reset_viewport_camera();
+            }
+            if ui
+                .add_enabled(
+                    !session.selected_objects().is_empty(),
+                    egui::Button::new("Frame Selection"),
+                )
+                .on_hover_text(
+                    "Frame selected Rectangle/Ellipse outlines; image/text layout is not ready",
+                )
+                .clicked()
+            {
+                frame_selection_requested = true;
+            }
+        });
         ui.separator();
         {
             if let Some(texture_id) = composition_texture_id {
@@ -410,7 +462,26 @@ pub fn draw_editor_shell(
                     }
                 }
 
-                let preview_size = fit_composition_preview(canvas.size()) * session.viewport_zoom();
+                let composition_size = [
+                    project.settings.composition_width,
+                    project.settings.composition_height,
+                ];
+                let fitted_size = fit_composition_preview(canvas.size(), composition_size);
+                let tick = project
+                    .tempo_map
+                    .continuous_tick_position(session.playhead())
+                    .unwrap_or(0.0);
+                if frame_selection_requested
+                    && let Some(bounds) = selected_outline_bounds(project, session, tick)
+                {
+                    session.frame_viewport_bounds(
+                        bounds,
+                        [canvas.width(), canvas.height()],
+                        [fitted_size.x, fitted_size.y],
+                        composition_size,
+                    );
+                }
+                let preview_size = fitted_size * session.viewport_zoom();
                 let preview =
                     panned_preview_rect(canvas, preview_size, session.viewport_pan_points());
                 ui.painter().with_clip_rect(canvas).image(
@@ -421,15 +492,7 @@ pub fn draw_editor_shell(
                 );
                 // Static objects remain pickable in projects without a tempo map.
                 // No audio-clock or timeline playback is inferred.
-                let tick = project
-                    .tempo_map
-                    .continuous_tick_position(session.playhead())
-                    .unwrap_or(0.0);
                 draw_editor_outlines(ui, preview, canvas, session, project, tick);
-                let composition_size = [
-                    project.settings.composition_width,
-                    project.settings.composition_height,
-                ];
                 // A marquee can only begin with the mouse pressed on empty
                 // composition geometry. Drags begun on an object are reserved
                 // for the future move gizmo, not misinterpreted as box selection.
@@ -517,15 +580,53 @@ pub fn draw_editor_shell(
 mod tests {
     use super::{
         apply_object_click, clamped_drag_point, composition_point_from_preview,
-        fit_composition_preview, panned_preview_rect, preview_point,
+        fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
 
     #[test]
+    fn fit_respects_non_widescreen_composition_dimensions() {
+        let portrait = fit_composition_preview(egui::vec2(1000.0, 400.0), [1080, 1920]);
+        assert!((portrait.x / portrait.y - 1080.0 / 1920.0).abs() < 0.0001);
+        assert!(fit_composition_preview(egui::vec2(1000.0, 400.0), [0, 1080]).is_zero());
+    }
+
+    #[test]
+    fn frame_selection_uses_camera_rectangle_and_respects_existing_pan() {
+        let canvas = egui::Rect::from_min_size(
+            egui::pos2(100.0, 100.0),
+            egui::vec2(1000.0, 600.0),
+        );
+        let fitted = fit_composition_preview(canvas.size(), [1920, 1080]);
+        let mut session = EditorSession::default();
+        session.begin_viewport_pan();
+        session.update_viewport_pan([300.0, -200.0]);
+        session.end_viewport_pan();
+        assert!(session.frame_viewport_bounds(
+            (
+                rhythm_core::domain::Vec2::new(500.0, 300.0).expect("min"),
+                rhythm_core::domain::Vec2::new(900.0, 500.0).expect("max"),
+            ),
+            [canvas.width(), canvas.height()],
+            [fitted.x, fitted.y],
+            [1920, 1080],
+        ));
+        let preview = panned_preview_rect(
+            canvas,
+            fitted * session.viewport_zoom(),
+            session.viewport_pan_points(),
+        );
+        let center = rhythm_core::domain::Vec2::new(700.0, 400.0).expect("center");
+        let projected = preview_point(preview, center, [1920, 1080]);
+        assert!((projected.x - canvas.center().x).abs() < 0.01);
+        assert!((projected.y - canvas.center().y).abs() < 0.01);
+    }
+
+    #[test]
     fn pointer_anchored_zoom_preserves_composition_point_and_outline_mapping() {
         let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(960.0, 600.0));
-        let fit_size = fit_composition_preview(canvas.size());
+        let fit_size = fit_composition_preview(canvas.size(), [1920, 1080]);
         let mut session = EditorSession::default();
         // Include existing pan, avoiding a symmetric camera-only test.
         session.begin_viewport_pan();
@@ -561,7 +662,7 @@ mod tests {
     #[test]
     fn camera_pan_shifts_image_and_hit_coordinates_together() {
         let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(1000.0, 800.0));
-        let fitted = fit_composition_preview(canvas.size());
+        let fitted = fit_composition_preview(canvas.size(), [1920, 1080]);
         let initial = panned_preview_rect(canvas, fitted, [0.0, 0.0]);
         let shifted = panned_preview_rect(canvas, fitted, [90.0, -70.0]);
         assert_eq!(shifted.min, initial.min + egui::vec2(90.0, -70.0));
@@ -581,7 +682,7 @@ mod tests {
     #[test]
     fn resetting_pan_can_recenter_an_offscreen_composition() {
         let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(800.0, 450.0));
-        let size = fit_composition_preview(canvas.size());
+        let size = fit_composition_preview(canvas.size(), [1920, 1080]);
         assert!(!panned_preview_rect(canvas, size, [2000.0, 0.0]).intersects(canvas));
         assert_eq!(
             panned_preview_rect(canvas, size, [0.0, 0.0]).center(),
@@ -641,8 +742,8 @@ mod tests {
 
     #[test]
     fn preview_fit_preserves_composition_aspect() {
-        let wide = fit_composition_preview(egui::vec2(1000.0, 400.0));
-        let tall = fit_composition_preview(egui::vec2(400.0, 1000.0));
+        let wide = fit_composition_preview(egui::vec2(1000.0, 400.0), [1920, 1080]);
+        let tall = fit_composition_preview(egui::vec2(400.0, 1000.0), [1920, 1080]);
 
         assert!((wide.x / wide.y - 16.0 / 9.0).abs() < 0.0001);
         assert!((tall.x / tall.y - 16.0 / 9.0).abs() < 0.0001);
