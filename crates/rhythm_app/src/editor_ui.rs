@@ -531,7 +531,9 @@ pub fn draw_editor_shell(
         );
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
-        ui.small("Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).");
+        ui.small(
+            "Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).",
+        );
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
         let mut frame_selection_requested = false;
         ui.horizontal(|ui| {
@@ -684,7 +686,8 @@ pub fn draw_editor_shell(
                                 unbounded_composition_point(preview, pointer, composition_size)
                             && let Some(position) = session.update_viewport_position_drag(point)
                         {
-                            viewport_position_actions.push(ViewportPositionAction::Update(position));
+                            viewport_position_actions
+                                .push(ViewportPositionAction::Update(position));
                         }
                         if session.finish_viewport_position_drag() {
                             viewport_position_actions.push(ViewportPositionAction::Commit);
@@ -745,8 +748,7 @@ mod tests {
     use super::{
         apply_object_click, clamped_drag_point, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
-        unbounded_composition_point,
-        selection_rect_on_preview,
+        selection_rect_on_preview, unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
@@ -945,28 +947,18 @@ mod tests {
 
     #[test]
     fn position_drag_pointer_mapping_respects_pan_zoom_and_allows_outside() {
-        let canvas = egui::Rect::from_min_size(
-            egui::pos2(300.0, 120.0),
-            egui::vec2(960.0, 540.0),
-        );
-        let preview = panned_preview_rect(
-            canvas,
-            egui::vec2(960.0, 540.0) * 2.0,
-            [90.0, -40.0],
-        );
+        let canvas = egui::Rect::from_min_size(egui::pos2(300.0, 120.0), egui::vec2(960.0, 540.0));
+        let preview = panned_preview_rect(canvas, egui::vec2(960.0, 540.0) * 2.0, [90.0, -40.0]);
         let start = egui::pos2(550.0, 250.0);
         let end = egui::pos2(610.0, 290.0);
-        let a = unbounded_composition_point(preview, start, [1920, 1080])
-            .expect("drag origin");
-        let b = unbounded_composition_point(preview, end, [1920, 1080])
-            .expect("drag target");
+        let a = unbounded_composition_point(preview, start, [1920, 1080]).expect("drag origin");
+        let b = unbounded_composition_point(preview, end, [1920, 1080]).expect("drag target");
         assert!((b.x() - a.x() - 60.0).abs() < 0.01);
         assert!((b.y() - a.y() - 40.0).abs() < 0.01);
-        assert!(unbounded_composition_point(
-            preview,
-            egui::pos2(-1000.0, -1000.0),
-            [1920, 1080],
-        ).is_some());
+        assert!(
+            unbounded_composition_point(preview, egui::pos2(-1000.0, -1000.0), [1920, 1080],)
+                .is_some()
+        );
     }
 
     #[test]
