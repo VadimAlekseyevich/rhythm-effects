@@ -86,6 +86,12 @@ AI-166 connects CPU hit testing to a real click on the fitted egui composition i
 
 **Rendering gap remains visible:** the composition GPU renderer still clears to black. Until GPU scene rendering is implemented, the app displays explicit *editor-only wireframe overlays* for Rectangle/Ellipse, calculated from the same evaluated geometry as picking. These outlines are not creative output or export content. Image and Text picking is supported by core only when prepared intrinsic-size and shaped-layout metadata are supplied; no cache exists in the UI yet, so the viewport deliberately passes None and does not fabricate clickable media bounds. Ctrl-click multi-selection, pan/zoom, real object GPU rendering, and Inspector property editing remain separate tasks.
 
+### Selection bounds and pivot overlays (AI-172)
+
+Selected, visible Rectangle/Ellipse objects show separate editor-only **axis-aligned selection bounds** on top of their existing transformed wireframes. Bounds derive from evaluated continuous-tick geometry: Rectangle uses transformed corners; Ellipse uses analytic curve extrema, so rotated and negatively scaled objects cannot be incorrectly framed by a local, unrotated box. Each selectable outline gets a fixed-screen-size crosshair/ring at the actual world **Position** of its normalized Anchor. With a noncentral Anchor, that pivot **differs from the geometric center**; the marker follows evaluated position animation and is not draggable yet. When more than one selected shape has usable geometry, a second group bounds rectangle surrounds their union.
+
+All bounds and pivot coordinates pass through the same fitted/panned/zoomed preview rectangle as hit-testing and box selection. Overlays are clipped to the viewport canvas and never enter the GPU composition texture, project serialization or video export. Invisible objects, invalid geometry and Image/Text without prepared runtime bounds are omitted rather than assigned synthetic bounds. Locked objects can display their selection overlays when selected through the Objects list, but are not picked by pointer.
+
 ## 8. Locked/hidden objects
 
 Hidden objects are not rendered or pointer-selectable.
