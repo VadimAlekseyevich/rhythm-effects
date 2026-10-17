@@ -109,6 +109,7 @@ pub struct EditorSession {
     selected_objects: Vec<ObjectId>,
     viewport_box_selection: Option<ViewportBoxSelection>,
     viewport_pan_points: [f32; 2],
+    viewport_zoom: f32,
     viewport_pan_origin: Option<[f32; 2]>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
@@ -130,6 +131,7 @@ impl Default for EditorSession {
             selected_objects: Vec::new(),
             viewport_box_selection: None,
             viewport_pan_points: [0.0, 0.0],
+            viewport_zoom: 1.0,
             viewport_pan_origin: None,
             selected_keyframes: HashSet::new(),
             focused_property: None,
@@ -185,6 +187,53 @@ impl EditorSession {
     #[must_use]
     pub const fn viewport_pan_points(&self) -> [f32; 2] {
         self.viewport_pan_points
+    }
+
+    /// 1.0 is the fitted composition size. Zoom is always editor-only state.
+    #[must_use]
+    pub const fn viewport_zoom(&self) -> f32 {
+        self.viewport_zoom
+    }
+
+    /// Zoom about the mouse position in *canvas-centered logical points*.
+    ///
+    /// The composition point under the pointer stays stationary as the
+    /// displayed rectangle scales. The same transform is used for drawing,
+    /// click picking, and marquee selection. No project values are mutated.
+    /// Ignores nonfinite values and concurrent middle-button camera gestures.
+    pub fn zoom_viewport_at(&mut self, multiplier: f32, pointer: [f32; 2]) -> bool {
+        if !multiplier.is_finite()
+            || multiplier <= 0.0
+            || !pointer[0].is_finite()
+            || !pointer[1].is_finite()
+            || self.viewport_pan_origin.is_some()
+        {
+            return false;
+        }
+
+        const MIN_ZOOM: f64 = 0.125;
+        const MAX_ZOOM: f64 = 16.0;
+        const MAX_PAN_POINTS: f64 = 1_000_000.0;
+        let old_zoom = f64::from(self.viewport_zoom);
+        let zoom = (old_zoom * f64::from(multiplier)).clamp(MIN_ZOOM, MAX_ZOOM) as f32;
+        if zoom == self.viewport_zoom {
+            return false;
+        }
+        let ratio = f64::from(zoom) / old_zoom;
+        for (axis, pointer_axis) in pointer.into_iter().enumerate() {
+            let previous = f64::from(self.viewport_pan_points[axis]);
+            let anchor = f64::from(pointer_axis);
+            let next = anchor + (previous - anchor) * ratio;
+            self.viewport_pan_points[axis] = next.clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32;
+        }
+        self.viewport_zoom = zoom;
+        true
+    }
+
+    /// Recover the default centered fitted preview, without losing selection.
+    pub fn reset_viewport_camera(&mut self) {
+        self.reset_viewport_pan();
+        self.viewport_zoom = 1.0;
     }
 
     /// Begin a middle-mouse gesture relative to the camera offset at press.
@@ -1195,6 +1244,58 @@ mod tests {
         assert_eq!(session.selected_object(), Some(a));
         session.apply_viewport_box_selection([], false);
         assert!(session.selected_objects().is_empty());
+    }
+
+    #[test]
+    fn viewport_zoom_anchors_pointer_and_keeps_selection_unchanged() {
+        let mut session = EditorSession::default();
+        let id = ObjectId::new(70).expect("object");
+        session.select_viewport_object(Some(id));
+        session.seek_paused(ProjectTimeNs::new(54321));
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert!(session.zoom_viewport_at(2.0, [100.0, -50.0]));
+        assert_eq!(session.viewport_zoom(), 2.0);
+        assert_eq!(session.viewport_pan_points(), [-100.0, 50.0]);
+
+        // Zoom out at the same cursor: the camera returns to its origin.
+        assert!(session.zoom_viewport_at(0.5, [100.0, -50.0]));
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert_eq!(session.selected_object(), Some(id));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(54321));
+    }
+
+    #[test]
+    fn viewport_zoom_honors_existing_pan_and_cancels_during_middle_drag() {
+        let mut session = EditorSession::default();
+        session.begin_viewport_pan();
+        session.update_viewport_pan([40.0, -20.0]);
+        session.end_viewport_pan();
+        assert!(session.zoom_viewport_at(2.0, [0.0, 0.0]));
+        assert_eq!(session.viewport_pan_points(), [80.0, -40.0]);
+        session.begin_viewport_pan();
+        assert!(!session.zoom_viewport_at(2.0, [100.0, 50.0]));
+        assert_eq!(session.viewport_zoom(), 2.0);
+        session.end_viewport_pan();
+        session.reset_viewport_camera();
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert_eq!(session.viewport_zoom(), 1.0);
+    }
+
+    #[test]
+    fn viewport_zoom_clamps_scale_and_rejects_nonfinite_input() {
+        let mut session = EditorSession::default();
+        for factor in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(!session.zoom_viewport_at(factor, [0.0, 0.0]));
+        }
+        assert!(!session.zoom_viewport_at(2.0, [f32::NAN, 0.0]));
+        assert!(!session.zoom_viewport_at(2.0, [0.0, f32::INFINITY]));
+        assert!(session.zoom_viewport_at(f32::MAX, [0.0, 0.0]));
+        assert_eq!(session.viewport_zoom(), 16.0);
+        assert!(!session.zoom_viewport_at(2.0, [0.0, 0.0]));
+        assert!(session.zoom_viewport_at(0.00001, [0.0, 0.0]));
+        assert_eq!(session.viewport_zoom(), 0.125);
+        assert!(!session.zoom_viewport_at(0.5, [0.0, 0.0]));
     }
 
     #[test]

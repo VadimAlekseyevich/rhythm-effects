@@ -34,9 +34,9 @@ Fit Composition and Frame Selection modify only camera state.
 
 ## 4. Zoom
 
-Mouse wheel zooms around pointer location so the composition point under cursor remains approximately stable.
+Mouse wheel over the viewport canvas zooms around the pointer (not the panel center): the composition point under the cursor remains stationary to floating-point precision. EditorSession stores a camera scale relative to the fitted preview (1.0 = fit) and a pan in egui logical points. Updating zoom adjusts pan so the image, editor-only wireframe overlays, hit testing and marquee all share the same camera rectangle; zoom never edits project coordinates or transport time.
 
-Clamp to practical min/max.
+The interactive scale is clamped to **0.125–16×** the fitted preview. Wheel input is exponential for smooth step sizes, ignored outside the viewport and while a middle-button pan is active. Reset View restores both default zoom and pan without changing object selection. Full Fit Composition/Frame Selection actions remain separate AI-171 tasks.
 
 ## 5. Pan
 
