@@ -217,11 +217,7 @@ fn draw_selection_overlays(
         // in screen points regardless of camera zoom and device DPI.
         let pivot = preview_point(preview, geometry.anchor_position(), composition_size);
         if pivot.x.is_finite() && pivot.y.is_finite() {
-            painter.circle_stroke(
-                pivot,
-                5.0,
-                egui::Stroke::new(3.0, egui::Color32::BLACK),
-            );
+            painter.circle_stroke(pivot, 5.0, egui::Stroke::new(3.0, egui::Color32::BLACK));
             painter.circle_stroke(pivot, 5.0, pivot_stroke);
             painter.line_segment(
                 [pivot + egui::vec2(-8.0, 0.0), pivot + egui::vec2(8.0, 0.0)],
@@ -509,7 +505,9 @@ pub fn draw_editor_shell(
     egui::CentralPanel::default().show(ui, |ui| {
         ui.heading("Viewport");
         ui.small("Editor-only wireframes; actual object GPU rendering is not wired yet.");
-        ui.small("Selected objects show yellow bounds and pivot crosses; blue bounds enclose groups.");
+        ui.small(
+            "Selected objects show yellow bounds and pivot crosses; blue bounds enclose groups.",
+        );
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
@@ -694,15 +692,8 @@ mod tests {
 
     #[test]
     fn selection_bounds_projection_tracks_pan_zoom_and_pivot_mapping() {
-        let canvas = egui::Rect::from_min_size(
-            egui::pos2(200.0, 80.0),
-            egui::vec2(960.0, 540.0),
-        );
-        let preview = panned_preview_rect(
-            canvas,
-            egui::vec2(960.0, 540.0) * 2.0,
-            [30.0, -45.0],
-        );
+        let canvas = egui::Rect::from_min_size(egui::pos2(200.0, 80.0), egui::vec2(960.0, 540.0));
+        let preview = panned_preview_rect(canvas, egui::vec2(960.0, 540.0) * 2.0, [30.0, -45.0]);
         let min = rhythm_core::domain::Vec2::new(720.0, 400.0).expect("min");
         let max = rhythm_core::domain::Vec2::new(1200.0, 680.0).expect("max");
         let rect = selection_rect_on_preview(preview, (min, max), [1920, 1080])
@@ -722,10 +713,7 @@ mod tests {
 
     #[test]
     fn selection_bounds_reject_empty_invalid_and_missing_composition() {
-        let preview = egui::Rect::from_min_size(
-            egui::pos2(10.0, 20.0),
-            egui::vec2(800.0, 600.0),
-        );
+        let preview = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(800.0, 600.0));
         let min = rhythm_core::domain::Vec2::new(50.0, 20.0).expect("min");
         let max = rhythm_core::domain::Vec2::new(50.0, 100.0).expect("max");
         assert!(selection_rect_on_preview(preview, (min, max), [1920, 1080]).is_none());
