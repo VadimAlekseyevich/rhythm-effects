@@ -381,6 +381,14 @@ pub struct OutlineGeometry {
 }
 
 impl OutlineGeometry {
+    /// Evaluated composition-space transform pivot used for editor anchor
+    /// markers. A noncentral Anchor is not the bounds center; Position remains
+    /// the pivot even after rotation, mirroring and animated transforms.
+    #[must_use]
+    pub const fn anchor_position(self) -> Vec2 {
+        self.position
+    }
+
     /// Maps a point expressed as fractions of the local shape size to the
     /// composition, honoring the same anchor/scale/rotation as the hit test.
     #[must_use]
@@ -856,6 +864,47 @@ mod tests {
                 || corner.x() > max.x()
                 || corner.y() < min.y()
                 || corner.y() > max.y()
+        );
+    }
+
+    #[test]
+    fn outline_anchor_marker_tracks_actual_pivot_not_geometric_center() {
+        let mut object = rectangle();
+        object.transform.position = Animated::new_static(vec2(320.0, 175.0));
+        object.transform.anchor = Animated::new_static(vec2(0.0, 1.0));
+        object.transform.rotation_degrees = Animated::new_static(67.0);
+        object.transform.scale = Animated::new_static(vec2(-2.0, 0.5));
+        let geometry = object_outline(&object, 0.0).expect("valid transformed object");
+        assert_eq!(geometry.anchor_position(), vec2(320.0, 175.0));
+        assert_eq!(geometry.point(0.0, 1.0), Some(geometry.anchor_position()));
+        assert_ne!(geometry.point(0.5, 0.5), Some(geometry.anchor_position()));
+        let (min, max) = geometry.composition_bounds().expect("valid bounds");
+        assert!(min.x() < max.x() && min.y() < max.y());
+
+        let mut animated = rectangle();
+        animated.transform.position = Animated::with_keyframes(
+            vec2(100.0, 100.0),
+            vec![
+                Keyframe::new(
+                    KeyframeId::new(10).expect("id"),
+                    MusicalTick::new(0),
+                    vec2(100.0, 100.0),
+                    Interpolation::Linear,
+                ),
+                Keyframe::new(
+                    KeyframeId::new(11).expect("id"),
+                    MusicalTick::new(960),
+                    vec2(300.0, 200.0),
+                    Interpolation::Linear,
+                ),
+            ],
+        )
+        .expect("valid animation");
+        let animated_geometry = object_outline(&animated, 480.0).expect("evaluated");
+        assert_eq!(animated_geometry.anchor_position(), vec2(200.0, 150.0));
+        assert_eq!(
+            animated_geometry.point(0.5, 0.5),
+            Some(animated_geometry.anchor_position())
         );
     }
 
