@@ -236,6 +236,67 @@ impl EditorSession {
         self.viewport_zoom = 1.0;
     }
 
+    /// Fit the selected composition-space AABB within the current viewport.
+    ///
+    /// `fitted_size` is the centered Fit Composition display size before
+    /// zoom; `canvas_size` is the drawable viewport size in logical points.
+    /// Pan is relative to canvas center. All math uses f64 intermediates to
+    /// avoid overflow and accumulate no incremental camera error.
+    /// The requested framing includes an 8% margin at each side.
+    pub fn frame_viewport_bounds(
+        &mut self,
+        bounds: (Vec2, Vec2),
+        canvas_size: [f32; 2],
+        fitted_size: [f32; 2],
+        composition_size: [u32; 2],
+    ) -> bool {
+        const MIN_ZOOM: f64 = 0.125;
+        const MAX_ZOOM: f64 = 16.0;
+        const MAX_PAN_POINTS: f64 = 1_000_000.0;
+        if self.viewport_pan_origin.is_some()
+            || canvas_size.iter().any(|x| !x.is_finite() || *x <= 0.0)
+            || fitted_size.iter().any(|x| !x.is_finite() || *x <= 0.0)
+            || composition_size.contains(&0)
+        {
+            return false;
+        }
+
+        let (min, max) = bounds;
+        let min = [f64::from(min.x()), f64::from(min.y())];
+        let max = [f64::from(max.x()), f64::from(max.y())];
+        if (0..2)
+            .any(|axis| !min[axis].is_finite() || !max[axis].is_finite() || max[axis] <= min[axis])
+        {
+            return false;
+        }
+        let units = [
+            f64::from(fitted_size[0]) / f64::from(composition_size[0]),
+            f64::from(fitted_size[1]) / f64::from(composition_size[1]),
+        ];
+        let zoom = (0..2)
+            .map(|axis| {
+                0.84 * f64::from(canvas_size[axis]) / ((max[axis] - min[axis]) * units[axis])
+            })
+            .fold(f64::INFINITY, f64::min)
+            .clamp(MIN_ZOOM, MAX_ZOOM);
+        if !zoom.is_finite() {
+            return false;
+        }
+        let next_pan = [0, 1].map(|axis| {
+            let object_center = min[axis] * 0.5 + max[axis] * 0.5;
+            let composition_center = f64::from(composition_size[axis]) * 0.5;
+            ((composition_center - object_center) * units[axis] * zoom)
+                .clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32
+        });
+        let next_zoom = zoom as f32;
+        if next_zoom == self.viewport_zoom && next_pan == self.viewport_pan_points {
+            return false;
+        }
+        self.viewport_zoom = next_zoom;
+        self.viewport_pan_points = next_pan;
+        true
+    }
+
     /// Begin a middle-mouse gesture relative to the camera offset at press.
     /// The caller supplies total drag displacement, never per-frame delta.
     pub fn begin_viewport_pan(&mut self) {
@@ -1129,6 +1190,7 @@ impl EditorSession {
 mod tests {
     use super::{EditorSession, KeyframeDragMember, PreviewQuality};
     use rhythm_core::{
+        domain::Vec2,
         ids::{KeyframeId, ObjectId},
         property::AnimatableProperty,
         time::{
@@ -1212,6 +1274,84 @@ mod tests {
             Some(([10.0, 20.0], [30.0, 40.0], true))
         );
         assert!(session.timeline_box_selection().is_none());
+    }
+
+    #[test]
+    fn frame_selection_centers_object_aabb_and_respects_eight_percent_padding() {
+        let mut session = EditorSession::default();
+        let min = Vec2::new(500.0, 300.0).expect("min");
+        let max = Vec2::new(900.0, 500.0).expect("max");
+        assert!(session.frame_viewport_bounds(
+            (min, max),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        let zoom = session.viewport_zoom();
+        let pan = session.viewport_pan_points();
+        assert!(zoom > 1.0);
+        let projected_width = 400.0 * (1000.0 / 1920.0) * zoom;
+        let projected_height = 200.0 * (562.5 / 1080.0) * zoom;
+        assert!(projected_width <= 840.01);
+        assert!(projected_height <= 504.01);
+        let center_x = (700.0 - 960.0) * (1000.0 / 1920.0) * zoom + pan[0];
+        let center_y = (400.0 - 540.0) * (562.5 / 1080.0) * zoom + pan[1];
+        assert!(center_x.abs() < 0.01);
+        assert!(center_y.abs() < 0.01);
+        assert!(!session.frame_viewport_bounds(
+            (min, max),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        session.reset_viewport_camera();
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn frame_selection_rejects_degenerate_bounds_and_invalid_canvas() {
+        let mut session = EditorSession::default();
+        let a = Vec2::new(200.0, 100.0).expect("position");
+        let b = Vec2::new(300.0, 180.0).expect("position");
+        assert!(!session.frame_viewport_bounds(
+            (a, a),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (b, a),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (a, b),
+            [0.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (a, b),
+            [1000.0, f32::NAN],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (a, b),
+            [1000.0, 600.0],
+            [0.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (a, b),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [0, 1080],
+        ));
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
     }
 
     #[test]
