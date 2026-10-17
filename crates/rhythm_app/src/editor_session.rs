@@ -108,6 +108,8 @@ pub struct EditorSession {
     follow_playhead: bool,
     selected_objects: Vec<ObjectId>,
     viewport_box_selection: Option<ViewportBoxSelection>,
+    viewport_pan_points: [f32; 2],
+    viewport_pan_origin: Option<[f32; 2]>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
@@ -127,6 +129,8 @@ impl Default for EditorSession {
             follow_playhead: false,
             selected_objects: Vec::new(),
             viewport_box_selection: None,
+            viewport_pan_points: [0.0, 0.0],
+            viewport_pan_origin: None,
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
@@ -175,6 +179,45 @@ impl EditorSession {
         } else {
             self.selected_objects.push(object_id);
         }
+    }
+
+    /// Camera-only translation in egui logical points, never Project pixels.
+    #[must_use]
+    pub const fn viewport_pan_points(&self) -> [f32; 2] {
+        self.viewport_pan_points
+    }
+
+    /// Begin a middle-mouse gesture relative to the camera offset at press.
+    /// The caller supplies total drag displacement, never per-frame delta.
+    pub fn begin_viewport_pan(&mut self) {
+        self.viewport_pan_origin = Some(self.viewport_pan_points);
+    }
+
+    /// Recompute from the original offset to avoid accumulating frame jitter.
+    /// Non-finite drag input is ignored; extreme offsets remain bounded.
+    pub fn update_viewport_pan(&mut self, total_delta: [f32; 2]) {
+        let Some(origin) = self.viewport_pan_origin else {
+            return;
+        };
+        if !total_delta[0].is_finite() || !total_delta[1].is_finite() {
+            return;
+        }
+        const MAX_PAN_POINTS: f64 = 1_000_000.0;
+        for axis in 0..2 {
+            let value = f64::from(origin[axis]) + f64::from(total_delta[axis]);
+            self.viewport_pan_points[axis] =
+                value.clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32;
+        }
+    }
+
+    pub fn end_viewport_pan(&mut self) {
+        self.viewport_pan_origin = None;
+    }
+
+    /// Reset just the editor camera translation; preserve selection and time.
+    pub fn reset_viewport_pan(&mut self) {
+        self.viewport_pan_points = [0.0, 0.0];
+        self.viewport_pan_origin = None;
     }
 
     /// The marquee starts only when dragging from empty composition space.
@@ -1153,6 +1196,54 @@ mod tests {
         assert_eq!(session.selected_object(), Some(a));
         session.apply_viewport_box_selection([], false);
         assert!(session.selected_objects().is_empty());
+    }
+
+    #[test]
+    fn viewport_middle_pan_uses_total_drag_delta_without_drift() {
+        let mut session = EditorSession::default();
+        let selected = ObjectId::new(77).expect("valid ID");
+        session.select_viewport_object(Some(selected));
+        session.seek_paused(ProjectTimeNs::new(123_456));
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+
+        // No active middle drag means the camera is not affected.
+        session.update_viewport_pan([40.0, 25.0]);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+
+        session.begin_viewport_pan();
+        session.update_viewport_pan([40.0, -25.0]);
+        assert_eq!(session.viewport_pan_points(), [40.0, -25.0]);
+        session.update_viewport_pan([40.0, -25.0]); // Same total, no drift.
+        assert_eq!(session.viewport_pan_points(), [40.0, -25.0]);
+        session.update_viewport_pan([10.0, 15.0]);
+        assert_eq!(session.viewport_pan_points(), [10.0, 15.0]);
+        session.end_viewport_pan();
+
+        session.begin_viewport_pan();
+        session.update_viewport_pan([-5.0, 20.0]);
+        assert_eq!(session.viewport_pan_points(), [5.0, 35.0]);
+        session.end_viewport_pan();
+
+        assert_eq!(session.selected_object(), Some(selected));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(123_456));
+        session.reset_viewport_pan();
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert_eq!(session.selected_object(), Some(selected));
+    }
+
+    #[test]
+    fn viewport_pan_rejects_nonfinite_drag_and_bounds_extreme_values() {
+        let mut session = EditorSession::default();
+        session.begin_viewport_pan();
+        session.update_viewport_pan([f32::NAN, 1.0]);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        session.update_viewport_pan([f32::INFINITY, 1.0]);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        session.update_viewport_pan([f32::MAX, f32::MIN]);
+        assert_eq!(session.viewport_pan_points(), [1_000_000.0, -1_000_000.0]);
+        session.end_viewport_pan();
+        session.update_viewport_pan([0.0, 0.0]);
+        assert_eq!(session.viewport_pan_points(), [1_000_000.0, -1_000_000.0]);
     }
 
     #[test]
