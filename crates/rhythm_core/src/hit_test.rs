@@ -401,6 +401,57 @@ impl OutlineGeometry {
     }
 }
 
+impl OutlineGeometry {
+    /// Exact composition-space axis-aligned bounds for fitting the viewport.
+    ///
+    /// Rectangle extrema are transformed corners. Ellipse extrema are
+    /// analytical projections of the rotated, possibly mirrored radii; a
+    /// polygon approximation would occasionally crop curved selection edges.
+    #[must_use]
+    pub fn composition_bounds(self) -> Option<(Vec2, Vec2)> {
+        let (min_x, min_y, max_x, max_y) = match self.kind {
+            OutlineKind::Rectangle => {
+                let corners = [
+                    self.point(0.0, 0.0)?,
+                    self.point(1.0, 0.0)?,
+                    self.point(1.0, 1.0)?,
+                    self.point(0.0, 1.0)?,
+                ];
+                let mut min_x = f32::INFINITY;
+                let mut min_y = f32::INFINITY;
+                let mut max_x = f32::NEG_INFINITY;
+                let mut max_y = f32::NEG_INFINITY;
+                for point in corners {
+                    min_x = min_x.min(point.x());
+                    min_y = min_y.min(point.y());
+                    max_x = max_x.max(point.x());
+                    max_y = max_y.max(point.y());
+                }
+                (
+                    f64::from(min_x),
+                    f64::from(min_y),
+                    f64::from(max_x),
+                    f64::from(max_y),
+                )
+            }
+            OutlineKind::Ellipse => {
+                let center = self.point(0.5, 0.5)?;
+                let rx = f64::from(self.size.x()) * f64::from(self.scale.x()) * 0.5;
+                let ry = f64::from(self.size.y()) * f64::from(self.scale.y()) * 0.5;
+                let dx = (rx * self.cos).hypot(ry * self.sin);
+                let dy = (rx * self.sin).hypot(ry * self.cos);
+                let cx = f64::from(center.x());
+                let cy = f64::from(center.y());
+                (cx - dx, cy - dy, cx + dx, cy + dy)
+            }
+        };
+        Some((
+            Vec2::new(min_x as f32, min_y as f32).ok()?,
+            Vec2::new(max_x as f32, max_y as f32).ok()?,
+        ))
+    }
+}
+
 /// Geometry for transparent editor-only Rectangle/Ellipse guides until the
 /// actual GPU composition pass is wired. Image/Text need runtime media/layout
 /// metadata, so no false proxy outlines are fabricated for those objects.
@@ -763,6 +814,44 @@ mod tests {
             ),
             Some(objects[1].id),
         );
+    }
+
+    #[test]
+    fn selected_rectangle_frame_bounds_cover_rotated_mirrored_corners() {
+        let mut object = rectangle();
+        object.transform.rotation_degrees = Animated::new_static(33.0);
+        object.transform.scale = Animated::new_static(vec2(-2.0, 0.5));
+        let outline = object_outline(&object, 0.0).expect("rectangle outline");
+        let (min, max) = outline.composition_bounds().expect("finite bounds");
+        for (u, v) in [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)] {
+            let point = outline.point(u, v).expect("valid corner");
+            assert!(point.x() >= min.x() - 0.001);
+            assert!(point.x() <= max.x() + 0.001);
+            assert!(point.y() >= min.y() - 0.001);
+            assert!(point.y() <= max.y() + 0.001);
+        }
+    }
+
+    #[test]
+    fn selected_ellipse_frame_bounds_use_exact_rotated_curve() {
+        let mut object = ellipse();
+        object.transform.anchor = Animated::new_static(vec2(0.0, 0.0));
+        object.transform.rotation_degrees = Animated::new_static(45.0);
+        object.transform.scale = Animated::new_static(vec2(-2.0, 0.75));
+        let outline = object_outline(&object, 0.0).expect("ellipse outline");
+        let (min, max) = outline.composition_bounds().expect("finite bounds");
+        for i in 0..360 {
+            let radians = std::f64::consts::TAU * f64::from(i) / 360.0;
+            let point = outline
+                .point(0.5 + 0.5 * radians.cos(), 0.5 + 0.5 * radians.sin())
+                .expect("curve point");
+            assert!(point.x() >= min.x() - 0.001);
+            assert!(point.x() <= max.x() + 0.001);
+            assert!(point.y() >= min.y() - 0.001);
+            assert!(point.y() <= max.y() + 0.001);
+        }
+        let corner = outline.point(1.0, 1.0).expect("bounding corner");
+        assert!(corner.x() > max.x() || corner.y() > max.y());
     }
 
     #[test]
