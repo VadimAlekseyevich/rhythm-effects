@@ -138,6 +138,116 @@ fn selected_outline_bounds(
     Some((Vec2::new(min_x, min_y).ok()?, Vec2::new(max_x, max_y).ok()?))
 }
 
+/// Projects composition-space bounds through the actual pan/zoom camera
+/// image rectangle. Returns none for empty or invalid geometry.
+fn selection_rect_on_preview(
+    preview: egui::Rect,
+    bounds: (Vec2, Vec2),
+    composition_size: [u32; 2],
+) -> Option<egui::Rect> {
+    let (min, max) = bounds;
+    if composition_size.contains(&0) || min.x() >= max.x() || min.y() >= max.y() {
+        return None;
+    }
+    let a = preview_point(preview, min, composition_size);
+    let b = preview_point(preview, max, composition_size);
+    if !a.x.is_finite() || !a.y.is_finite() || !b.x.is_finite() || !b.y.is_finite() {
+        return None;
+    }
+    Some(egui::Rect::from_min_max(a, b))
+}
+
+/// Draws a crisp AABB independently of the transformed wireframe outline.
+fn paint_selection_bounds(painter: &egui::Painter, bounds: egui::Rect, stroke: egui::Stroke) {
+    painter.add(egui::Shape::line(
+        vec![
+            bounds.left_top(),
+            bounds.right_top(),
+            bounds.right_bottom(),
+            bounds.left_bottom(),
+            bounds.left_top(),
+        ],
+        stroke,
+    ));
+}
+
+/// Viewport-only selection bounds and actual transform pivot markers.
+/// Rendered after the wireframes, clipped to the canvas; no Project mutations,
+/// GPU readback or guessed Image/Text bounds. Locked objects selected from the
+/// Objects panel can still show their noninteractive selection overlays.
+fn draw_selection_overlays(
+    ui: &egui::Ui,
+    preview: egui::Rect,
+    canvas: egui::Rect,
+    session: &EditorSession,
+    project: &Project,
+    continuous_tick: f64,
+) {
+    let composition_size = [
+        project.settings.composition_width,
+        project.settings.composition_height,
+    ];
+    if composition_size.contains(&0) {
+        return;
+    }
+    let painter = ui.painter().with_clip_rect(preview.intersect(canvas));
+    let selected_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 210, 80));
+    let pivot_stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 210, 80));
+    let mut shown = 0_usize;
+
+    for object in &project.composition.objects {
+        if !object.visible || !session.is_object_selected(object.id) {
+            continue;
+        }
+        let Some(geometry) = object_outline(object, continuous_tick) else {
+            continue;
+        };
+        let Some(bounds) = geometry
+            .composition_bounds()
+            .and_then(|bounds| selection_rect_on_preview(preview, bounds, composition_size))
+        else {
+            continue;
+        };
+
+        paint_selection_bounds(&painter, bounds, selected_stroke);
+        shown += 1;
+
+        // Position marks the actual transform Anchor, not the visual center
+        // when the normalized Anchor is noncentral. Keep marker size constant
+        // in screen points regardless of camera zoom and device DPI.
+        let pivot = preview_point(preview, geometry.anchor_position(), composition_size);
+        if pivot.x.is_finite() && pivot.y.is_finite() {
+            painter.circle_stroke(
+                pivot,
+                5.0,
+                egui::Stroke::new(3.0, egui::Color32::BLACK),
+            );
+            painter.circle_stroke(pivot, 5.0, pivot_stroke);
+            painter.line_segment(
+                [pivot + egui::vec2(-8.0, 0.0), pivot + egui::vec2(8.0, 0.0)],
+                pivot_stroke,
+            );
+            painter.line_segment(
+                [pivot + egui::vec2(0.0, -8.0), pivot + egui::vec2(0.0, 8.0)],
+                pivot_stroke,
+            );
+        }
+    }
+
+    // Multiple selected objects share one additional group context, while
+    // each individual object retains its own pivot marker.
+    if shown > 1
+        && let Some(bounds) = selected_outline_bounds(project, session, continuous_tick)
+        && let Some(bounds) = selection_rect_on_preview(preview, bounds, composition_size)
+    {
+        paint_selection_bounds(
+            &painter,
+            bounds,
+            egui::Stroke::new(2.0, egui::Color32::from_rgb(130, 210, 255)),
+        );
+    }
+}
+
 /// Single dispatch point for viewport and Objects-panel click semantics.
 fn apply_object_click(session: &mut EditorSession, picked: Option<ObjectId>, ctrl: bool) {
     if ctrl {
@@ -399,6 +509,7 @@ pub fn draw_editor_shell(
     egui::CentralPanel::default().show(ui, |ui| {
         ui.heading("Viewport");
         ui.small("Editor-only wireframes; actual object GPU rendering is not wired yet.");
+        ui.small("Selected objects show yellow bounds and pivot crosses; blue bounds enclose groups.");
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
@@ -487,6 +598,7 @@ pub fn draw_editor_shell(
                 // Static objects remain pickable in projects without a tempo map.
                 // No audio-clock or timeline playback is inferred.
                 draw_editor_outlines(ui, preview, canvas, session, project, tick);
+                draw_selection_overlays(ui, preview, canvas, session, project, tick);
                 // A marquee can only begin with the mouse pressed on empty
                 // composition geometry. Drags begun on an object are reserved
                 // for the future move gizmo, not misinterpreted as box selection.
@@ -575,9 +687,52 @@ mod tests {
     use super::{
         apply_object_click, clamped_drag_point, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
+        selection_rect_on_preview,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
+
+    #[test]
+    fn selection_bounds_projection_tracks_pan_zoom_and_pivot_mapping() {
+        let canvas = egui::Rect::from_min_size(
+            egui::pos2(200.0, 80.0),
+            egui::vec2(960.0, 540.0),
+        );
+        let preview = panned_preview_rect(
+            canvas,
+            egui::vec2(960.0, 540.0) * 2.0,
+            [30.0, -45.0],
+        );
+        let min = rhythm_core::domain::Vec2::new(720.0, 400.0).expect("min");
+        let max = rhythm_core::domain::Vec2::new(1200.0, 680.0).expect("max");
+        let rect = selection_rect_on_preview(preview, (min, max), [1920, 1080])
+            .expect("projected selected bounds");
+        let expected_min = preview_point(preview, min, [1920, 1080]);
+        let expected_max = preview_point(preview, max, [1920, 1080]);
+        assert_eq!(rect.min, expected_min);
+        assert_eq!(rect.max, expected_max);
+        // The selected pivot/center maps through the same camera.
+        let pivot = preview_point(
+            preview,
+            rhythm_core::domain::Vec2::new(960.0, 540.0).expect("pivot"),
+            [1920, 1080],
+        );
+        assert_eq!(pivot, canvas.center() + egui::vec2(30.0, -45.0));
+    }
+
+    #[test]
+    fn selection_bounds_reject_empty_invalid_and_missing_composition() {
+        let preview = egui::Rect::from_min_size(
+            egui::pos2(10.0, 20.0),
+            egui::vec2(800.0, 600.0),
+        );
+        let min = rhythm_core::domain::Vec2::new(50.0, 20.0).expect("min");
+        let max = rhythm_core::domain::Vec2::new(50.0, 100.0).expect("max");
+        assert!(selection_rect_on_preview(preview, (min, max), [1920, 1080]).is_none());
+        let max = rhythm_core::domain::Vec2::new(200.0, 100.0).expect("max");
+        assert!(selection_rect_on_preview(preview, (max, min), [1920, 1080]).is_none());
+        assert!(selection_rect_on_preview(preview, (min, max), [0, 1080]).is_none());
+    }
 
     #[test]
     fn fit_respects_non_widescreen_composition_dimensions() {
