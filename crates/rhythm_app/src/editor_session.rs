@@ -232,17 +232,20 @@ impl EditorSession {
         if self.viewport_position_drag.is_some() {
             return false;
         }
-        self.viewport_position_drag = Some(ViewportPositionDrag { start, base_position });
+        self.viewport_position_drag = Some(ViewportPositionDrag {
+            start,
+            base_position,
+        });
         true
     }
 
     #[must_use]
     pub fn update_viewport_position_drag(&self, pointer: Vec2) -> Option<Vec2> {
         let drag = self.viewport_position_drag?;
-        let x = f64::from(drag.base_position.x())
-            + f64::from(pointer.x()) - f64::from(drag.start.x());
-        let y = f64::from(drag.base_position.y())
-            + f64::from(pointer.y()) - f64::from(drag.start.y());
+        let x =
+            f64::from(drag.base_position.x()) + f64::from(pointer.x()) - f64::from(drag.start.x());
+        let y =
+            f64::from(drag.base_position.y()) + f64::from(pointer.y()) - f64::from(drag.start.y());
         if !x.is_finite()
             || !y.is_finite()
             || x.abs() > f64::from(f32::MAX)
@@ -1578,8 +1581,14 @@ mod tests {
         let mut session = EditorSession::default();
         assert!(session.begin_viewport_position_drag(v(20.0, 10.0), v(300.0, 200.0)));
         assert!(!session.begin_viewport_position_drag(v(0.0, 0.0), v(0.0, 0.0)));
-        assert_eq!(session.update_viewport_position_drag(v(45.0, 5.0)), Some(v(325.0, 195.0)));
-        assert_eq!(session.update_viewport_position_drag(v(45.0, 5.0)), Some(v(325.0, 195.0)));
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0)),
+            Some(v(325.0, 195.0))
+        );
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0)),
+            Some(v(325.0, 195.0))
+        );
         assert!(session.cancel_viewport_position_drag());
         assert!(!session.cancel_viewport_position_drag());
         assert_eq!(session.update_viewport_position_drag(v(80.0, 90.0)), None);
@@ -1592,7 +1601,8 @@ mod tests {
             domain::LinearRgba,
             editor::ProjectEditor,
             project::{
-                Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
             },
         };
         let v = |x, y| Vec2::new(x, y).expect("finite");
@@ -1624,21 +1634,34 @@ mod tests {
         project.next_entity_id = 2;
         let mut editor = ProjectEditor::new(project).expect("valid project");
         let current = |editor: &ProjectEditor| {
-            *editor.project().composition.objects[0].transform.position.base_value()
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value()
         };
-        assert!(!apply_viewport_position_actions(
-            &mut editor, [ViewportPositionAction::Begin(id)]
-        ).expect("begin"));
-        assert!(apply_viewport_position_actions(
-            &mut editor, [ViewportPositionAction::Update(v(320.0, 210.0))]
-        ).expect("update"));
-        assert!(apply_viewport_position_actions(
-            &mut editor, [ViewportPositionAction::Update(v(340.0, 230.0))]
-        ).expect("update"));
+        assert!(
+            !apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Begin(id)])
+                .expect("begin")
+        );
+        assert!(
+            apply_viewport_position_actions(
+                &mut editor,
+                [ViewportPositionAction::Update(v(320.0, 210.0))]
+            )
+            .expect("update")
+        );
+        assert!(
+            apply_viewport_position_actions(
+                &mut editor,
+                [ViewportPositionAction::Update(v(340.0, 230.0))]
+            )
+            .expect("update")
+        );
         assert_eq!(editor.history_len(), 0);
-        assert!(apply_viewport_position_actions(
-            &mut editor, [ViewportPositionAction::Commit]
-        ).expect("commit"));
+        assert!(
+            apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Commit])
+                .expect("commit")
+        );
         assert_eq!(editor.history_len(), 1);
         assert_eq!(current(&editor), v(340.0, 230.0));
         assert!(editor.undo().expect("undo"));
@@ -1648,8 +1671,12 @@ mod tests {
 
         apply_viewport_position_actions(
             &mut editor,
-            [ViewportPositionAction::Begin(id), ViewportPositionAction::Update(v(700.0, 700.0))],
-        ).expect("next drag");
+            [
+                ViewportPositionAction::Begin(id),
+                ViewportPositionAction::Update(v(700.0, 700.0)),
+            ],
+        )
+        .expect("next drag");
         assert!(editor.cancel_transaction().expect("Escape"));
         assert_eq!(current(&editor), v(340.0, 230.0));
         assert_eq!(editor.history_len(), 1);
