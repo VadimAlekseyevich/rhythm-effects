@@ -11,10 +11,7 @@ use rhythm_core::{
 };
 
 fn fit_composition_preview(available: egui::Vec2, composition_size: [u32; 2]) -> egui::Vec2 {
-    if available.x <= 0.0
-        || available.y <= 0.0
-        || composition_size.contains(&0)
-    {
+    if available.x <= 0.0 || available.y <= 0.0 || composition_size.contains(&0) {
         return egui::Vec2::ZERO;
     }
 
@@ -138,10 +135,7 @@ fn selected_outline_bounds(
         });
     }
     let (min_x, min_y, max_x, max_y) = bounds?;
-    Some((
-        Vec2::new(min_x, min_y).ok()?,
-        Vec2::new(max_x, max_y).ok()?,
-    ))
+    Some((Vec2::new(min_x, min_y).ok()?, Vec2::new(max_x, max_y).ok()?))
 }
 
 /// Single dispatch point for viewport and Objects-panel click semantics.
@@ -601,7 +595,8 @@ mod tests {
             animation::Animated,
             domain::{LinearRgba, Vec2},
             project::{
-                Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
             },
             time::{GridOffsetNs, TempoMap},
         };
@@ -651,10 +646,7 @@ mod tests {
 
     #[test]
     fn frame_selection_uses_camera_rectangle_and_respects_existing_pan() {
-        let canvas = egui::Rect::from_min_size(
-            egui::pos2(100.0, 100.0),
-            egui::vec2(1000.0, 600.0),
-        );
+        let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(1000.0, 600.0));
         let fitted = fit_composition_preview(canvas.size(), [1920, 1080]);
         let mut session = EditorSession::default();
         session.begin_viewport_pan();
