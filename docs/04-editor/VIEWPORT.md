@@ -40,7 +40,9 @@ Clamp to practical min/max.
 
 ## 5. Pan
 
-Middle-mouse drag pans.
+Middle-mouse drag pans the composition image in egui logical pixels, beginning from anywhere in the viewport canvas (including the letterbox background). The camera pan is EditorSession-only state; no Project transform values or timeline/playhead change. The image, CPU hit-testing coordinates, editor outline overlays and marquee share the same shifted composition rectangle. Draw and input are clipped to the viewport canvas. An explicit Reset Pan action recenters the fitted composition even when it is fully outside the panel.
+
+Viewport wheel zoom, fit actions and DPI-specific camera controls are separate follow-up tasks (AI-170/171).
 
 Space is reserved for Play/Pause.
 

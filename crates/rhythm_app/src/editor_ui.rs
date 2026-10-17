@@ -48,6 +48,18 @@ fn composition_point_from_preview(
 /// Maps a pointer that can leave the preview during dragging back to its
 /// nearest point inside the displayed image. Only used once the drag began
 /// inside the composition; letterbox chrome cannot start marquee selection.
+/// Translate the fitted composition without changing project object coordinates.
+fn panned_preview_rect(
+    canvas: egui::Rect,
+    fitted_size: egui::Vec2,
+    pan_points: [f32; 2],
+) -> egui::Rect {
+    egui::Rect::from_center_size(
+        canvas.center() + egui::vec2(pan_points[0], pan_points[1]),
+        fitted_size,
+    )
+}
+
 fn clamped_drag_point(rect: egui::Rect, pointer: egui::Pos2, size: [u32; 2]) -> Option<Vec2> {
     let position = egui::pos2(
         pointer.x.clamp(rect.min.x, rect.max.x),
@@ -64,12 +76,19 @@ fn preview_point(rect: egui::Rect, point: Vec2, size: [u32; 2]) -> egui::Pos2 {
     )
 }
 
-fn draw_marquee(ui: &egui::Ui, preview: egui::Rect, start: Vec2, current: Vec2, size: [u32; 2]) {
+fn draw_marquee(
+    ui: &egui::Ui,
+    preview: egui::Rect,
+    clip: egui::Rect,
+    start: Vec2,
+    current: Vec2,
+    size: [u32; 2],
+) {
     let rect = egui::Rect::from_two_pos(
         preview_point(preview, start, size),
         preview_point(preview, current, size),
     );
-    let painter = ui.painter().with_clip_rect(preview);
+    let painter = ui.painter().with_clip_rect(preview.intersect(clip));
     painter.rect_filled(
         rect,
         0.0,
@@ -102,13 +121,14 @@ fn apply_object_click(session: &mut EditorSession, picked: Option<ObjectId>, ctr
 fn draw_editor_outlines(
     ui: &egui::Ui,
     preview: egui::Rect,
+    clip: egui::Rect,
     session: &EditorSession,
     project: &Project,
     continuous_tick: f64,
 ) {
     let width = project.settings.composition_width as f32;
     let height = project.settings.composition_height as f32;
-    let painter = ui.painter().with_clip_rect(preview);
+    let painter = ui.painter().with_clip_rect(preview.intersect(clip));
     for object in &project.composition.objects {
         if !object.visible {
             continue;
@@ -350,17 +370,36 @@ pub fn draw_editor_shell(
         ui.small("Editor-only wireframes; actual object GPU rendering is not wired yet.");
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
+        ui.small("Middle-drag pans the viewport; this never changes Project coordinates.");
+        if ui.small_button("Reset Pan").clicked() {
+            session.reset_viewport_pan();
+        }
         ui.separator();
-        ui.centered_and_justified(|ui| {
+        {
             if let Some(texture_id) = composition_texture_id {
-                let preview_size = fit_composition_preview(ui.available_size());
-                let response = ui.add(
-                    egui::Image::from_texture(egui::load::SizedTexture::new(
-                        texture_id,
-                        egui::vec2(1920.0, 1080.0),
-                    ))
-                    .fit_to_exact_size(preview_size)
-                    .sense(egui::Sense::click_and_drag()),
+                // The whole panel handles pan, including its letterbox regions.
+                let (canvas, response) =
+                    ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+                if response.drag_started_by(egui::PointerButton::Middle) {
+                    session.begin_viewport_pan();
+                }
+                if response.dragged_by(egui::PointerButton::Middle)
+                    && let Some(delta) = ui.input(|input| input.pointer.total_drag_delta())
+                {
+                    session.update_viewport_pan([delta.x, delta.y]);
+                }
+                if response.drag_stopped_by(egui::PointerButton::Middle) {
+                    session.end_viewport_pan();
+                }
+
+                let preview_size = fit_composition_preview(canvas.size());
+                let preview =
+                    panned_preview_rect(canvas, preview_size, session.viewport_pan_points());
+                ui.painter().with_clip_rect(canvas).image(
+                    texture_id,
+                    preview,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
                 );
                 // Static objects remain pickable in projects without a tempo map.
                 // No audio-clock or timeline playback is inferred.
@@ -368,7 +407,7 @@ pub fn draw_editor_shell(
                     .tempo_map
                     .continuous_tick_position(session.playhead())
                     .unwrap_or(0.0);
-                draw_editor_outlines(ui, response.rect, session, project, tick);
+                draw_editor_outlines(ui, preview, canvas, session, project, tick);
                 let composition_size = [
                     project.settings.composition_width,
                     project.settings.composition_height,
@@ -379,19 +418,19 @@ pub fn draw_editor_shell(
                 if response.drag_started_by(egui::PointerButton::Primary)
                     && let Some(pointer) = response.interact_pointer_pos()
                 {
-                    let start_pointer = pointer - response.drag_delta();
-                    if let Some(start) = composition_point_from_preview(
-                        response.rect,
-                        start_pointer,
-                        composition_size,
-                    ) && pick_topmost_object(
-                        &project.composition.objects,
-                        tick,
-                        start,
-                        |_| None,
-                        |_| None,
-                    )
-                    .is_none()
+                    let start_pointer = ui
+                        .input(|input| input.pointer.press_origin())
+                        .unwrap_or(pointer);
+                    if let Some(start) =
+                        composition_point_from_preview(preview, start_pointer, composition_size)
+                        && pick_topmost_object(
+                            &project.composition.objects,
+                            tick,
+                            start,
+                            |_| None,
+                            |_| None,
+                        )
+                        .is_none()
                     {
                         session.begin_viewport_box_selection(
                             start,
@@ -401,15 +440,14 @@ pub fn draw_editor_shell(
                 }
                 if response.dragged_by(egui::PointerButton::Primary)
                     && let Some(pointer) = response.interact_pointer_pos()
-                    && let Some(current) =
-                        clamped_drag_point(response.rect, pointer, composition_size)
+                    && let Some(current) = clamped_drag_point(preview, pointer, composition_size)
                 {
                     session.update_viewport_box_selection(current);
                 }
                 if response.drag_stopped_by(egui::PointerButton::Primary) {
                     if let Some(pointer) = response.interact_pointer_pos()
                         && let Some(current) =
-                            clamped_drag_point(response.rect, pointer, composition_size)
+                            clamped_drag_point(preview, pointer, composition_size)
                     {
                         session.update_viewport_box_selection(current);
                     }
@@ -428,12 +466,12 @@ pub fn draw_editor_shell(
                     }
                 }
                 if let Some((start, current, _)) = session.viewport_box_selection() {
-                    draw_marquee(ui, response.rect, start, current, composition_size);
+                    draw_marquee(ui, preview, canvas, start, current, composition_size);
                 }
                 if response.clicked()
                     && let Some(pointer) = response.interact_pointer_pos()
                     && let Some(point) = composition_point_from_preview(
-                        response.rect,
+                        preview,
                         pointer,
                         [
                             project.settings.composition_width,
@@ -453,7 +491,7 @@ pub fn draw_editor_shell(
             } else {
                 ui.label("Composition preview unavailable");
             }
-        });
+        }
     });
 }
 
@@ -461,10 +499,41 @@ pub fn draw_editor_shell(
 mod tests {
     use super::{
         apply_object_click, clamped_drag_point, composition_point_from_preview,
-        fit_composition_preview, preview_point,
+        fit_composition_preview, panned_preview_rect, preview_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
+
+    #[test]
+    fn camera_pan_shifts_image_and_hit_coordinates_together() {
+        let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(1000.0, 800.0));
+        let fitted = fit_composition_preview(canvas.size());
+        let initial = panned_preview_rect(canvas, fitted, [0.0, 0.0]);
+        let shifted = panned_preview_rect(canvas, fitted, [90.0, -70.0]);
+        assert_eq!(shifted.min, initial.min + egui::vec2(90.0, -70.0));
+        assert_eq!(shifted.size(), initial.size());
+
+        let center = composition_point_from_preview(shifted, shifted.center(), [1920, 1080])
+            .expect("panned image center");
+        assert!((center.x() - 960.0).abs() < 0.01);
+        assert!((center.y() - 540.0).abs() < 0.01);
+        let earlier_center =
+            composition_point_from_preview(shifted, initial.center(), [1920, 1080])
+                .expect("image overlaps canvas center");
+        assert!(earlier_center.x() < 960.0);
+        assert!(earlier_center.y() > 540.0);
+    }
+
+    #[test]
+    fn resetting_pan_can_recenter_an_offscreen_composition() {
+        let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(800.0, 450.0));
+        let size = fit_composition_preview(canvas.size());
+        assert!(!panned_preview_rect(canvas, size, [2000.0, 0.0]).intersects(canvas));
+        assert_eq!(
+            panned_preview_rect(canvas, size, [0.0, 0.0]).center(),
+            canvas.center()
+        );
+    }
 
     #[test]
     fn marquee_uses_preview_coordinate_mapping_and_clamps_outside_drag() {
