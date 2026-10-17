@@ -224,8 +224,7 @@ impl EditorSession {
             let previous = f64::from(self.viewport_pan_points[axis]);
             let anchor = f64::from(pointer_axis);
             let next = anchor + (previous - anchor) * ratio;
-            self.viewport_pan_points[axis] =
-                next.clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32;
+            self.viewport_pan_points[axis] = next.clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32;
         }
         self.viewport_zoom = zoom;
         true
