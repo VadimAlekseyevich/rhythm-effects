@@ -370,9 +370,9 @@ pub fn draw_editor_shell(
         ui.small("Editor-only wireframes; actual object GPU rendering is not wired yet.");
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
-        ui.small("Middle-drag pans the viewport; this never changes Project coordinates.");
-        if ui.small_button("Reset Pan").clicked() {
-            session.reset_viewport_pan();
+        ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
+        if ui.small_button("Reset View").clicked() {
+            session.reset_viewport_camera();
         }
         ui.separator();
         {
@@ -392,7 +392,32 @@ pub fn draw_editor_shell(
                     session.end_viewport_pan();
                 }
 
-                let preview_size = fit_composition_preview(canvas.size());
+                // Wheel is handled only when hovering the viewport, not
+                // timeline or property panels. Keep the composition point
+                // under the cursor fixed when updating zoom and camera pan.
+                if response.hovered() {
+                    let (pointer, scroll) = ui.input(|input| {
+                        (input.pointer.hover_pos(), input.smooth_scroll_delta().y)
+                    });
+                    if let Some(pointer) = pointer
+                        && scroll.is_finite()
+                        && scroll != 0.0
+                    {
+                        let multiplier = (f64::from(scroll) * 0.003)
+                            .clamp(-4.0, 4.0)
+                            .exp() as f32;
+                        session.zoom_viewport_at(
+                            multiplier,
+                            [
+                                pointer.x - canvas.center().x,
+                                pointer.y - canvas.center().y,
+                            ],
+                        );
+                    }
+                }
+
+                let preview_size =
+                    fit_composition_preview(canvas.size()) * session.viewport_zoom();
                 let preview =
                     panned_preview_rect(canvas, preview_size, session.viewport_pan_points());
                 ui.painter().with_clip_rect(canvas).image(
@@ -503,6 +528,45 @@ mod tests {
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
+
+    #[test]
+    fn pointer_anchored_zoom_preserves_composition_point_and_outline_mapping() {
+        let canvas = egui::Rect::from_min_size(
+            egui::pos2(100.0, 100.0),
+            egui::vec2(960.0, 600.0),
+        );
+        let fit_size = fit_composition_preview(canvas.size());
+        let mut session = EditorSession::default();
+        // Include existing pan, avoiding a symmetric camera-only test.
+        session.begin_viewport_pan();
+        session.update_viewport_pan([45.0, -20.0]);
+        session.end_viewport_pan();
+        let before = panned_preview_rect(canvas, fit_size, session.viewport_pan_points());
+        let pointer = before.center() + egui::vec2(90.0, 45.0);
+        let composition = [1920, 1080];
+        let original =
+            composition_point_from_preview(before, pointer, composition).expect("inside image");
+
+        assert!(session.zoom_viewport_at(
+            1.75,
+            [pointer.x - canvas.center().x, pointer.y - canvas.center().y],
+        ));
+        let after = panned_preview_rect(
+            canvas,
+            fit_size * session.viewport_zoom(),
+            session.viewport_pan_points(),
+        );
+        let preserved =
+            composition_point_from_preview(after, pointer, composition).expect("zoom anchor");
+        assert!((preserved.x() - original.x()).abs() < 0.001);
+        assert!((preserved.y() - original.y()).abs() < 0.001);
+        let outline_point = preview_point(after, original, composition);
+        assert!((outline_point.x - pointer.x).abs() < 0.001);
+        assert!((outline_point.y - pointer.y).abs() < 0.001);
+        session.reset_viewport_camera();
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+    }
 
     #[test]
     fn camera_pan_shifts_image_and_hit_coordinates_together() {
