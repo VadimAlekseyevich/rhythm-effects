@@ -396,28 +396,21 @@ pub fn draw_editor_shell(
                 // timeline or property panels. Keep the composition point
                 // under the cursor fixed when updating zoom and camera pan.
                 if response.hovered() {
-                    let (pointer, scroll) = ui.input(|input| {
-                        (input.pointer.hover_pos(), input.smooth_scroll_delta().y)
-                    });
+                    let (pointer, scroll) = ui
+                        .input(|input| (input.pointer.hover_pos(), input.smooth_scroll_delta().y));
                     if let Some(pointer) = pointer
                         && scroll.is_finite()
                         && scroll != 0.0
                     {
-                        let multiplier = (f64::from(scroll) * 0.003)
-                            .clamp(-4.0, 4.0)
-                            .exp() as f32;
+                        let multiplier = (f64::from(scroll) * 0.003).clamp(-4.0, 4.0).exp() as f32;
                         session.zoom_viewport_at(
                             multiplier,
-                            [
-                                pointer.x - canvas.center().x,
-                                pointer.y - canvas.center().y,
-                            ],
+                            [pointer.x - canvas.center().x, pointer.y - canvas.center().y],
                         );
                     }
                 }
 
-                let preview_size =
-                    fit_composition_preview(canvas.size()) * session.viewport_zoom();
+                let preview_size = fit_composition_preview(canvas.size()) * session.viewport_zoom();
                 let preview =
                     panned_preview_rect(canvas, preview_size, session.viewport_pan_points());
                 ui.painter().with_clip_rect(canvas).image(
@@ -531,10 +524,7 @@ mod tests {
 
     #[test]
     fn pointer_anchored_zoom_preserves_composition_point_and_outline_mapping() {
-        let canvas = egui::Rect::from_min_size(
-            egui::pos2(100.0, 100.0),
-            egui::vec2(960.0, 600.0),
-        );
+        let canvas = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(960.0, 600.0));
         let fit_size = fit_composition_preview(canvas.size());
         let mut session = EditorSession::default();
         // Include existing pan, avoiding a symmetric camera-only test.
