@@ -338,6 +338,12 @@ fn draw_editor_outlines(
     }
 }
 
+#[derive(Debug, Default)]
+pub struct EditorUiActions {
+    pub add_rectangle_requested: bool,
+    pub viewport_position_actions: Vec<ViewportPositionAction>,
+}
+
 #[derive(Debug, Clone)]
 pub struct DiagnosticsView {
     pub adapter_name: String,
@@ -380,8 +386,7 @@ pub fn draw_editor_shell(
     diagnostics: &DiagnosticsView,
     composition_texture_id: Option<egui::TextureId>,
     waveform: Option<&rhythm_engine::waveform::WaveformData>,
-    add_rectangle_requested: &mut bool,
-    viewport_position_actions: &mut Vec<ViewportPositionAction>,
+    actions: &mut EditorUiActions,
 ) {
     egui::Panel::top("transport_rhythm")
         .exact_size(54.0)
@@ -455,7 +460,7 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.heading("Objects");
             if ui.button("+ Rectangle").clicked() {
-                *add_rectangle_requested = true;
+                actions.add_rectangle_requested = true;
             }
             ui.separator();
             if project.composition.objects.is_empty() {
@@ -656,7 +661,7 @@ pub fn draw_editor_shell(
                                 )
                             {
                                 session.select_viewport_object(Some(id));
-                                viewport_position_actions.push(ViewportPositionAction::Begin(id));
+                                actions.viewport_position_actions.push(ViewportPositionAction::Begin(id));
                             }
                         } else {
                             session.begin_viewport_box_selection(
@@ -673,7 +678,7 @@ pub fn draw_editor_shell(
                         unbounded_composition_point(preview, pointer, composition_size)
                         && let Some(position) = session.update_viewport_position_drag(point)
                     {
-                        viewport_position_actions.push(ViewportPositionAction::Update(position));
+                        actions.viewport_position_actions.push(ViewportPositionAction::Update(position));
                     }
                     if let Some(current) = clamped_drag_point(preview, pointer, composition_size) {
                         session.update_viewport_box_selection(current);
@@ -686,11 +691,11 @@ pub fn draw_editor_shell(
                                 unbounded_composition_point(preview, pointer, composition_size)
                             && let Some(position) = session.update_viewport_position_drag(point)
                         {
-                            viewport_position_actions
+                            actions.viewport_position_actions
                                 .push(ViewportPositionAction::Update(position));
                         }
                         if session.finish_viewport_position_drag() {
-                            viewport_position_actions.push(ViewportPositionAction::Commit);
+                            actions.viewport_position_actions.push(ViewportPositionAction::Commit);
                         }
                     }
                     if let Some(pointer) = response.interact_pointer_pos()
