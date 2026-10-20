@@ -698,9 +698,9 @@ pub fn draw_editor_shell(
                             && let Some(point) =
                                 unbounded_composition_point(preview, pointer, composition_size)
                             && let Some(position) = session.update_viewport_position_drag(
-                            point,
-                            ui.input(|input| input.modifiers.shift),
-                        )
+                                point,
+                                ui.input(|input| input.modifiers.shift),
+                            )
                         {
                             actions
                                 .viewport_position_actions

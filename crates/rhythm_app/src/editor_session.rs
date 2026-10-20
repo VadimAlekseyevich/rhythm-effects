@@ -1606,7 +1606,10 @@ mod tests {
         );
         assert!(session.cancel_viewport_position_drag());
         assert!(!session.cancel_viewport_position_drag());
-        assert_eq!(session.update_viewport_position_drag(v(80.0, 90.0), false), None);
+        assert_eq!(
+            session.update_viewport_position_drag(v(80.0, 90.0), false),
+            None
+        );
     }
 
     #[test]
@@ -1644,7 +1647,10 @@ mod tests {
             Some(v(300.0, 200.0))
         );
         assert!(session.finish_viewport_position_drag());
-        assert_eq!(session.update_viewport_position_drag(v(30.0, 30.0), true), None);
+        assert_eq!(
+            session.update_viewport_position_drag(v(30.0, 30.0), true),
+            None
+        );
     }
 
     #[test]
@@ -1655,7 +1661,10 @@ mod tests {
         let object_id = ObjectId::new(1).expect("id");
         assert!(session.begin_viewport_position_drag(v(0.0, 0.0), v(0.0, 0.0)));
         assert_eq!(
-            apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Begin(object_id)]),
+            apply_viewport_position_actions(
+                &mut editor,
+                [ViewportPositionAction::Begin(object_id)]
+            ),
             Ok(false)
         );
         for (point, shift) in [
