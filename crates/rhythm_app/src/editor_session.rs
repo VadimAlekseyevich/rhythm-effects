@@ -239,13 +239,28 @@ impl EditorSession {
         true
     }
 
+    /// Constrain the total drag displacement to its dominant axis while Shift
+    /// is held. Horizontal wins ties; releasing Shift restores free movement.
     #[must_use]
-    pub fn update_viewport_position_drag(&self, pointer: Vec2) -> Option<Vec2> {
+    pub fn update_viewport_position_drag(
+        &self,
+        pointer: Vec2,
+        shift_axis_lock: bool,
+    ) -> Option<Vec2> {
         let drag = self.viewport_position_drag?;
-        let x =
-            f64::from(drag.base_position.x()) + f64::from(pointer.x()) - f64::from(drag.start.x());
-        let y =
-            f64::from(drag.base_position.y()) + f64::from(pointer.y()) - f64::from(drag.start.y());
+        let delta_x = f64::from(pointer.x()) - f64::from(drag.start.x());
+        let delta_y = f64::from(pointer.y()) - f64::from(drag.start.y());
+        let (delta_x, delta_y) = if shift_axis_lock {
+            if delta_x.abs() >= delta_y.abs() {
+                (delta_x, 0.0)
+            } else {
+                (0.0, delta_y)
+            }
+        } else {
+            (delta_x, delta_y)
+        };
+        let x = f64::from(drag.base_position.x()) + delta_x;
+        let y = f64::from(drag.base_position.y()) + delta_y;
         if !x.is_finite()
             || !y.is_finite()
             || x.abs() > f64::from(f32::MAX)
@@ -1582,16 +1597,100 @@ mod tests {
         assert!(session.begin_viewport_position_drag(v(20.0, 10.0), v(300.0, 200.0)));
         assert!(!session.begin_viewport_position_drag(v(0.0, 0.0), v(0.0, 0.0)));
         assert_eq!(
-            session.update_viewport_position_drag(v(45.0, 5.0)),
+            session.update_viewport_position_drag(v(45.0, 5.0), false),
             Some(v(325.0, 195.0))
         );
         assert_eq!(
-            session.update_viewport_position_drag(v(45.0, 5.0)),
+            session.update_viewport_position_drag(v(45.0, 5.0), false),
             Some(v(325.0, 195.0))
         );
         assert!(session.cancel_viewport_position_drag());
         assert!(!session.cancel_viewport_position_drag());
-        assert_eq!(session.update_viewport_position_drag(v(80.0, 90.0)), None);
+        assert_eq!(session.update_viewport_position_drag(v(80.0, 90.0), false), None);
+    }
+
+    #[test]
+    fn shift_position_drag_constrains_dominant_axis_and_can_be_toggled_mid_drag() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_position_drag(v(20.0, 10.0), v(300.0, 200.0)));
+
+        // Horizontal displacement dominates; unconstrained input is unchanged.
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0), true),
+            Some(v(325.0, 200.0))
+        );
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0), false),
+            Some(v(325.0, 195.0))
+        );
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0), true),
+            Some(v(325.0, 200.0))
+        );
+
+        // Vertical movement can dominate, including in a negative direction.
+        assert_eq!(
+            session.update_viewport_position_drag(v(15.0, -70.0), true),
+            Some(v(300.0, 120.0))
+        );
+        // Exact ties resolve to horizontal; no accumulated or off-axis drift.
+        assert_eq!(
+            session.update_viewport_position_drag(v(50.0, -20.0), true),
+            Some(v(330.0, 200.0))
+        );
+        assert_eq!(
+            session.update_viewport_position_drag(v(20.0, 10.0), true),
+            Some(v(300.0, 200.0))
+        );
+        assert!(session.finish_viewport_position_drag());
+        assert_eq!(session.update_viewport_position_drag(v(30.0, 30.0), true), None);
+    }
+
+    #[test]
+    fn shift_position_drag_is_one_undo_entry_with_correct_final_axis() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        let mut editor = editor_with_object_for_drag();
+        let object_id = ObjectId::new(1).expect("id");
+        assert!(session.begin_viewport_position_drag(v(0.0, 0.0), v(0.0, 0.0)));
+        assert_eq!(
+            apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Begin(object_id)]),
+            Ok(false)
+        );
+        for (point, shift) in [
+            (v(40.0, 10.0), true),
+            (v(40.0, 10.0), false),
+            (v(40.0, 50.0), false),
+            (v(40.0, 50.0), true),
+        ] {
+            let position = session
+                .update_viewport_position_drag(point, shift)
+                .expect("drag remains active");
+            apply_viewport_position_actions(
+                &mut editor,
+                [ViewportPositionAction::Update(position)],
+            )
+            .expect("live position");
+        }
+        assert_eq!(editor.history_len(), 0);
+        assert!(session.finish_viewport_position_drag());
+        assert_eq!(
+            apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Commit]),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), 1);
+        let current = |editor: &rhythm_core::editor::ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value()
+        };
+        assert_eq!(current(&editor), v(0.0, 50.0));
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(current(&editor), v(0.0, 0.0));
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(current(&editor), v(0.0, 50.0));
     }
 
     #[test]

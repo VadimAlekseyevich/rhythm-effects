@@ -539,6 +539,7 @@ pub fn draw_editor_shell(
         ui.small(
             "Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).",
         );
+        ui.small("Hold Shift while moving to constrain Position to the dominant axis.");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
         let mut frame_selection_requested = false;
         ui.horizontal(|ui| {
@@ -678,7 +679,10 @@ pub fn draw_editor_shell(
                 {
                     if let Some(point) =
                         unbounded_composition_point(preview, pointer, composition_size)
-                        && let Some(position) = session.update_viewport_position_drag(point)
+                        && let Some(position) = session.update_viewport_position_drag(
+                            point,
+                            ui.input(|input| input.modifiers.shift),
+                        )
                     {
                         actions
                             .viewport_position_actions
@@ -693,7 +697,10 @@ pub fn draw_editor_shell(
                         if let Some(pointer) = response.interact_pointer_pos()
                             && let Some(point) =
                                 unbounded_composition_point(preview, pointer, composition_size)
-                            && let Some(position) = session.update_viewport_position_drag(point)
+                            && let Some(position) = session.update_viewport_position_drag(
+                            point,
+                            ui.input(|input| input.modifiers.shift),
+                        )
                         {
                             actions
                                 .viewport_position_actions
