@@ -530,7 +530,9 @@ pub fn draw_editor_shell(
 
     egui::CentralPanel::default().show(ui, |ui| {
         ui.heading("Viewport");
-        ui.small("Rectangle/Ellipse are GPU rendered; Image, Text, and object effects are pending.");
+        ui.small(
+            "Rectangle/Ellipse are GPU rendered; Image, Text, and object effects are pending.",
+        );
         ui.small(
             "Selected objects show yellow bounds and pivot crosses; blue bounds enclose groups.",
         );

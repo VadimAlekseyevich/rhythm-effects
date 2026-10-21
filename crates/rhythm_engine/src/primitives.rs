@@ -6,8 +6,7 @@ use rhythm_core::domain::{LinearRgba, Vec2};
 use crate::scene_eval::{EvaluatedObject, EvaluatedObjectContent, EvaluatedScene};
 
 pub(crate) const VERTEX_STRIDE: u64 = 48;
-pub(crate) const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 6] =
-    wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32x4, 4 => Float32, 5 => Float32];
+pub(crate) const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 6] = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x2, 3 => Float32x4, 4 => Float32, 5 => Float32];
 
 pub(crate) const PRIMITIVE_SHADER: &str = r#"
 struct VertexInput {
@@ -88,7 +87,10 @@ impl PrimitiveVertex {
 /// Six vertices per primitive, preserving original scene painter order.
 /// Effect-bearing objects deliberately stay unsupported until object isolation
 /// is implemented; rendering their unmodified pixels would be misleading.
-pub(crate) fn scene_vertices(scene: &EvaluatedScene, composition_size: [u32; 2]) -> Vec<PrimitiveVertex> {
+pub(crate) fn scene_vertices(
+    scene: &EvaluatedScene,
+    composition_size: [u32; 2],
+) -> Vec<PrimitiveVertex> {
     if composition_size.contains(&0) {
         return Vec::new();
     }
@@ -103,16 +105,25 @@ pub(crate) fn scene_vertices(scene: &EvaluatedScene, composition_size: [u32; 2])
     vertices
 }
 
-fn append_object(vertices: &mut Vec<PrimitiveVertex>, object: &EvaluatedObject, dimensions: [u32; 2]) {
+fn append_object(
+    vertices: &mut Vec<PrimitiveVertex>,
+    object: &EvaluatedObject,
+    dimensions: [u32; 2],
+) {
     let (size, fill, radius, kind) = match &object.content {
-        EvaluatedObjectContent::Rectangle { size, fill, corner_radius } =>
-            (*size, *fill, *corner_radius, 0.0),
+        EvaluatedObjectContent::Rectangle {
+            size,
+            fill,
+            corner_radius,
+        } => (*size, *fill, *corner_radius, 0.0),
         EvaluatedObjectContent::Ellipse { size, fill } => (*size, *fill, 0.0, 1.0),
         EvaluatedObjectContent::Image { .. } | EvaluatedObjectContent::Text { .. } => return,
     };
 
-    if size.x() <= 0.0 || size.y() <= 0.0
-        || object.transform.scale.x() == 0.0 || object.transform.scale.y() == 0.0
+    if size.x() <= 0.0
+        || size.y() <= 0.0
+        || object.transform.scale.x() == 0.0
+        || object.transform.scale.y() == 0.0
     {
         return;
     }
@@ -129,7 +140,12 @@ fn append_object(vertices: &mut Vec<PrimitiveVertex>, object: &EvaluatedObject, 
     let radians = f64::from(object.transform.rotation_degrees).to_radians();
     let (sin, cos) = radians.sin_cos();
     let mut corners = [[0.0; 2]; 4];
-    let locals = [[0.0, 0.0], [size.x(), 0.0], [size.x(), size.y()], [0.0, size.y()]];
+    let locals = [
+        [0.0, 0.0],
+        [size.x(), 0.0],
+        [size.x(), size.y()],
+        [0.0, size.y()],
+    ];
     for (i, local) in locals.iter().enumerate() {
         let local_x = f64::from(local[0]) - f64::from(object.transform.anchor.x()) * width;
         let local_y = f64::from(local[1]) - f64::from(object.transform.anchor.y()) * height;
@@ -139,7 +155,8 @@ fn append_object(vertices: &mut Vec<PrimitiveVertex>, object: &EvaluatedObject, 
         let y = f64::from(object.transform.position.y()) + sin * scaled_x + cos * scaled_y;
         let ndc_x = (2.0 * x / f64::from(dimensions[0])) - 1.0;
         let ndc_y = 1.0 - (2.0 * y / f64::from(dimensions[1]));
-        if !ndc_x.is_finite() || !ndc_y.is_finite()
+        if !ndc_x.is_finite()
+            || !ndc_y.is_finite()
             || ndc_x.abs() > f64::from(f32::MAX)
             || ndc_y.abs() > f64::from(f32::MAX)
         {
@@ -148,7 +165,11 @@ fn append_object(vertices: &mut Vec<PrimitiveVertex>, object: &EvaluatedObject, 
         corners[i] = [ndc_x as f32, ndc_y as f32];
     }
 
-    let radius = if kind == 0.0 { radius.max(0.0).min(size.x().min(size.y()) * 0.5) } else { 0.0 };
+    let radius = if kind == 0.0 {
+        radius.max(0.0).min(size.x().min(size.y()) * 0.5)
+    } else {
+        0.0
+    };
     for index in [0_usize, 1, 2, 0, 2, 3] {
         vertices.push(PrimitiveVertex {
             ndc: corners[index],
@@ -185,18 +206,28 @@ mod tests {
     use crate::scene_eval::{
         EvaluatedObject, EvaluatedObjectContent, EvaluatedScene, EvaluatedTransform,
     };
-    use rhythm_core::{domain::{LinearRgba, Vec2}, ids::ObjectId};
+    use rhythm_core::{
+        domain::{LinearRgba, Vec2},
+        ids::ObjectId,
+    };
 
-    fn v(x: f32, y: f32) -> Vec2 { Vec2::new(x, y).expect("finite") }
+    fn v(x: f32, y: f32) -> Vec2 {
+        Vec2::new(x, y).expect("finite")
+    }
     fn rectangle(id: u64, position: Vec2, fill: LinearRgba) -> EvaluatedObject {
         EvaluatedObject {
             id: ObjectId::new(id).expect("ID"),
             transform: EvaluatedTransform {
-                position, scale: v(1.0, 1.0), rotation_degrees: 0.0,
-                anchor: v(0.5, 0.5), opacity: 1.0,
+                position,
+                scale: v(1.0, 1.0),
+                rotation_degrees: 0.0,
+                anchor: v(0.5, 0.5),
+                opacity: 1.0,
             },
             content: EvaluatedObjectContent::Rectangle {
-                size: v(20.0, 10.0), fill, corner_radius: 0.0,
+                size: v(20.0, 10.0),
+                fill,
+                corner_radius: 0.0,
             },
             effects: Vec::new(),
         }
@@ -204,15 +235,22 @@ mod tests {
 
     #[test]
     fn center_anchor_maps_to_correct_ndc_and_serialization_stride() {
-        let scene = EvaluatedScene { objects: vec![
-            rectangle(1, v(50.0, 50.0), LinearRgba::black_opaque()),
-        ] };
+        let scene = EvaluatedScene {
+            objects: vec![rectangle(1, v(50.0, 50.0), LinearRgba::black_opaque())],
+        };
         let vertices = scene_vertices(&scene, [100, 100]);
         assert_eq!(vertices.len(), 6);
         assert_eq!(vertices[0].local, [0.0, 0.0]);
-        assert_eq!(vertices[0].ndc, [-0.2, 0.1]);
-        assert_eq!(vertices[2].ndc, [0.2, -0.1]);
-        assert_eq!(vertices_as_bytes(&vertices).len(), 6 * VERTEX_STRIDE as usize);
+        for (actual, expected) in vertices[0].ndc.into_iter().zip([-0.2, 0.1]) {
+            assert!((actual - expected).abs() < 1e-6);
+        }
+        for (actual, expected) in vertices[2].ndc.into_iter().zip([0.2, -0.1]) {
+            assert!((actual - expected).abs() < 1e-6);
+        }
+        assert_eq!(
+            vertices_as_bytes(&vertices).len(),
+            6 * VERTEX_STRIDE as usize
+        );
     }
 
     #[test]
@@ -221,7 +259,12 @@ mod tests {
         shape.transform.anchor = v(0.0, 0.0);
         shape.transform.scale = v(-1.0, 2.0);
         shape.transform.rotation_degrees = 90.0;
-        let vertices = scene_vertices(&EvaluatedScene { objects: vec![shape] }, [100, 100]);
+        let vertices = scene_vertices(
+            &EvaluatedScene {
+                objects: vec![shape],
+            },
+            [100, 100],
+        );
         // Local (20, 0) mirrors left and rotates upward in screen coordinates.
         assert!((vertices[1].ndc[0]).abs() < 0.0001);
         assert!((vertices[1].ndc[1] - 0.4).abs() < 0.0001);
@@ -234,13 +277,18 @@ mod tests {
         let first = rectangle(1, v(10.0, 10.0), fill);
         let mut second = rectangle(2, v(20.0, 20.0), fill);
         second.transform.opacity = 0.5;
-        second.content = EvaluatedObjectContent::Ellipse { size: v(8.0, 6.0), fill };
+        second.content = EvaluatedObjectContent::Ellipse {
+            size: v(8.0, 6.0),
+            fill,
+        };
         let mut ignored = rectangle(3, v(30.0, 30.0), fill);
         ignored.effects.push(crate::scene_eval::EvaluatedEffect {
             id: rhythm_core::ids::EffectId::new(4).expect("id"),
             kind: crate::scene_eval::EvaluatedEffectKind::Blur { radius_px: 8.0 },
         });
-        let scene = EvaluatedScene { objects: vec![first, ignored, second] };
+        let scene = EvaluatedScene {
+            objects: vec![first, ignored, second],
+        };
         let vertices = scene_vertices(&scene, [100, 100]);
         assert_eq!(vertices.len(), 12);
         assert_eq!(vertices[0].color, [0.4, 0.2, 0.1, 0.5]);
@@ -253,11 +301,27 @@ mod tests {
     fn degenerate_or_unrepresentable_shapes_are_ignored() {
         let mut shape = rectangle(1, v(50.0, 50.0), LinearRgba::black_opaque());
         shape.transform.scale = v(0.0, 1.0);
-        assert!(scene_vertices(&EvaluatedScene { objects: vec![shape] }, [100, 100]).is_empty());
+        assert!(
+            scene_vertices(
+                &EvaluatedScene {
+                    objects: vec![shape]
+                },
+                [100, 100]
+            )
+            .is_empty()
+        );
         assert!(scene_vertices(&EvaluatedScene { objects: vec![] }, [0, 100]).is_empty());
         let mut huge = rectangle(1, v(f32::MAX, f32::MAX), LinearRgba::black_opaque());
         huge.transform.scale = v(f32::MAX, f32::MAX);
-        assert!(scene_vertices(&EvaluatedScene { objects: vec![huge] }, [100, 100]).is_empty());
+        assert!(
+            scene_vertices(
+                &EvaluatedScene {
+                    objects: vec![huge]
+                },
+                [100, 100]
+            )
+            .is_empty()
+        );
     }
 
     #[test]

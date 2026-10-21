@@ -460,7 +460,8 @@ impl ApplicationHandler for RhythmApp {
                     // Commit creative content before the egui pass samples its native texture.
                     // The same evaluated scene will later drive preview and export.
                     if let Some(renderer) = self.renderer.as_ref() {
-                        match evaluate_scene(self.project_editor.project(), self.session.playhead()) {
+                        match evaluate_scene(self.project_editor.project(), self.session.playhead())
+                        {
                             Ok(scene) => {
                                 renderer.render_primitives(
                                     &gpu.device,
@@ -470,7 +471,9 @@ impl ApplicationHandler for RhythmApp {
                                 );
                                 renderer.refresh_preview_display(&gpu.device, &gpu.queue);
                             }
-                            Err(error) => warn!(?error, "could not evaluate creative preview scene"),
+                            Err(error) => {
+                                warn!(?error, "could not evaluate creative preview scene")
+                            }
                         }
                     }
                     let paint_jobs =
