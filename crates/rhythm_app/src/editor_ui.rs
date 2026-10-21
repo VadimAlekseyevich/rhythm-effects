@@ -431,9 +431,12 @@ fn draw_inspector_position_field(
     actions: &mut EditorUiActions,
 ) {
     let id = inspector_position_id(object_id, axis);
+    // TextEdit owns `id` for its internal cursor/selection state; keep
+    // application draft data in a separate key to avoid type collisions.
+    let draft_id = id.with("draft");
     let mut draft = ui
         .ctx()
-        .data(|data| data.get_temp::<InspectorNumericDraft>(id))
+        .data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
         .unwrap_or_else(|| InspectorNumericDraft {
             text: current.to_string(),
             dirty: false,
@@ -453,7 +456,7 @@ fn draw_inspector_position_field(
     if escape {
         ui.memory_mut(|memory| memory.surrender_focus(id));
         ui.ctx()
-            .data_mut(|data| data.remove::<InspectorNumericDraft>(id));
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     } else if response.lost_focus() || enter {
         if let Some(value) = committed_number(&draft) {
             actions
@@ -465,15 +468,15 @@ fn draw_inspector_position_field(
                 });
         }
         ui.ctx()
-            .data_mut(|data| data.remove::<InspectorNumericDraft>(id));
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
         if enter {
             ui.memory_mut(|memory| memory.surrender_focus(id));
         }
     } else if response.has_focus() {
-        ui.ctx().data_mut(|data| data.insert_temp(id, draft));
+        ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
     } else {
         ui.ctx()
-            .data_mut(|data| data.remove::<InspectorNumericDraft>(id));
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     }
 }
 
@@ -495,10 +498,10 @@ fn flush_inspector_draft_on_selection_change(
                 && object.transform.position.keyframes().is_empty()
         });
         for axis in [PositionAxis::X, PositionAxis::Y] {
-            let id = inspector_position_id(old_id, axis);
+            let draft_id = inspector_position_id(old_id, axis).with("draft");
             let draft = ui.ctx().data_mut(|data| {
-                let draft = data.get_temp::<InspectorNumericDraft>(id);
-                data.remove::<InspectorNumericDraft>(id);
+                let draft = data.get_temp::<InspectorNumericDraft>(draft_id);
+                data.remove::<InspectorNumericDraft>(draft_id);
                 draft
             });
             if editable && let Some(value) = draft.as_ref().and_then(committed_number) {
