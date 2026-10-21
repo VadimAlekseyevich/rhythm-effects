@@ -213,11 +213,11 @@ impl Renderer {
                 module: &primitive_shader,
                 entry_point: Some("vs_main"),
                 compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
+                buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: primitives::VERTEX_STRIDE,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &primitives::VERTEX_ATTRIBUTES,
-                }],
+                })],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &primitive_shader,

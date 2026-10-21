@@ -1,7 +1,7 @@
 //! GPU-ready Rectangle/Ellipse vertices derived from the evaluated project scene.
 //! No editor-only state enters the creative geometry or painter-order semantics.
 
-use rhythm_core::domain::{LinearRgba, Vec2};
+use rhythm_core::domain::LinearRgba;
 
 use crate::scene_eval::{EvaluatedObject, EvaluatedObjectContent, EvaluatedScene};
 
