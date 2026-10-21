@@ -3,6 +3,10 @@
 //! This module owns renderer/backend concerns inside `rhythm_engine`.
 //! `rhythm_core` stays independent from wgpu and other graphics APIs.
 
+use rhythm_core::domain::LinearRgba;
+
+use crate::{primitives, scene_eval::EvaluatedScene};
+
 pub const INITIAL_COMPOSITION_WIDTH: u32 = 1920;
 pub const INITIAL_COMPOSITION_HEIGHT: u32 = 1080;
 pub const COMPOSITION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -75,6 +79,7 @@ pub struct Renderer {
     preview_display_view: wgpu::TextureView,
     preview_bind_group: wgpu::BindGroup,
     preview_pipeline: wgpu::RenderPipeline,
+    primitive_pipeline: wgpu::RenderPipeline,
 }
 
 impl Renderer {
@@ -197,6 +202,54 @@ impl Renderer {
             cache: None,
         });
 
+        let primitive_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Rhythm Effects creative primitive shader"),
+            source: wgpu::ShaderSource::Wgsl(primitives::PRIMITIVE_SHADER.into()),
+        });
+        let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Rhythm Effects creative primitive pipeline"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &primitive_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: primitives::VERTEX_STRIDE,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &primitives::VERTEX_ATTRIBUTES,
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &primitive_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: COMPOSITION_FORMAT,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
         Self {
             _composition_texture: composition_texture,
             composition_view,
@@ -205,6 +258,7 @@ impl Renderer {
             preview_display_view,
             preview_bind_group,
             preview_pipeline,
+            primitive_pipeline,
         }
     }
 
@@ -221,6 +275,62 @@ impl Renderer {
     #[must_use]
     pub fn preview_display_view(&self) -> &wgpu::TextureView {
         &self.preview_display_view
+    }
+
+    /// Draw Rectangle/Ellipse scene content into the linear-premultiplied
+    /// composition texture. Editor overlays live exclusively in egui.
+    ///
+    /// This is the first live GPU integration slice. Image/Text and any object
+    /// with enabled effects remain deliberately absent until their paths exist.
+    pub fn render_primitives(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scene: &EvaluatedScene,
+        background: LinearRgba,
+    ) {
+        let vertices = primitives::scene_vertices(scene, self.composition_size);
+        let vertex_buffer = if vertices.is_empty() {
+            None
+        } else {
+            let bytes = primitives::vertices_as_bytes(&vertices);
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Rhythm Effects frame primitive vertices"),
+                size: bytes.len() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, &bytes);
+            Some(buffer)
+        };
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Rhythm Effects creative primitive encoder"),
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Rhythm Effects creative primitives"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.composition_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(primitives::clear_color(background)),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if let Some(buffer) = vertex_buffer.as_ref() {
+                pass.set_pipeline(&self.primitive_pipeline);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..vertices.len() as u32, 0..1);
+            }
+        }
+        queue.submit([encoder.finish()]);
     }
 
     pub fn clear_composition(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
