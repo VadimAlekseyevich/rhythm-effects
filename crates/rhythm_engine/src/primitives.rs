@@ -313,6 +313,11 @@ mod tests {
         assert!(scene_vertices(&EvaluatedScene { objects: vec![] }, [0, 100]).is_empty());
         let mut huge = rectangle(1, v(f32::MAX, f32::MAX), LinearRgba::black_opaque());
         huge.transform.scale = v(f32::MAX, f32::MAX);
+        huge.content = EvaluatedObjectContent::Rectangle {
+            size: v(f32::MAX, f32::MAX),
+            fill: LinearRgba::black_opaque(),
+            corner_radius: 0.0,
+        };
         assert!(
             scene_vertices(
                 &EvaluatedScene {
