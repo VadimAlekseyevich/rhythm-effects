@@ -4,6 +4,7 @@ use crate::{
 };
 use rhythm_core::{
     domain::Vec2,
+    editor::{EditCommand, EditError, ProjectEditor},
     hit_test::{OutlineKind, object_outline, pick_topmost_object, select_objects_in_box},
     ids::ObjectId,
     project::Project,
@@ -338,10 +339,198 @@ fn draw_editor_outlines(
     }
 }
 
+/// A commit of one static Inspector Position axis; updates recompute the
+/// untouched axis from the current ProjectEditor state, never from a stale UI snapshot.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InspectorPositionEdit {
+    pub object_id: ObjectId,
+    pub axis: PositionAxis,
+    pub value: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PositionAxis {
+    X,
+    Y,
+}
+
+impl PositionAxis {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::X => "X",
+            Self::Y => "Y",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct InspectorNumericDraft {
+    text: String,
+    dirty: bool,
+}
+
+fn inspector_position_id(object_id: ObjectId, axis: PositionAxis) -> egui::Id {
+    // Stable across different nested egui panels/horizontal layouts, so a
+    // selection change can flush the same draft that TextEdit produced.
+    egui::Id::new(("inspector_position", object_id.get(), axis.label()))
+}
+
+fn committed_number(draft: &InspectorNumericDraft) -> Option<f32> {
+    if !draft.dirty {
+        return None;
+    }
+    draft
+        .text
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite())
+}
+
+/// One valid focus-loss/Enter commit becomes one EditCommand and one Undo step.
+/// Editing animated, locked or missing objects is deliberately not supported yet.
+pub fn apply_inspector_position_edits(
+    editor: &mut ProjectEditor,
+    edits: impl IntoIterator<Item = InspectorPositionEdit>,
+) -> Result<bool, EditError> {
+    let mut changed = false;
+    for edit in edits {
+        let Some(object) = editor
+            .project()
+            .composition
+            .objects
+            .iter()
+            .find(|object| object.id == edit.object_id)
+        else {
+            continue;
+        };
+        if object.locked || !object.transform.position.keyframes().is_empty() {
+            continue;
+        }
+        let current = *object.transform.position.base_value();
+        let (x, y) = match edit.axis {
+            PositionAxis::X => (edit.value, current.y()),
+            PositionAxis::Y => (current.x(), edit.value),
+        };
+        let Ok(position) = Vec2::new(x, y) else {
+            continue;
+        };
+        changed |= editor.execute(EditCommand::SetPositionBase {
+            object_id: edit.object_id,
+            value: position,
+        })?;
+    }
+    Ok(changed)
+}
+
+fn draw_inspector_position_field(
+    ui: &mut egui::Ui,
+    object_id: ObjectId,
+    axis: PositionAxis,
+    current: f32,
+    actions: &mut EditorUiActions,
+) {
+    let id = inspector_position_id(object_id, axis);
+    // TextEdit owns `id` for its internal cursor/selection state; keep
+    // application draft data in a separate key to avoid type collisions.
+    let draft_id = id.with("draft");
+    let mut draft = ui
+        .ctx()
+        .data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
+        .unwrap_or_else(|| InspectorNumericDraft {
+            text: current.to_string(),
+            dirty: false,
+        });
+    ui.label(axis.label());
+    let previously_focused = ui.memory(|memory| memory.has_focus(id));
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut draft.text)
+            .id(id)
+            .desired_width(96.0),
+    );
+    draft.dirty |= response.changed();
+    let escape = (previously_focused || response.has_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+
+    if escape {
+        ui.memory_mut(|memory| memory.surrender_focus(id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+    } else if response.lost_focus() || enter {
+        if let Some(value) = committed_number(&draft) {
+            actions
+                .inspector_position_edits
+                .push(InspectorPositionEdit {
+                    object_id,
+                    axis,
+                    value,
+                });
+        }
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        if enter {
+            ui.memory_mut(|memory| memory.surrender_focus(id));
+        }
+    } else if response.has_focus() {
+        ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
+    } else {
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+    }
+}
+
+fn flush_inspector_draft_on_selection_change(
+    ui: &egui::Ui,
+    project: &Project,
+    selected_object: Option<ObjectId>,
+    actions: &mut EditorUiActions,
+) {
+    let marker = egui::Id::new("last_inspector_position_object");
+    let previous = ui.ctx().data(|data| data.get_temp::<ObjectId>(marker));
+    if previous == selected_object {
+        return;
+    }
+    if let Some(old_id) = previous {
+        let editable = project.composition.objects.iter().any(|object| {
+            object.id == old_id
+                && !object.locked
+                && object.transform.position.keyframes().is_empty()
+        });
+        for axis in [PositionAxis::X, PositionAxis::Y] {
+            let draft_id = inspector_position_id(old_id, axis).with("draft");
+            let draft = ui.ctx().data_mut(|data| {
+                let draft = data.get_temp::<InspectorNumericDraft>(draft_id);
+                data.remove::<InspectorNumericDraft>(draft_id);
+                draft
+            });
+            if editable && let Some(value) = draft.as_ref().and_then(committed_number) {
+                actions
+                    .inspector_position_edits
+                    .push(InspectorPositionEdit {
+                        object_id: old_id,
+                        axis,
+                        value,
+                    });
+            }
+        }
+    }
+    ui.ctx().data_mut(|data| {
+        if let Some(selected_object) = selected_object {
+            data.insert_temp(marker, selected_object);
+        } else {
+            data.remove::<ObjectId>(marker);
+        }
+    });
+}
+
 #[derive(Debug, Default)]
 pub struct EditorUiActions {
     pub add_rectangle_requested: bool,
     pub viewport_position_actions: Vec<ViewportPositionAction>,
+    pub inspector_position_edits: Vec<InspectorPositionEdit>,
+    pub undo_requested: bool,
+    pub redo_requested: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -494,6 +683,21 @@ pub fn draw_editor_shell(
         .show(ui, |ui| {
             ui.heading("Inspector");
             ui.separator();
+            let selected = if session.selected_objects().len() == 1 {
+                session.selected_object()
+            } else {
+                None
+            };
+            flush_inspector_draft_on_selection_change(ui, project, selected, actions);
+            ui.horizontal(|ui| {
+                if ui.button("Undo").clicked() {
+                    actions.undo_requested = true;
+                }
+                if ui.button("Redo").clicked() {
+                    actions.redo_requested = true;
+                }
+            });
+            ui.separator();
             if let Some(object) = session.selected_object().and_then(|id| {
                 project
                     .composition
@@ -509,8 +713,31 @@ pub fn draw_editor_shell(
                 ui.label(format!("Primary ID: {}", object.id.get()));
                 if session.selected_objects().len() > 1 {
                     ui.small("Multi-object transform editing is not wired yet.");
+                } else if object.locked {
+                    ui.small("Locked object: editing is disabled.");
+                } else if !object.transform.position.keyframes().is_empty() {
+                    ui.small("Animated Position: edit through the keyframe timeline.");
                 } else {
-                    ui.label("Transform controls are not wired yet.");
+                    ui.label("Transform — Position (px)");
+                    let base = *object.transform.position.base_value();
+                    ui.horizontal(|ui| {
+                        draw_inspector_position_field(
+                            ui,
+                            object.id,
+                            PositionAxis::X,
+                            base.x(),
+                            actions,
+                        );
+                        draw_inspector_position_field(
+                            ui,
+                            object.id,
+                            PositionAxis::Y,
+                            base.y(),
+                            actions,
+                        );
+                    });
+                    ui.small("Enter / focus loss to commit · Escape to cancel.");
+                    ui.small("Scale, Rotation, Anchor and Opacity controls are pending.");
                 }
             } else {
                 ui.label("No object selected.");
@@ -758,12 +985,126 @@ pub fn draw_editor_shell(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_object_click, clamped_drag_point, composition_point_from_preview,
+        InspectorNumericDraft, InspectorPositionEdit, PositionAxis, apply_inspector_position_edits,
+        apply_object_click, clamped_drag_point, committed_number, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
         selection_rect_on_preview, unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
+
+    #[test]
+    fn position_text_accepts_only_changed_finite_numeric_values() {
+        let draft = |text: &str, dirty| InspectorNumericDraft {
+            text: text.to_owned(),
+            dirty,
+        };
+        assert_eq!(committed_number(&draft(" -123.25 ", true)), Some(-123.25));
+        assert_eq!(committed_number(&draft("123", false)), None);
+        for invalid in ["", "-", "1.2.3", "NaN", "inf", "1e999"] {
+            assert_eq!(committed_number(&draft(invalid, true)), None);
+        }
+    }
+
+    #[test]
+    fn inspector_position_axis_commits_preserve_other_axis_with_individual_undo() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            editor::ProjectEditor,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, TempoMap},
+        };
+
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut project = Project::new(
+            "Inspector integration",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let id = ObjectId::new(1).expect("id");
+        project.composition.objects.push(Object {
+            id,
+            name: "Test".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(100.0, 200.0)),
+                Animated::new_static(v(1.0, 1.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(100.0, 50.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        let mut editor = ProjectEditor::new(project).expect("project");
+        let position = |editor: &ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value()
+        };
+        assert!(
+            apply_inspector_position_edits(
+                &mut editor,
+                [
+                    InspectorPositionEdit {
+                        object_id: id,
+                        axis: PositionAxis::X,
+                        value: 320.0
+                    },
+                    InspectorPositionEdit {
+                        object_id: id,
+                        axis: PositionAxis::Y,
+                        value: -50.0
+                    },
+                ],
+            )
+            .expect("edits")
+        );
+        assert_eq!(position(&editor), v(320.0, -50.0));
+        assert_eq!(editor.history_len(), 2);
+        assert!(
+            !apply_inspector_position_edits(
+                &mut editor,
+                [InspectorPositionEdit {
+                    object_id: id,
+                    axis: PositionAxis::Y,
+                    value: -50.0
+                }],
+            )
+            .expect("no-op")
+        );
+        assert!(
+            !apply_inspector_position_edits(
+                &mut editor,
+                [InspectorPositionEdit {
+                    object_id: id,
+                    axis: PositionAxis::X,
+                    value: f32::NAN
+                }],
+            )
+            .expect("invalid")
+        );
+        assert_eq!(editor.history_len(), 2);
+        assert!(editor.undo().expect("undo y"));
+        assert_eq!(position(&editor), v(320.0, 200.0));
+        assert!(editor.undo().expect("undo x"));
+        assert_eq!(position(&editor), v(100.0, 200.0));
+        assert!(editor.redo().expect("redo x"));
+        assert!(editor.redo().expect("redo y"));
+        assert_eq!(position(&editor), v(320.0, -50.0));
+        editor.project().validate().expect("project remains valid");
+    }
 
     #[test]
     fn selection_bounds_projection_tracks_pan_zoom_and_pivot_mapping() {

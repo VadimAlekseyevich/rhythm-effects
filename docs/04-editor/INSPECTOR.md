@@ -193,3 +193,17 @@ No project-wide property scan for one selected object.
 ## 19. Definition of Done
 
 Inspector is MVP-ready when static/animated edit semantics, last-key removal, mixed selection, object-specific controls, effect controls, focus/cancel/undo, and comfortable design-system sizing all pass.
+
+## Incremental runtime integration: static Position
+
+The first live Inspector Transform control edits a single unlocked object's
+**static Position X/Y** in composition pixels. Each text field commits on Enter
+or focus loss, Escape discards the draft, and invalid/non-finite input never
+reaches Project. Selecting another object flushes a valid pending edit.
+Undo/Redo buttons in Inspector use the existing ProjectEditor history.
+
+The unaffected axis is read from current Project state at commit time to
+avoid losing a simultaneous edit or overwriting a viewport move. A successful
+change creates exactly one Undo entry; no-op entries are omitted. Multi-object,
+locked, and animated Position edits are intentionally unavailable in this slice.
+The full Inspector definition of done remains open.
