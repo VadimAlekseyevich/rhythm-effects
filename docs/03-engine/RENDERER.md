@@ -293,3 +293,22 @@ Renderer is MVP-ready when:
 - temporary resources are reused;
 - effects/text match export;
 - representative 1080p scene meets PERFORMANCE.md.
+
+
+## Live primitive-preview integration (initial slice)
+
+The app evaluates the current Project at the EditorSession playhead and renders
+visible Rectangle/Ellipse objects into its existing Rgba16Float composition
+texture before converting to the sRGB-compatible egui native preview texture.
+The same animated Position/Scale/Rotation/Anchor/Opacity and fill values used
+by scene evaluation drive the GPU geometry; painter ordering is preserved.
+Single-pass analytic fragment coverage handles rounded rectangle corners and
+ellipse edges. RGB uses premultiplied linear-light alpha over the project
+background. Editor-only selection/hit-test outlines remain in egui.
+
+**Scope boundary:** Image and Text are not yet rasterized. A primitive with
+any enabled effects is skipped rather than displayed incorrectly without its
+effect chain; this does not claim effects preview or export parity. Preview
+texture dimensions remain the initial 1920x1080 target, and the vertex upload
+is a first working path, not yet pooled or performance-certified. Manual
+Windows GPU inspection and multi-resolution validation are still required.

@@ -18,7 +18,7 @@ use rhythm_core::{
     ids::ObjectId,
     project::{Object, ObjectContent, RectangleObject, TransformAnimation},
 };
-use rhythm_engine::renderer::Renderer;
+use rhythm_engine::{renderer::Renderer, scene_eval::evaluate_scene};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use winit::{
@@ -425,8 +425,11 @@ impl ApplicationHandler for RhythmApp {
                                 size: Animated::new_static(
                                     Vec2::new(320.0, 180.0).expect("finite rectangle size"),
                                 ),
-                                fill: Animated::new_static(LinearRgba::black_opaque()),
-                                corner_radius: Animated::new_static(0.0),
+                                fill: Animated::new_static(
+                                    LinearRgba::new(0.18, 0.48, 0.85, 1.0)
+                                        .expect("finite visible rectangle color"),
+                                ),
+                                corner_radius: Animated::new_static(18.0),
                             }),
                             effects: Vec::new(),
                         };
@@ -453,6 +456,25 @@ impl ApplicationHandler for RhythmApp {
                         Ok(true) => window.request_redraw(),
                         Ok(false) => {}
                         Err(error) => warn!(?error, "keyframe easing edit failed"),
+                    }
+                    // Commit creative content before the egui pass samples its native texture.
+                    // The same evaluated scene will later drive preview and export.
+                    if let Some(renderer) = self.renderer.as_ref() {
+                        match evaluate_scene(self.project_editor.project(), self.session.playhead())
+                        {
+                            Ok(scene) => {
+                                renderer.render_primitives(
+                                    &gpu.device,
+                                    &gpu.queue,
+                                    &scene,
+                                    self.project_editor.project().settings.background,
+                                );
+                                renderer.refresh_preview_display(&gpu.device, &gpu.queue);
+                            }
+                            Err(error) => {
+                                warn!(?error, "could not evaluate creative preview scene")
+                            }
+                        }
                     }
                     let paint_jobs =
                         egui_context.tessellate(full_output.shapes, full_output.pixels_per_point);

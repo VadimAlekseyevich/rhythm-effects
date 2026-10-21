@@ -233,3 +233,13 @@ No objects:
 ## 23. Definition of Done
 
 Viewport is MVP-ready when selection, pan/zoom, single-object move/scale/rotation, direct animated edits, hit testing, overlays, and coordinate parity with renderer all pass.
+
+
+**Live GPU preview integration (post AI-173):** the app now submits
+EvaluateScene-derived Rectangle/Ellipse fill geometry to the Rgba16Float
+composition texture, then refreshes the native preview texture before egui
+draw. Selection wireframes, bounds and pivot markers remain editor-only
+overlays, so neither export nor creative scene pixels include those handles.
+Image/Text and objects with enabled effects still do not render. The basic
+single-object static Position drag now moves visible GPU shape pixels as well
+as its overlay; full renderer/multi-object acceptance remains outstanding.
