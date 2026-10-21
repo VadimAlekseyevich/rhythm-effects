@@ -974,12 +974,102 @@ pub fn draw_editor_shell(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_object_click, clamped_drag_point, composition_point_from_preview,
-        fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
-        selection_rect_on_preview, unbounded_composition_point,
+        InspectorNumericDraft, InspectorPositionEdit, PositionAxis,
+        apply_inspector_position_edits, apply_object_click, clamped_drag_point, committed_number,
+        composition_point_from_preview, fit_composition_preview, panned_preview_rect,
+        preview_point, selected_outline_bounds, selection_rect_on_preview,
+        unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
+
+    #[test]
+    fn position_text_accepts_only_changed_finite_numeric_values() {
+        let draft = |text: &str, dirty| InspectorNumericDraft {
+            text: text.to_owned(),
+            dirty,
+        };
+        assert_eq!(committed_number(&draft(" -123.25 ", true)), Some(-123.25));
+        assert_eq!(committed_number(&draft("123", false)), None);
+        for invalid in ["", "-", "1.2.3", "NaN", "inf", "1e999"] {
+            assert_eq!(committed_number(&draft(invalid, true)), None);
+        }
+    }
+
+    #[test]
+    fn inspector_position_axis_commits_preserve_other_axis_with_individual_undo() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            editor::ProjectEditor,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, TempoMap},
+        };
+
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut project = Project::new(
+            "Inspector integration",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let id = ObjectId::new(1).expect("id");
+        project.composition.objects.push(Object {
+            id,
+            name: "Test".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(100.0, 200.0)),
+                Animated::new_static(v(1.0, 1.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(100.0, 50.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        let mut editor = ProjectEditor::new(project).expect("project");
+        let position = |editor: &ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value()
+        };
+        assert!(apply_inspector_position_edits(
+            &mut editor,
+            [
+                InspectorPositionEdit { object_id: id, axis: PositionAxis::X, value: 320.0 },
+                InspectorPositionEdit { object_id: id, axis: PositionAxis::Y, value: -50.0 },
+            ],
+        ).expect("edits"));
+        assert_eq!(position(&editor), v(320.0, -50.0));
+        assert_eq!(editor.history_len(), 2);
+        assert!(!apply_inspector_position_edits(
+            &mut editor,
+            [InspectorPositionEdit { object_id: id, axis: PositionAxis::Y, value: -50.0 }],
+        ).expect("no-op"));
+        assert!(!apply_inspector_position_edits(
+            &mut editor,
+            [InspectorPositionEdit { object_id: id, axis: PositionAxis::X, value: f32::NAN }],
+        ).expect("invalid"));
+        assert_eq!(editor.history_len(), 2);
+        assert!(editor.undo().expect("undo y"));
+        assert_eq!(position(&editor), v(320.0, 200.0));
+        assert!(editor.undo().expect("undo x"));
+        assert_eq!(position(&editor), v(100.0, 200.0));
+        assert!(editor.redo().expect("redo x"));
+        assert!(editor.redo().expect("redo y"));
+        assert_eq!(position(&editor), v(320.0, -50.0));
+        editor.project().validate().expect("project remains valid");
+    }
 
     #[test]
     fn selection_bounds_projection_tracks_pan_zoom_and_pivot_mapping() {
