@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
 use rhythm_core::{
+    animation::EasingPreset,
+    domain::Vec2,
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
     property::{
@@ -12,6 +14,34 @@ use rhythm_core::{
         snap_tick_position_to_grid,
     },
 };
+
+/// Apply live pointer updates through the existing ProjectEditor transaction.
+/// Only the final Commit records one undo entry; errors cancel the transaction.
+pub fn apply_viewport_position_actions(
+    editor: &mut ProjectEditor,
+    actions: impl IntoIterator<Item = ViewportPositionAction>,
+) -> Result<bool, EditError> {
+    let mut repaint = false;
+    for action in actions {
+        let result = match action {
+            ViewportPositionAction::Begin(id) => {
+                editor.begin_position_transaction(id).map(|()| false)
+            }
+            ViewportPositionAction::Update(position) => {
+                editor.update_position_transaction(position).map(|()| true)
+            }
+            ViewportPositionAction::Commit => editor.commit_transaction(),
+        };
+        match result {
+            Ok(changed) => repaint |= changed,
+            Err(error) => {
+                let _ = editor.cancel_transaction();
+                return Err(error);
+            }
+        }
+    }
+    Ok(repaint)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreviewQuality {
@@ -40,6 +70,26 @@ impl PreviewQuality {
 struct TimelineBoxSelection {
     start: [f32; 2],
     current: [f32; 2],
+    ctrl_toggle: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewportPositionAction {
+    Begin(ObjectId),
+    Update(Vec2),
+    Commit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportPositionDrag {
+    start: Vec2,
+    base_position: Vec2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportBoxSelection {
+    start: Vec2,
+    current: Vec2,
     ctrl_toggle: bool,
 }
 
@@ -96,11 +146,19 @@ pub struct EditorSession {
     playhead: ProjectTimeNs,
     authoring_division: BeatDivision,
     timeline_view: Option<TimelineView>,
+    follow_playhead: bool,
+    selected_objects: Vec<ObjectId>,
+    viewport_box_selection: Option<ViewportBoxSelection>,
+    viewport_position_drag: Option<ViewportPositionDrag>,
+    viewport_pan_points: [f32; 2],
+    viewport_zoom: f32,
+    viewport_pan_origin: Option<[f32; 2]>,
     selected_keyframes: HashSet<KeyframeId>,
     focused_property: Option<FocusedProperty>,
     keyframe_drag: Option<KeyframeDrag>,
     pending_keyframe_move: Option<PendingKeyframeMove>,
     keyframe_clipboard: Option<KeyframeCopyPacket>,
+    pending_easing_preset: Option<EasingPreset>,
     timeline_box_selection: Option<TimelineBoxSelection>,
 }
 
@@ -111,17 +169,298 @@ impl Default for EditorSession {
             playhead: ProjectTimeNs::new(0),
             authoring_division: BeatDivision::new(4).expect("1/4 beat is an accepted MVP grid"),
             timeline_view: None,
+            follow_playhead: false,
+            selected_objects: Vec::new(),
+            viewport_box_selection: None,
+            viewport_position_drag: None,
+            viewport_pan_points: [0.0, 0.0],
+            viewport_zoom: 1.0,
+            viewport_pan_origin: None,
             selected_keyframes: HashSet::new(),
             focused_property: None,
             keyframe_drag: None,
             pending_keyframe_move: None,
             keyframe_clipboard: None,
+            pending_easing_preset: None,
             timeline_box_selection: None,
         }
     }
 }
 
 impl EditorSession {
+    /// The most recently selected object is the primary Inspector focus.
+    #[must_use]
+    pub fn selected_object(&self) -> Option<ObjectId> {
+        self.selected_objects.last().copied()
+    }
+
+    /// Selection is kept in click order, with stable IDs and no duplicates.
+    #[must_use]
+    pub fn selected_objects(&self) -> &[ObjectId] {
+        &self.selected_objects
+    }
+
+    #[must_use]
+    pub fn is_object_selected(&self, object_id: ObjectId) -> bool {
+        self.selected_objects.contains(&object_id)
+    }
+
+    /// Plain click replaces object selection; empty-space click clears it.
+    pub fn select_viewport_object(&mut self, object_id: Option<ObjectId>) {
+        self.selected_objects.clear();
+        if let Some(object_id) = object_id {
+            self.selected_objects.push(object_id);
+        }
+    }
+
+    /// Ctrl-click toggles one ID without disturbing the other selected objects.
+    /// Empty-space Ctrl-click is a no-op, unlike a plain empty-space click.
+    pub fn toggle_viewport_object(&mut self, object_id: Option<ObjectId>) {
+        let Some(object_id) = object_id else {
+            return;
+        };
+        if let Some(index) = self.selected_objects.iter().position(|id| *id == object_id) {
+            self.selected_objects.remove(index);
+        } else {
+            self.selected_objects.push(object_id);
+        }
+    }
+
+    /// Absolute position updates are computed from the original mouse-down
+    /// composition point, preventing frame-to-frame drift.
+    pub fn begin_viewport_position_drag(&mut self, start: Vec2, base_position: Vec2) -> bool {
+        if self.viewport_position_drag.is_some() {
+            return false;
+        }
+        self.viewport_position_drag = Some(ViewportPositionDrag {
+            start,
+            base_position,
+        });
+        true
+    }
+
+    #[must_use]
+    pub fn update_viewport_position_drag(&self, pointer: Vec2) -> Option<Vec2> {
+        let drag = self.viewport_position_drag?;
+        let x =
+            f64::from(drag.base_position.x()) + f64::from(pointer.x()) - f64::from(drag.start.x());
+        let y =
+            f64::from(drag.base_position.y()) + f64::from(pointer.y()) - f64::from(drag.start.y());
+        if !x.is_finite()
+            || !y.is_finite()
+            || x.abs() > f64::from(f32::MAX)
+            || y.abs() > f64::from(f32::MAX)
+        {
+            return None;
+        }
+        Vec2::new(x as f32, y as f32).ok()
+    }
+
+    pub fn finish_viewport_position_drag(&mut self) -> bool {
+        self.viewport_position_drag.take().is_some()
+    }
+
+    pub fn cancel_viewport_position_drag(&mut self) -> bool {
+        self.viewport_position_drag.take().is_some()
+    }
+
+    #[must_use]
+    pub const fn viewport_position_drag_active(&self) -> bool {
+        self.viewport_position_drag.is_some()
+    }
+
+    /// Camera-only translation in egui logical points, never Project pixels.
+    #[must_use]
+    pub const fn viewport_pan_points(&self) -> [f32; 2] {
+        self.viewport_pan_points
+    }
+
+    /// 1.0 is the fitted composition size. Zoom is always editor-only state.
+    #[must_use]
+    pub const fn viewport_zoom(&self) -> f32 {
+        self.viewport_zoom
+    }
+
+    /// Zoom about the mouse position in *canvas-centered logical points*.
+    ///
+    /// The composition point under the pointer stays stationary as the
+    /// displayed rectangle scales. The same transform is used for drawing,
+    /// click picking, and marquee selection. No project values are mutated.
+    /// Ignores nonfinite values and concurrent middle-button camera gestures.
+    pub fn zoom_viewport_at(&mut self, multiplier: f32, pointer: [f32; 2]) -> bool {
+        if !multiplier.is_finite()
+            || multiplier <= 0.0
+            || !pointer[0].is_finite()
+            || !pointer[1].is_finite()
+            || self.viewport_pan_origin.is_some()
+        {
+            return false;
+        }
+
+        const MIN_ZOOM: f64 = 0.125;
+        const MAX_ZOOM: f64 = 16.0;
+        const MAX_PAN_POINTS: f64 = 1_000_000.0;
+        let old_zoom = f64::from(self.viewport_zoom);
+        let zoom = (old_zoom * f64::from(multiplier)).clamp(MIN_ZOOM, MAX_ZOOM) as f32;
+        if zoom == self.viewport_zoom {
+            return false;
+        }
+        let ratio = f64::from(zoom) / old_zoom;
+        for (axis, pointer_axis) in pointer.into_iter().enumerate() {
+            let previous = f64::from(self.viewport_pan_points[axis]);
+            let anchor = f64::from(pointer_axis);
+            let next = anchor + (previous - anchor) * ratio;
+            self.viewport_pan_points[axis] = next.clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32;
+        }
+        self.viewport_zoom = zoom;
+        true
+    }
+
+    /// Recover the default centered fitted preview, without losing selection.
+    pub fn reset_viewport_camera(&mut self) {
+        self.reset_viewport_pan();
+        self.viewport_zoom = 1.0;
+    }
+
+    /// Fit the selected composition-space AABB within the current viewport.
+    ///
+    /// `fitted_size` is the centered Fit Composition display size before
+    /// zoom; `canvas_size` is the drawable viewport size in logical points.
+    /// Pan is relative to canvas center. All math uses f64 intermediates to
+    /// avoid overflow and accumulate no incremental camera error.
+    /// The requested framing includes an 8% margin at each side.
+    pub fn frame_viewport_bounds(
+        &mut self,
+        bounds: (Vec2, Vec2),
+        canvas_size: [f32; 2],
+        fitted_size: [f32; 2],
+        composition_size: [u32; 2],
+    ) -> bool {
+        const MIN_ZOOM: f64 = 0.125;
+        const MAX_ZOOM: f64 = 16.0;
+        const MAX_PAN_POINTS: f64 = 1_000_000.0;
+        if self.viewport_pan_origin.is_some()
+            || canvas_size.iter().any(|x| !x.is_finite() || *x <= 0.0)
+            || fitted_size.iter().any(|x| !x.is_finite() || *x <= 0.0)
+            || composition_size.contains(&0)
+        {
+            return false;
+        }
+
+        let (min, max) = bounds;
+        let min = [f64::from(min.x()), f64::from(min.y())];
+        let max = [f64::from(max.x()), f64::from(max.y())];
+        if (0..2)
+            .any(|axis| !min[axis].is_finite() || !max[axis].is_finite() || max[axis] <= min[axis])
+        {
+            return false;
+        }
+        let units = [
+            f64::from(fitted_size[0]) / f64::from(composition_size[0]),
+            f64::from(fitted_size[1]) / f64::from(composition_size[1]),
+        ];
+        let zoom = (0..2)
+            .map(|axis| {
+                0.84 * f64::from(canvas_size[axis]) / ((max[axis] - min[axis]) * units[axis])
+            })
+            .fold(f64::INFINITY, f64::min)
+            .clamp(MIN_ZOOM, MAX_ZOOM);
+        if !zoom.is_finite() {
+            return false;
+        }
+        let next_pan = [0, 1].map(|axis| {
+            let object_center = min[axis] * 0.5 + max[axis] * 0.5;
+            let composition_center = f64::from(composition_size[axis]) * 0.5;
+            ((composition_center - object_center) * units[axis] * zoom)
+                .clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32
+        });
+        let next_zoom = zoom as f32;
+        if next_zoom == self.viewport_zoom && next_pan == self.viewport_pan_points {
+            return false;
+        }
+        self.viewport_zoom = next_zoom;
+        self.viewport_pan_points = next_pan;
+        true
+    }
+
+    /// Begin a middle-mouse gesture relative to the camera offset at press.
+    /// The caller supplies total drag displacement, never per-frame delta.
+    pub fn begin_viewport_pan(&mut self) {
+        self.viewport_pan_origin = Some(self.viewport_pan_points);
+    }
+
+    /// Recompute from the original offset to avoid accumulating frame jitter.
+    /// Non-finite drag input is ignored; extreme offsets remain bounded.
+    pub fn update_viewport_pan(&mut self, total_delta: [f32; 2]) {
+        let Some(origin) = self.viewport_pan_origin else {
+            return;
+        };
+        if !total_delta[0].is_finite() || !total_delta[1].is_finite() {
+            return;
+        }
+        const MAX_PAN_POINTS: f64 = 1_000_000.0;
+        for axis in 0..2 {
+            let value = f64::from(origin[axis]) + f64::from(total_delta[axis]);
+            self.viewport_pan_points[axis] = value.clamp(-MAX_PAN_POINTS, MAX_PAN_POINTS) as f32;
+        }
+    }
+
+    pub fn end_viewport_pan(&mut self) {
+        self.viewport_pan_origin = None;
+    }
+
+    /// Reset just the editor camera translation; preserve selection and time.
+    pub fn reset_viewport_pan(&mut self) {
+        self.viewport_pan_points = [0.0, 0.0];
+        self.viewport_pan_origin = None;
+    }
+
+    /// The marquee starts only when dragging from empty composition space.
+    pub fn begin_viewport_box_selection(&mut self, start: Vec2, ctrl_toggle: bool) {
+        self.viewport_box_selection = Some(ViewportBoxSelection {
+            start,
+            current: start,
+            ctrl_toggle,
+        });
+    }
+
+    pub fn update_viewport_box_selection(&mut self, current: Vec2) {
+        if let Some(box_selection) = self.viewport_box_selection.as_mut() {
+            box_selection.current = current;
+        }
+    }
+
+    #[must_use]
+    pub fn viewport_box_selection(&self) -> Option<(Vec2, Vec2, bool)> {
+        self.viewport_box_selection
+            .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
+    }
+
+    pub fn take_viewport_box_selection(&mut self) -> Option<(Vec2, Vec2, bool)> {
+        self.viewport_box_selection
+            .take()
+            .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
+    }
+
+    /// Applies a completed marquee's painter-ordered IDs.
+    /// A plain box replaces, Ctrl-box toggles each intersected ID.
+    pub fn apply_viewport_box_selection(
+        &mut self,
+        ids: impl IntoIterator<Item = ObjectId>,
+        ctrl_toggle: bool,
+    ) {
+        if !ctrl_toggle {
+            self.selected_objects.clear();
+        }
+        for id in ids {
+            if ctrl_toggle {
+                self.toggle_viewport_object(Some(id));
+            } else if !self.selected_objects.contains(&id) {
+                self.selected_objects.push(id);
+            }
+        }
+    }
+
     #[must_use]
     pub const fn playhead(&self) -> ProjectTimeNs {
         self.playhead
@@ -129,6 +468,66 @@ impl EditorSession {
 
     pub const fn seek_paused(&mut self, project_time: ProjectTimeNs) {
         self.playhead = project_time;
+    }
+
+    #[must_use]
+    pub const fn follow_playhead_enabled(&self) -> bool {
+        self.follow_playhead
+    }
+
+    pub fn set_follow_playhead_enabled(&mut self, enabled: bool) {
+        self.follow_playhead = enabled;
+    }
+
+    /// Accept only positions sourced from the audible audio clock while playing.
+    /// The app's audio transport will call this after it is connected; never
+    /// estimate playback from UI frame deltas.
+    #[allow(dead_code)]
+    pub fn update_playhead_from_audio_clock(
+        &mut self,
+        audible_time: ProjectTimeNs,
+        duration: DurationNs,
+    ) -> bool {
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let next_playhead = ProjectTimeNs::new(audible_time.get().clamp(0, duration_ns));
+        let changed = self.playhead != next_playhead;
+        self.playhead = next_playhead;
+        self.follow_playhead_during_playback(duration) || changed
+    }
+
+    /// Follow at the viewport edges rather than continuously centering the playhead.
+    /// A 1/8-width trigger zone and 1/5-width landing inset prevent oscillation.
+    fn follow_playhead_during_playback(&mut self, duration: DurationNs) -> bool {
+        if !self.follow_playhead {
+            return false;
+        }
+        let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
+        let (start, end) = self.timeline_range(duration);
+        let span = end.get() - start.get();
+        if span >= duration_ns || span < 5 {
+            return false;
+        }
+
+        let trigger_inset = (span / 8).max(1);
+        let landing_inset = (span / 5).max(1);
+        let playhead_ns = self.playhead.get().clamp(0, duration_ns);
+        let desired_start = if playhead_ns < start.get().saturating_add(trigger_inset) {
+            playhead_ns.saturating_sub(landing_inset)
+        } else if playhead_ns > end.get().saturating_sub(trigger_inset) {
+            playhead_ns.saturating_sub(span - landing_inset)
+        } else {
+            return false;
+        };
+
+        let new_start = desired_start.clamp(0, duration_ns - span);
+        if new_start == start.get() {
+            return false;
+        }
+        self.timeline_view = Some(TimelineView {
+            start: ProjectTimeNs::new(new_start),
+            end: ProjectTimeNs::new(new_start.saturating_add(span)),
+        });
+        true
     }
 
     #[must_use]
@@ -406,6 +805,7 @@ impl EditorSession {
         true
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn keyframe_clipboard(&self) -> Option<&KeyframeCopyPacket> {
         self.keyframe_clipboard.as_ref()
@@ -440,9 +840,10 @@ impl EditorSession {
             packet.entries[0].source_object_id,
             packet.entries[0].source_property,
         );
-        let single_source = packet.entries.iter().all(|entry| {
-            (entry.source_object_id, entry.source_property) == first_source
-        });
+        let single_source = packet
+            .entries
+            .iter()
+            .all(|entry| (entry.source_object_id, entry.source_property) == first_source);
         let remap_target = self.focused_property.filter(|focused| {
             single_source
                 && packet
@@ -484,6 +885,79 @@ impl EditorSession {
 
         self.replace_keyframe_selection(new_ids);
         Ok(true)
+    }
+
+    pub fn duplicate_selected_keyframes(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let mut selected_ids = self.selected_keyframe_ids();
+        if selected_ids.is_empty() {
+            return Ok(false);
+        }
+        selected_ids.sort_unstable();
+
+        let mut located = Vec::with_capacity(selected_ids.len());
+        for keyframe_id in selected_ids {
+            let keyframe = locate_property_keyframe(editor.project(), keyframe_id)
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+            located.push(keyframe);
+        }
+
+        let first_tick = located
+            .iter()
+            .map(|entry| entry.keyframe.tick.get())
+            .min()
+            .expect("selected keys are nonempty");
+        let last_tick = located
+            .iter()
+            .map(|entry| entry.keyframe.tick.get())
+            .max()
+            .expect("selected keys are nonempty");
+
+        // Place the copy just after the selected range, never on top of its source.
+        // Use i128 so even extreme but valid MusicalTicks cannot overflow here.
+        let delta = i128::from(last_tick) - i128::from(first_tick)
+            + i128::from(self.authoring_division.ticks_per_step());
+        let drafts = located
+            .into_iter()
+            .map(|entry| {
+                let target_tick = i128::from(entry.keyframe.tick.get()) + delta;
+                let target_tick = i64::try_from(target_tick)
+                    .map_err(|_| EditError::HistoryInvariant("duplicate tick overflow"))?;
+                Ok(PropertyKeyframeDraft {
+                    object_id: entry.object_id,
+                    property: entry.property,
+                    tick: MusicalTick::new(target_tick),
+                    value: entry.keyframe.value,
+                    interpolation: entry.keyframe.interpolation,
+                })
+            })
+            .collect::<Result<Vec<_>, EditError>>()?;
+
+        // Reuse the compound insertion command for fresh IDs, collisions, and undo.
+        let new_ids = editor.insert_property_keyframes(drafts)?;
+        if new_ids.is_empty() {
+            return Ok(false);
+        }
+        self.replace_keyframe_selection(new_ids);
+        Ok(true)
+    }
+
+    pub fn request_selected_keyframe_easing(&mut self, preset: EasingPreset) {
+        self.pending_easing_preset = Some(preset);
+    }
+
+    pub fn commit_pending_keyframe_easing(
+        &mut self,
+        editor: &mut ProjectEditor,
+    ) -> Result<bool, EditError> {
+        let Some(preset) = self.pending_easing_preset.take() else {
+            return Ok(false);
+        };
+        let mut ids = self.selected_keyframe_ids();
+        ids.sort_unstable();
+        editor.set_property_keyframe_interpolations(ids, preset.interpolation())
     }
 
     pub fn delete_selected_keyframes(
@@ -586,6 +1060,7 @@ impl EditorSession {
             .map(|selection| (selection.start, selection.current, selection.ctrl_toggle))
     }
 
+    #[allow(dead_code)] // reserved for a future explicit grid selection control
     pub const fn set_authoring_division(&mut self, division: BeatDivision) {
         self.authoring_division = division;
     }
@@ -702,6 +1177,9 @@ impl EditorSession {
             return false;
         }
 
+        // A deliberate pan cancels following even if this gesture is clamped
+        // at the timeline boundary or rounds to less than one nanosecond.
+        self.follow_playhead = false;
         let duration_ns = i64::try_from(duration.get()).unwrap_or(i64::MAX).max(1);
         let (start, end) = self.timeline_range(duration);
         let span = (end.get() - start.get()).max(1);
@@ -796,10 +1274,23 @@ impl EditorSession {
 
 #[cfg(test)]
 mod tests {
-    use super::{EditorSession, PreviewQuality};
-    use rhythm_core::time::{
-        BeatDivision, BpmMicros, DurationNs, GridOffsetNs, ProjectTimeNs, TempoMap, TimeSignature,
+    use super::{
+        EditorSession, KeyframeDragMember, PreviewQuality, ViewportPositionAction,
+        apply_viewport_position_actions,
     };
+    use rhythm_core::{
+        domain::Vec2,
+        ids::{KeyframeId, ObjectId},
+        property::AnimatableProperty,
+        time::{
+            BeatDivision, BpmMicros, DurationNs, GridOffsetNs, MusicalTick, ProjectTimeNs,
+            TempoMap, TimeSignature,
+        },
+    };
+
+    fn apply_audible_time(session: &mut EditorSession, duration: DurationNs, ns: i64) -> bool {
+        session.update_playhead_from_audio_clock(ProjectTimeNs::new(ns), duration)
+    }
 
     fn tempo_120() -> TempoMap {
         TempoMap::with_initial_tempo(
@@ -875,6 +1366,388 @@ mod tests {
     }
 
     #[test]
+    fn frame_selection_centers_object_aabb_and_respects_eight_percent_padding() {
+        let mut session = EditorSession::default();
+        let min = Vec2::new(500.0, 300.0).expect("min");
+        let max = Vec2::new(900.0, 500.0).expect("max");
+        assert!(session.frame_viewport_bounds(
+            (min, max),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        let zoom = session.viewport_zoom();
+        let pan = session.viewport_pan_points();
+        assert!(zoom > 1.0);
+        let projected_width = 400.0 * (1000.0 / 1920.0) * zoom;
+        let projected_height = 200.0 * (562.5 / 1080.0) * zoom;
+        assert!(projected_width <= 840.01);
+        assert!(projected_height <= 504.01);
+        let center_x = (700.0 - 960.0) * (1000.0 / 1920.0) * zoom + pan[0];
+        let center_y = (400.0 - 540.0) * (562.5 / 1080.0) * zoom + pan[1];
+        assert!(center_x.abs() < 0.01);
+        assert!(center_y.abs() < 0.01);
+        assert!(!session.frame_viewport_bounds(
+            (min, max),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        session.reset_viewport_camera();
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn frame_selection_rejects_degenerate_bounds_and_invalid_canvas() {
+        let mut session = EditorSession::default();
+        let a = Vec2::new(200.0, 100.0).expect("position");
+        let b = Vec2::new(300.0, 180.0).expect("position");
+        assert!(!session.frame_viewport_bounds(
+            (a, a),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (b, a),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (a, b),
+            [0.0, 600.0],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (a, b),
+            [1000.0, f32::NAN],
+            [1000.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (a, b),
+            [1000.0, 600.0],
+            [0.0, 562.5],
+            [1920, 1080],
+        ));
+        assert!(!session.frame_viewport_bounds(
+            (a, b),
+            [1000.0, 600.0],
+            [1000.0, 562.5],
+            [0, 1080],
+        ));
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+    }
+
+    #[test]
+    fn viewport_plain_click_replaces_and_clears_single_object_selection() {
+        let mut session = EditorSession::default();
+        let a = ObjectId::new(1).expect("id");
+        let b = ObjectId::new(2).expect("id");
+        assert_eq!(session.selected_object(), None);
+        session.select_viewport_object(Some(a));
+        assert_eq!(session.selected_object(), Some(a));
+        session.select_viewport_object(Some(b));
+        assert_eq!(session.selected_object(), Some(b));
+        session.select_viewport_object(None);
+        assert_eq!(session.selected_object(), None);
+    }
+
+    #[test]
+    fn viewport_marquee_replaces_or_toggles_and_preserves_order() {
+        let a = ObjectId::new(1).expect("id");
+        let b = ObjectId::new(2).expect("id");
+        let c = ObjectId::new(3).expect("id");
+        let mut session = EditorSession::default();
+        session.select_viewport_object(Some(a));
+        session.apply_viewport_box_selection([b, c, b], false);
+        assert_eq!(session.selected_objects(), &[b, c]);
+        assert_eq!(session.selected_object(), Some(c));
+
+        session.apply_viewport_box_selection([c, a], true);
+        assert_eq!(session.selected_objects(), &[b, a]);
+        assert_eq!(session.selected_object(), Some(a));
+        session.apply_viewport_box_selection([], false);
+        assert!(session.selected_objects().is_empty());
+    }
+
+    #[test]
+    fn viewport_zoom_anchors_pointer_and_keeps_selection_unchanged() {
+        let mut session = EditorSession::default();
+        let id = ObjectId::new(70).expect("object");
+        session.select_viewport_object(Some(id));
+        session.seek_paused(ProjectTimeNs::new(54321));
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert!(session.zoom_viewport_at(2.0, [100.0, -50.0]));
+        assert_eq!(session.viewport_zoom(), 2.0);
+        assert_eq!(session.viewport_pan_points(), [-100.0, 50.0]);
+
+        // Zoom out at the same cursor: the camera returns to its origin.
+        assert!(session.zoom_viewport_at(0.5, [100.0, -50.0]));
+        assert_eq!(session.viewport_zoom(), 1.0);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert_eq!(session.selected_object(), Some(id));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(54321));
+    }
+
+    #[test]
+    fn viewport_zoom_honors_existing_pan_and_cancels_during_middle_drag() {
+        let mut session = EditorSession::default();
+        session.begin_viewport_pan();
+        session.update_viewport_pan([40.0, -20.0]);
+        session.end_viewport_pan();
+        assert!(session.zoom_viewport_at(2.0, [0.0, 0.0]));
+        assert_eq!(session.viewport_pan_points(), [80.0, -40.0]);
+        session.begin_viewport_pan();
+        assert!(!session.zoom_viewport_at(2.0, [100.0, 50.0]));
+        assert_eq!(session.viewport_zoom(), 2.0);
+        session.end_viewport_pan();
+        session.reset_viewport_camera();
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert_eq!(session.viewport_zoom(), 1.0);
+    }
+
+    #[test]
+    fn viewport_zoom_clamps_scale_and_rejects_nonfinite_input() {
+        let mut session = EditorSession::default();
+        for factor in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(!session.zoom_viewport_at(factor, [0.0, 0.0]));
+        }
+        assert!(!session.zoom_viewport_at(2.0, [f32::NAN, 0.0]));
+        assert!(!session.zoom_viewport_at(2.0, [0.0, f32::INFINITY]));
+        assert!(session.zoom_viewport_at(f32::MAX, [0.0, 0.0]));
+        assert_eq!(session.viewport_zoom(), 16.0);
+        assert!(!session.zoom_viewport_at(2.0, [0.0, 0.0]));
+        assert!(session.zoom_viewport_at(0.00001, [0.0, 0.0]));
+        assert_eq!(session.viewport_zoom(), 0.125);
+        assert!(!session.zoom_viewport_at(0.5, [0.0, 0.0]));
+    }
+
+    #[test]
+    fn viewport_middle_pan_uses_total_drag_delta_without_drift() {
+        let mut session = EditorSession::default();
+        let selected = ObjectId::new(77).expect("valid ID");
+        session.select_viewport_object(Some(selected));
+        session.seek_paused(ProjectTimeNs::new(123_456));
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+
+        // No active middle drag means the camera is not affected.
+        session.update_viewport_pan([40.0, 25.0]);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+
+        session.begin_viewport_pan();
+        session.update_viewport_pan([40.0, -25.0]);
+        assert_eq!(session.viewport_pan_points(), [40.0, -25.0]);
+        session.update_viewport_pan([40.0, -25.0]); // Same total, no drift.
+        assert_eq!(session.viewport_pan_points(), [40.0, -25.0]);
+        session.update_viewport_pan([10.0, 15.0]);
+        assert_eq!(session.viewport_pan_points(), [10.0, 15.0]);
+        session.end_viewport_pan();
+
+        session.begin_viewport_pan();
+        session.update_viewport_pan([-5.0, 20.0]);
+        assert_eq!(session.viewport_pan_points(), [5.0, 35.0]);
+        session.end_viewport_pan();
+
+        assert_eq!(session.selected_object(), Some(selected));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(123_456));
+        session.reset_viewport_pan();
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        assert_eq!(session.selected_object(), Some(selected));
+    }
+
+    #[test]
+    fn viewport_pan_rejects_nonfinite_drag_and_bounds_extreme_values() {
+        let mut session = EditorSession::default();
+        session.begin_viewport_pan();
+        session.update_viewport_pan([f32::NAN, 1.0]);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        session.update_viewport_pan([f32::INFINITY, 1.0]);
+        assert_eq!(session.viewport_pan_points(), [0.0, 0.0]);
+        session.update_viewport_pan([f32::MAX, f32::MIN]);
+        assert_eq!(session.viewport_pan_points(), [1_000_000.0, -1_000_000.0]);
+        session.end_viewport_pan();
+        session.update_viewport_pan([0.0, 0.0]);
+        assert_eq!(session.viewport_pan_points(), [1_000_000.0, -1_000_000.0]);
+    }
+
+    #[test]
+    fn position_drag_computes_absolute_delta_and_can_be_cancelled() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_position_drag(v(20.0, 10.0), v(300.0, 200.0)));
+        assert!(!session.begin_viewport_position_drag(v(0.0, 0.0), v(0.0, 0.0)));
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0)),
+            Some(v(325.0, 195.0))
+        );
+        assert_eq!(
+            session.update_viewport_position_drag(v(45.0, 5.0)),
+            Some(v(325.0, 195.0))
+        );
+        assert!(session.cancel_viewport_position_drag());
+        assert!(!session.cancel_viewport_position_drag());
+        assert_eq!(session.update_viewport_position_drag(v(80.0, 90.0)), None);
+    }
+
+    #[test]
+    fn position_drag_multiple_updates_create_one_undo_entry() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::LinearRgba,
+            editor::ProjectEditor,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut project = Project::new(
+            "drag",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let id = ObjectId::new(1).expect("id");
+        project.composition.objects.push(Object {
+            id,
+            name: "Move".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(300.0, 200.0)),
+                Animated::new_static(v(1.0, 1.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(100.0, 50.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let current = |editor: &ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .position
+                .base_value()
+        };
+        assert!(
+            !apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Begin(id)])
+                .expect("begin")
+        );
+        assert!(
+            apply_viewport_position_actions(
+                &mut editor,
+                [ViewportPositionAction::Update(v(320.0, 210.0))]
+            )
+            .expect("update")
+        );
+        assert!(
+            apply_viewport_position_actions(
+                &mut editor,
+                [ViewportPositionAction::Update(v(340.0, 230.0))]
+            )
+            .expect("update")
+        );
+        assert_eq!(editor.history_len(), 0);
+        assert!(
+            apply_viewport_position_actions(&mut editor, [ViewportPositionAction::Commit])
+                .expect("commit")
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(current(&editor), v(340.0, 230.0));
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(current(&editor), v(300.0, 200.0));
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(current(&editor), v(340.0, 230.0));
+
+        apply_viewport_position_actions(
+            &mut editor,
+            [
+                ViewportPositionAction::Begin(id),
+                ViewportPositionAction::Update(v(700.0, 700.0)),
+            ],
+        )
+        .expect("next drag");
+        assert!(editor.cancel_transaction().expect("Escape"));
+        assert_eq!(current(&editor), v(340.0, 230.0));
+        assert_eq!(editor.history_len(), 1);
+    }
+
+    #[test]
+    fn viewport_box_drag_state_tracks_coordinates_and_clears_on_commit() {
+        let mut session = EditorSession::default();
+        let start = rhythm_core::domain::Vec2::new(10.0, 20.0).expect("point");
+        let end = rhythm_core::domain::Vec2::new(50.0, 80.0).expect("point");
+        assert!(session.viewport_box_selection().is_none());
+        session.begin_viewport_box_selection(start, true);
+        session.update_viewport_box_selection(end);
+        assert_eq!(session.viewport_box_selection(), Some((start, end, true)));
+        assert_eq!(
+            session.take_viewport_box_selection(),
+            Some((start, end, true))
+        );
+        assert!(session.viewport_box_selection().is_none());
+    }
+
+    #[test]
+    fn viewport_ctrl_toggle_keeps_other_ids_and_moves_primary_predictably() {
+        let mut session = EditorSession::default();
+        let a = ObjectId::new(11).expect("id");
+        let b = ObjectId::new(7).expect("id");
+        let c = ObjectId::new(9).expect("id");
+
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        session.toggle_viewport_object(Some(c));
+        assert_eq!(session.selected_objects(), &[a, b, c]);
+        assert_eq!(session.selected_objects().len(), 3);
+        assert_eq!(session.selected_object(), Some(c));
+        for id in [a, b, c] {
+            assert!(session.is_object_selected(id));
+        }
+
+        // Removing the primary leaves the most recently selected survivor.
+        session.toggle_viewport_object(Some(c));
+        assert_eq!(session.selected_objects(), &[a, b]);
+        assert_eq!(session.selected_object(), Some(b));
+        session.toggle_viewport_object(Some(a));
+        assert_eq!(session.selected_objects(), &[b]);
+        assert_eq!(session.selected_object(), Some(b));
+        session.toggle_viewport_object(Some(b));
+        assert!(session.selected_objects().is_empty());
+        assert_eq!(session.selected_object(), None);
+    }
+
+    #[test]
+    fn viewport_ctrl_click_empty_space_is_noop_and_plain_click_replaces() {
+        let mut session = EditorSession::default();
+        let a = ObjectId::new(2).expect("id");
+        let b = ObjectId::new(3).expect("id");
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        session.toggle_viewport_object(None);
+        assert_eq!(session.selected_objects(), &[a, b]);
+
+        session.select_viewport_object(Some(b));
+        assert_eq!(session.selected_objects(), &[b]);
+        session.toggle_viewport_object(Some(a));
+        assert_eq!(session.selected_objects(), &[b, a]);
+        session.select_viewport_object(None);
+        assert!(session.selected_objects().is_empty());
+        session.toggle_viewport_object(None);
+        assert!(session.selected_objects().is_empty());
+    }
+
+    #[test]
     fn single_and_ctrl_toggle_keyframe_selection_use_stable_ids() {
         let first = rhythm_core::ids::KeyframeId::new(11).expect("key id");
         let second = rhythm_core::ids::KeyframeId::new(12).expect("key id");
@@ -911,6 +1784,142 @@ mod tests {
                 ProjectTimeNs::new(7_500_000_000),
             )
         );
+    }
+
+    #[test]
+    fn follow_playhead_defaults_off_and_never_follows_manual_seeks() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(!session.follow_playhead_enabled());
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+
+        assert!(apply_audible_time(&mut session, duration, 3_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        session.set_follow_playhead_enabled(true);
+        session.seek_paused(ProjectTimeNs::new(7_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        // The next authoritative audio tick, not the paused seek, is allowed to follow.
+        assert!(apply_audible_time(&mut session, duration, 7_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(5_400_000_000),
+                ProjectTimeNs::new(7_400_000_000),
+            )
+        );
+    }
+
+    #[test]
+    fn follow_playhead_moves_only_near_edges_and_preserves_zoom_span() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+        session.set_follow_playhead_enabled(true);
+
+        assert!(apply_audible_time(&mut session, duration, 1_500_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+
+        assert!(apply_audible_time(&mut session, duration, 1_800_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(200_000_000),
+                ProjectTimeNs::new(2_200_000_000),
+            )
+        );
+        assert!(apply_audible_time(&mut session, duration, 1_900_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(200_000_000),
+                ProjectTimeNs::new(2_200_000_000),
+            )
+        );
+
+        // Seeking to an earlier audible position shifts left without re-centering.
+        assert!(apply_audible_time(&mut session, duration, 100_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(2_000_000_000))
+        );
+        assert!(!apply_audible_time(&mut session, duration, 100_000_000));
+    }
+
+    #[test]
+    fn manual_pan_disables_follow_until_user_reenables_it() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(0), 5.0));
+        session.set_follow_playhead_enabled(true);
+        assert!(apply_audible_time(&mut session, duration, 1_800_000_000));
+
+        assert!(session.pan_timeline_points(duration, -200.0, 1_000.0));
+        assert!(!session.follow_playhead_enabled());
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(600_000_000),
+                ProjectTimeNs::new(2_600_000_000),
+            )
+        );
+        assert!(apply_audible_time(&mut session, duration, 2_900_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(600_000_000),
+                ProjectTimeNs::new(2_600_000_000),
+            )
+        );
+        session.set_follow_playhead_enabled(true);
+        assert!(apply_audible_time(&mut session, duration, 2_900_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(1_300_000_000),
+                ProjectTimeNs::new(3_300_000_000),
+            )
+        );
+
+        // A real pan attempt disables follow even at a clamped/full-width boundary.
+        assert!(session.pan_timeline_points(duration, -1_000_000.0, 1_000.0));
+        session.set_follow_playhead_enabled(true);
+        assert!(!session.pan_timeline_points(duration, -1_000.0, 1_000.0));
+        assert!(!session.follow_playhead_enabled());
+    }
+
+    #[test]
+    fn playback_follow_clamps_to_project_bounds_without_zooming() {
+        let duration = DurationNs::new(10_000_000_000);
+        let mut session = EditorSession::default();
+        session.set_follow_playhead_enabled(true);
+        assert!(apply_audible_time(&mut session, duration, 15_000_000_000));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(10_000_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (ProjectTimeNs::new(0), ProjectTimeNs::new(10_000_000_000))
+        );
+
+        assert!(session.zoom_timeline(duration, ProjectTimeNs::new(10_000_000_000), 5.0,));
+        assert!(apply_audible_time(&mut session, duration, 9_990_000_000));
+        assert_eq!(
+            session.timeline_range(duration),
+            (
+                ProjectTimeNs::new(8_000_000_000),
+                ProjectTimeNs::new(10_000_000_000),
+            )
+        );
+        assert!(session.follow_playhead_enabled());
     }
 
     #[test]
@@ -1005,6 +2014,400 @@ mod tests {
         assert!(pasted_first.id.get() > second.get());
         assert!(session.is_keyframe_selected(pasted_first.id));
         assert!(session.is_keyframe_selected(pasted_second.id));
+    }
+
+    #[test]
+    fn duplicate_preserves_multi_property_pattern_and_selects_fresh_ids() {
+        use rhythm_core::{
+            animation::Interpolation,
+            editor::PropertyKeyframeDraft,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let source_ids = editor
+            .insert_property_keyframes(vec![
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Opacity,
+                    tick: MusicalTick::new(0),
+                    value: PropertyValue::Scalar(0.25),
+                    interpolation: Interpolation::Hold,
+                },
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Opacity,
+                    tick: MusicalTick::new(480),
+                    value: PropertyValue::Scalar(0.75),
+                    interpolation: Interpolation::Linear,
+                },
+                PropertyKeyframeDraft {
+                    object_id,
+                    property: AnimatableProperty::Rotation,
+                    tick: MusicalTick::new(240),
+                    value: PropertyValue::Scalar(30.0),
+                    interpolation: Interpolation::Linear,
+                },
+            ])
+            .expect("source keys");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection(source_ids.iter().copied());
+        let history_before = editor.history_len();
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
+        assert_eq!(editor.history_len(), history_before + 1);
+
+        let duplicate_ids = session.selected_keyframe_ids();
+        assert_eq!(duplicate_ids.len(), 3);
+        assert!(duplicate_ids.iter().all(|id| !source_ids.contains(id)));
+
+        for (property, tick, value, interpolation) in [
+            (
+                AnimatableProperty::Opacity,
+                720,
+                PropertyValue::Scalar(0.25),
+                Interpolation::Hold,
+            ),
+            (
+                AnimatableProperty::Opacity,
+                1_200,
+                PropertyValue::Scalar(0.75),
+                Interpolation::Linear,
+            ),
+            (
+                AnimatableProperty::Rotation,
+                960,
+                PropertyValue::Scalar(30.0),
+                Interpolation::Linear,
+            ),
+        ] {
+            let copied = property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                property,
+                MusicalTick::new(tick),
+            )
+            .expect("property")
+            .expect("duplicate key");
+            assert_eq!(copied.value, value);
+            assert_eq!(copied.interpolation, interpolation);
+            assert!(session.is_keyframe_selected(copied.id));
+        }
+
+        for (property, tick) in [
+            (AnimatableProperty::Opacity, 0),
+            (AnimatableProperty::Opacity, 480),
+            (AnimatableProperty::Rotation, 240),
+        ] {
+            assert!(
+                property_keyframe_at_tick(
+                    editor.project(),
+                    object_id,
+                    property,
+                    MusicalTick::new(tick),
+                )
+                .expect("property")
+                .is_some()
+            );
+        }
+
+        assert_eq!(editor.undo(), Ok(true));
+        for tick in [720, 1_200] {
+            assert!(
+                property_keyframe_at_tick(
+                    editor.project(),
+                    object_id,
+                    AnimatableProperty::Opacity,
+                    MusicalTick::new(tick),
+                )
+                .expect("property")
+                .is_none()
+            );
+        }
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+            )
+            .expect("property")
+            .expect("restored copy")
+            .interpolation,
+            Interpolation::Hold
+        );
+    }
+
+    #[test]
+    fn duplicate_collision_replaces_target_and_undo_restores_it() {
+        use rhythm_core::{
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.2),
+            )
+            .expect("insert")
+            .expect("first");
+        let second = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(0.4),
+            )
+            .expect("insert")
+            .expect("second");
+        let occupied_id = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+                PropertyValue::Scalar(0.9),
+            )
+            .expect("insert")
+            .expect("occupied");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, second]);
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(true));
+
+        let collided = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(720),
+        )
+        .expect("property")
+        .expect("new key");
+        assert_eq!(collided.value, PropertyValue::Scalar(0.2));
+        assert_ne!(collided.id, occupied_id);
+        assert!(session.is_keyframe_selected(collided.id));
+
+        assert_eq!(editor.undo(), Ok(true));
+        let restored = property_keyframe_at_tick(
+            editor.project(),
+            object_id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(720),
+        )
+        .expect("property")
+        .expect("restored collision");
+        assert_eq!(restored.id, occupied_id);
+        assert_eq!(restored.value, PropertyValue::Scalar(0.9));
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(
+            property_keyframe_at_tick(
+                editor.project(),
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(720),
+            )
+            .expect("property")
+            .expect("redo collision")
+            .id,
+            collided.id
+        );
+    }
+
+    #[test]
+    fn duplicate_empty_selection_and_overflow_do_not_mutate_project() {
+        use rhythm_core::{
+            editor::EditError,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue},
+            time::MusicalTick,
+        };
+
+        let object_id = ObjectId::new(1).expect("object id");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+        assert_eq!(session.duplicate_selected_keyframes(&mut editor), Ok(false));
+
+        let key_id = editor
+            .create_property_keyframe(
+                object_id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(i64::MAX),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("key");
+        session.select_only_keyframe(key_id);
+        let project_before = editor.project().clone();
+        let history_before = editor.history_len();
+        assert_eq!(
+            session.duplicate_selected_keyframes(&mut editor),
+            Err(EditError::HistoryInvariant("duplicate tick overflow"))
+        );
+        assert_eq!(editor.project(), &project_before);
+        assert_eq!(editor.history_len(), history_before);
+        assert!(session.is_keyframe_selected(key_id));
+    }
+
+    #[test]
+    fn easing_preset_changes_selected_outgoing_segments_as_one_undo_entry() {
+        use rhythm_core::{
+            animation::{EasingPreset, Interpolation},
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick},
+            time::MusicalTick,
+        };
+
+        let object = ObjectId::new(1).expect("object");
+        let mut editor = editor_with_object_for_drag();
+        let first = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.0),
+            )
+            .expect("insert")
+            .expect("first");
+        let middle = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("middle");
+        let last = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(480),
+                PropertyValue::Scalar(1.0),
+            )
+            .expect("insert")
+            .expect("last");
+        let other = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Rotation,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.0),
+            )
+            .expect("insert")
+            .expect("other");
+        let other_last = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Rotation,
+                MusicalTick::new(960),
+                PropertyValue::Scalar(90.0),
+            )
+            .expect("insert")
+            .expect("other last");
+
+        let mut session = EditorSession::default();
+        session.replace_keyframe_selection([first, middle, last, other, other_last]);
+        let before = editor.history_len();
+        session.request_selected_keyframe_easing(EasingPreset::EaseInOut);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(editor.history_len(), before + 1);
+        assert_eq!(session.selected_keyframe_count(), 5);
+
+        let get = |editor: &rhythm_core::editor::ProjectEditor,
+                   property: AnimatableProperty,
+                   tick: i64| {
+            property_keyframe_at_tick(editor.project(), object, property, MusicalTick::new(tick))
+                .expect("property")
+                .expect("keyframe")
+                .interpolation
+        };
+
+        let ease = EasingPreset::EaseInOut.interpolation();
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 0), ease);
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 240), ease);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 480),
+            Interpolation::Linear
+        );
+        assert_eq!(get(&editor, AnimatableProperty::Rotation, 0), ease);
+        assert_eq!(
+            get(&editor, AnimatableProperty::Rotation, 960),
+            Interpolation::Linear
+        );
+
+        assert_eq!(editor.undo(), Ok(true));
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Linear
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Rotation, 0),
+            Interpolation::Linear
+        );
+        assert_eq!(editor.redo(), Ok(true));
+        assert_eq!(get(&editor, AnimatableProperty::Opacity, 240), ease);
+
+        session.request_selected_keyframe_easing(EasingPreset::Hold);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Hold
+        );
+        session.request_selected_keyframe_easing(EasingPreset::Linear);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(true)
+        );
+        assert_eq!(
+            get(&editor, AnimatableProperty::Opacity, 0),
+            Interpolation::Linear
+        );
+    }
+
+    #[test]
+    fn easing_edit_on_only_terminal_key_is_noop() {
+        use rhythm_core::{
+            animation::EasingPreset,
+            ids::ObjectId,
+            property::{AnimatableProperty, PropertyValue},
+            time::MusicalTick,
+        };
+
+        let object = ObjectId::new(1).expect("object");
+        let mut editor = editor_with_object_for_drag();
+        let only_id = editor
+            .create_property_keyframe(
+                object,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("insert")
+            .expect("id");
+        let mut session = EditorSession::default();
+        session.select_only_keyframe(only_id);
+        let history = editor.history_len();
+        session.request_selected_keyframe_easing(EasingPreset::EaseOut);
+        assert_eq!(
+            session.commit_pending_keyframe_easing(&mut editor),
+            Ok(false)
+        );
+        assert_eq!(editor.history_len(), history);
     }
 
     #[test]

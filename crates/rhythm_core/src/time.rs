@@ -223,7 +223,7 @@ fn grid_bound_tick_position(
         scaled.floor() * step
     };
 
-    if snapped < -9_223_372_036_854_775_808.0 || snapped >= 9_223_372_036_854_775_808.0 {
+    if snapped < i64::MIN as f64 || snapped >= 9_223_372_036_854_775_808.0 {
         return Err(TimeConversionError::Overflow);
     }
 
@@ -249,7 +249,7 @@ pub fn snap_tick_position_to_grid(
         upper
     };
 
-    if snapped < -9_223_372_036_854_775_808.0 || snapped >= 9_223_372_036_854_775_808.0 {
+    if snapped < i64::MIN as f64 || snapped >= 9_223_372_036_854_775_808.0 {
         return Err(TimeConversionError::Overflow);
     }
 

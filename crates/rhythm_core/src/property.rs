@@ -176,15 +176,9 @@ pub fn property_keyframe_at_tick(
     tick: MusicalTick,
 ) -> Result<Option<PropertyKeyframe>, PropertyAccessError> {
     Ok(match animated_ref(project, object_id, property)? {
-        AnimatedRef::Scalar(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(|keyframe| pack_scalar_keyframe(keyframe)),
-        AnimatedRef::Vec2(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(|keyframe| pack_vec2_keyframe(keyframe)),
-        AnimatedRef::Color(animated) => animated
-            .keyframe_at_tick(tick)
-            .map(|keyframe| pack_color_keyframe(keyframe)),
+        AnimatedRef::Scalar(animated) => animated.keyframe_at_tick(tick).map(pack_scalar_keyframe),
+        AnimatedRef::Vec2(animated) => animated.keyframe_at_tick(tick).map(pack_vec2_keyframe),
+        AnimatedRef::Color(animated) => animated.keyframe_at_tick(tick).map(pack_color_keyframe),
     })
 }
 
@@ -385,6 +379,38 @@ pub(crate) fn insert_property_keyframe(
             Err(PropertyAccessError::DuplicateTick(tick))
         }
     }
+}
+
+/// Returns whether a keyframe owns a following segment on its property.
+pub fn property_keyframe_has_successor(
+    project: &Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    tick: MusicalTick,
+) -> Result<bool, PropertyAccessError> {
+    Ok(match animated_ref(project, object_id, property)? {
+        AnimatedRef::Scalar(animated) => animated.has_keyframe_after(tick),
+        AnimatedRef::Vec2(animated) => animated.has_keyframe_after(tick),
+        AnimatedRef::Color(animated) => animated.has_keyframe_after(tick),
+    })
+}
+
+pub(crate) fn set_property_keyframe_interpolation(
+    project: &mut Project,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    id: KeyframeId,
+    interpolation: Interpolation,
+) -> Result<Option<Interpolation>, PropertyAccessError> {
+    Ok(match animated_mut(project, object_id, property)? {
+        AnimatedMut::Scalar(animated) => {
+            animated.set_keyframe_interpolation_by_id(id, interpolation)
+        }
+        AnimatedMut::Vec2(animated) => animated.set_keyframe_interpolation_by_id(id, interpolation),
+        AnimatedMut::Color(animated) => {
+            animated.set_keyframe_interpolation_by_id(id, interpolation)
+        }
+    })
 }
 
 pub(crate) fn remove_property_keyframe_at_tick(
@@ -686,7 +712,7 @@ fn eased_progress(interpolation: Interpolation, progress: f64) -> f64 {
     }
 }
 
-fn evaluate_scalar(animated: &Animated<f32>, tick: f64) -> f32 {
+pub(crate) fn evaluate_scalar(animated: &Animated<f32>, tick: f64) -> f32 {
     if animated.keyframes().is_empty() {
         return *animated.base_value();
     }
@@ -704,7 +730,7 @@ fn evaluate_scalar(animated: &Animated<f32>, tick: f64) -> f32 {
     )
 }
 
-fn evaluate_vec2(animated: &Animated<Vec2>, tick: f64) -> Vec2 {
+pub(crate) fn evaluate_vec2(animated: &Animated<Vec2>, tick: f64) -> Vec2 {
     if animated.keyframes().is_empty() {
         return *animated.base_value();
     }

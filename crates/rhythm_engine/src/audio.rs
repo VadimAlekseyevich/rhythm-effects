@@ -994,10 +994,28 @@ fn resample_decoded_audio(
         .process_all(&input, frame_count, None)
         .map_err(|error| AudioDecodeError::Resample(error.to_string()))?;
 
+    // Rubato's FFT block processing can return one extra endpoint frame.
+    // Playback duration must follow the input frame count and sample-rate
+    // ratio, not the implementation-specific padded FFT output length.
+    let target_frames = (frame_count as u128 * u128::from(output_sample_rate)
+        + u128::from(audio.sample_rate) / 2)
+        / u128::from(audio.sample_rate);
+    let target_samples = usize::try_from(target_frames)
+        .ok()
+        .and_then(|frames| frames.checked_mul(channels))
+        .ok_or(AudioDecodeError::DurationOverflow)?;
+    let mut samples = output.take_data();
+    if samples.len() < target_samples {
+        return Err(AudioDecodeError::Resample(
+            "resampler returned fewer samples than required".to_owned(),
+        ));
+    }
+    samples.truncate(target_samples);
+
     Ok(DecodedAudio {
         sample_rate: output_sample_rate,
         channel_layout: audio.channel_layout,
-        interleaved_f32: output.take_data(),
+        interleaved_f32: samples,
     })
 }
 
@@ -1060,7 +1078,8 @@ mod tests {
     };
 
     use super::{
-        AudioChannelLayout, AudioDecodeError, DecodedAudio, decode_audio_file, probe_audio_file,
+        AudioChannelLayout, AudioDecodeError, DecodedAudio, ProjectTimeNs, decode_audio_file,
+        probe_audio_file,
     };
 
     fn write_pcm16_wav(path: &Path, sample_rate: u32, channels: u16, samples: &[i16]) {
