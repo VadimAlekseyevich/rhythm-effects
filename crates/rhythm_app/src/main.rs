@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use editor_session::{EditorSession, apply_viewport_position_actions};
-use editor_ui::{DiagnosticsView, EditorUiActions};
+use editor_ui::{DiagnosticsView, EditorUiActions, apply_inspector_position_edits};
 use gpu::GpuContext;
 use rhythm_core::{
     APP_NAME,
@@ -389,6 +389,16 @@ impl ApplicationHandler for RhythmApp {
                             );
                         }
                     });
+                    if !ui_actions.inspector_position_edits.is_empty() {
+                        match apply_inspector_position_edits(
+                            &mut self.project_editor,
+                            ui_actions.inspector_position_edits,
+                        ) {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => warn!(?error, "Inspector Position edit failed"),
+                        }
+                    }
                     if !ui_actions.viewport_position_actions.is_empty() {
                         match apply_viewport_position_actions(
                             &mut self.project_editor,
@@ -400,6 +410,19 @@ impl ApplicationHandler for RhythmApp {
                                 self.session.cancel_viewport_position_drag();
                                 warn!(?error, "viewport Position drag failed and was cancelled");
                             }
+                        }
+                    }
+                    if ui_actions.undo_requested {
+                        match self.project_editor.undo() {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => warn!(?error, "Undo failed"),
+                        }
+                    } else if ui_actions.redo_requested {
+                        match self.project_editor.redo() {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => warn!(?error, "Redo failed"),
                         }
                     }
                     if ui_actions.add_rectangle_requested {
