@@ -325,6 +325,68 @@ mod tests {
     }
 
     #[test]
+    fn project_editor_position_drag_changes_creative_geometry_and_undo_restores_it() {
+        use crate::scene_eval::evaluate_scene;
+        use rhythm_core::{
+            animation::Animated,
+            editor::ProjectEditor,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, ProjectTimeNs, TempoMap},
+        };
+
+        let mut project = Project::new(
+            "Live preview integration",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        let id = ObjectId::new(1).expect("id");
+        project.composition.objects.push(Object {
+            id,
+            name: "Visible rectangle".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(100.0, 200.0)),
+                Animated::new_static(v(1.0, 1.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(20.0, 10.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        let displayed = |editor: &ProjectEditor| {
+            let evaluated =
+                evaluate_scene(editor.project(), ProjectTimeNs::new(0)).expect("static scene");
+            scene_vertices(&evaluated, [1920, 1080])
+        };
+        let original = displayed(&editor);
+        assert_eq!(original.len(), 6);
+        editor.begin_position_transaction(id).expect("begin");
+        editor
+            .update_position_transaction(v(300.0, 400.0))
+            .expect("live move");
+        let moved = displayed(&editor);
+        assert_ne!(original[0].ndc, moved[0].ndc);
+        assert_eq!(editor.history_len(), 0);
+        assert!(editor.commit_transaction().expect("commit"));
+        assert_eq!(editor.history_len(), 1);
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(displayed(&editor), original);
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(displayed(&editor), moved);
+    }
+
+    #[test]
     fn background_alpha_is_premultiplied_in_linear_light() {
         let c = clear_color(LinearRgba::new(0.8, 0.2, 0.0, 0.5).expect("color"));
         assert!((c.r - 0.4).abs() < 1e-6);
