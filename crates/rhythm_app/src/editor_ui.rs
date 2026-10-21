@@ -369,8 +369,10 @@ struct InspectorNumericDraft {
     dirty: bool,
 }
 
-fn inspector_position_id(ui: &egui::Ui, object_id: ObjectId, axis: PositionAxis) -> egui::Id {
-    ui.make_persistent_id(("inspector_position", object_id.get(), axis.label()))
+fn inspector_position_id(object_id: ObjectId, axis: PositionAxis) -> egui::Id {
+    // Stable across different nested egui panels/horizontal layouts, so a
+    // selection change can flush the same draft that TextEdit produced.
+    egui::Id::new(("inspector_position", object_id.get(), axis.label()))
 }
 
 fn committed_number(draft: &InspectorNumericDraft) -> Option<f32> {
@@ -428,7 +430,7 @@ fn draw_inspector_position_field(
     current: f32,
     actions: &mut EditorUiActions,
 ) {
-    let id = inspector_position_id(ui, object_id, axis);
+    let id = inspector_position_id(object_id, axis);
     let mut draft = ui
         .ctx()
         .data(|data| data.get_temp::<InspectorNumericDraft>(id))
@@ -481,7 +483,7 @@ fn flush_inspector_draft_on_selection_change(
     selected_object: Option<ObjectId>,
     actions: &mut EditorUiActions,
 ) {
-    let marker = ui.make_persistent_id("last_inspector_position_object");
+    let marker = egui::Id::new("last_inspector_position_object");
     let previous = ui.ctx().data(|data| data.get_temp::<ObjectId>(marker));
     if previous == selected_object {
         return;
@@ -493,7 +495,7 @@ fn flush_inspector_draft_on_selection_change(
                 && object.transform.position.keyframes().is_empty()
         });
         for axis in [PositionAxis::X, PositionAxis::Y] {
-            let id = inspector_position_id(ui, old_id, axis);
+            let id = inspector_position_id(old_id, axis);
             let draft = ui.ctx().data_mut(|data| {
                 let draft = data.get_temp::<InspectorNumericDraft>(id);
                 data.remove::<InspectorNumericDraft>(id);
