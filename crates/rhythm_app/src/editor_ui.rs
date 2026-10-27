@@ -8,7 +8,7 @@ use rhythm_core::{
     hit_test::{OutlineKind, object_outline, pick_topmost_object, select_objects_in_box},
     ids::ObjectId,
     project::{Object, ObjectContent, Project},
-    property::{evaluate_scalar, evaluate_vec2},
+    property::{AnimatableProperty, PropertyValue, evaluate_property_at_tick},
     time::ProjectTimeNs,
 };
 
@@ -230,7 +230,7 @@ fn selected_scale_corner_hit(
     }
     let object = editable_scale_object(project, session)?;
     let geometry = object_outline(object, continuous_tick)?;
-    let anchor = evaluate_vec2(&object.transform.anchor, continuous_tick);
+    let anchor = scale_anchor(project, object, continuous_tick)?;
     let size = [
         project.settings.composition_width,
         project.settings.composition_height,
@@ -252,10 +252,28 @@ fn selected_scale_corner_hit(
     nearest.map(|(corner, _)| (object.id, corner))
 }
 
-fn scale_shape_size(object: &Object, continuous_tick: f64) -> Option<Vec2> {
-    match &object.content {
-        ObjectContent::Rectangle(shape) => Some(evaluate_vec2(&shape.size, continuous_tick)),
-        ObjectContent::Ellipse(shape) => Some(evaluate_vec2(&shape.size, continuous_tick)),
+fn scale_anchor(project: &Project, object: &Object, tick: f64) -> Option<Vec2> {
+    match evaluate_property_at_tick(project, object.id, AnimatableProperty::Anchor, tick).ok()? {
+        PropertyValue::Vec2(anchor) => Some(anchor),
+        _ => None,
+    }
+}
+
+fn scale_rotation(project: &Project, object: &Object, tick: f64) -> Option<f32> {
+    match evaluate_property_at_tick(project, object.id, AnimatableProperty::Rotation, tick).ok()? {
+        PropertyValue::Scalar(rotation) => Some(rotation),
+        _ => None,
+    }
+}
+
+fn scale_shape_size(project: &Project, object: &Object, tick: f64) -> Option<Vec2> {
+    let property = match object.content {
+        ObjectContent::Rectangle(_) => AnimatableProperty::RectangleSize,
+        ObjectContent::Ellipse(_) => AnimatableProperty::EllipseSize,
+        _ => return None,
+    };
+    match evaluate_property_at_tick(project, object.id, property, tick).ok()? {
+        PropertyValue::Vec2(size) => Some(size),
         _ => None,
     }
 }
@@ -303,8 +321,9 @@ fn draw_selection_overlays(
 
         // Corner handles follow local transformed geometry, not the AABB.
         // Only one visible, unlocked, static-scale shape may be resized.
-        if editable_scale_object(project, session).is_some_and(|shape| shape.id == object.id) {
-            let anchor = evaluate_vec2(&object.transform.anchor, continuous_tick);
+        if editable_scale_object(project, session).is_some_and(|shape| shape.id == object.id)
+            && let Some(anchor) = scale_anchor(project, object, continuous_tick)
+        {
             for corner in SCALE_CORNERS {
                 if corner == [anchor.x(), anchor.y()] {
                     continue;
@@ -972,19 +991,18 @@ pub fn draw_editor_shell(
                         };
                         if let Some((id, corner)) = scale_hit {
                             if let Some(object) = editable_scale_object(project, session)
-                                && let Some(size) = scale_shape_size(object, tick)
-                            {
-                                let anchor = evaluate_vec2(&object.transform.anchor, tick);
-                                let rotation =
-                                    evaluate_scalar(&object.transform.rotation_degrees, tick);
-                                if session.begin_viewport_scale_drag(
+                                && let Some(size) = scale_shape_size(project, object, tick)
+                                && let Some(anchor) = scale_anchor(project, object, tick)
+                                && let Some(rotation) = scale_rotation(project, object, tick)
+                                && session.begin_viewport_scale_drag(
                                     start,
                                     *object.transform.scale.base_value(),
                                     size,
                                     anchor,
                                     rotation,
                                     corner,
-                                ) {
+                                )
+                            {
                                     actions
                                         .viewport_scale_actions
                                         .push(ViewportScaleAction::Begin(id));
