@@ -80,10 +80,55 @@ pub enum ViewportPositionAction {
     Commit,
 }
 
+/// Static Scale updates share one core transaction for an entire corner drag.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewportScaleAction {
+    Begin(ObjectId),
+    Update(Vec2),
+    Commit,
+}
+
+/// Like Position drag, dispatch every live update through ProjectEditor.
+pub fn apply_viewport_scale_actions(
+    editor: &mut ProjectEditor,
+    actions: impl IntoIterator<Item = ViewportScaleAction>,
+) -> Result<bool, EditError> {
+    let mut repaint = false;
+    for action in actions {
+        let result = match action {
+            ViewportScaleAction::Begin(id) => editor.begin_scale_transaction(id).map(|()| false),
+            ViewportScaleAction::Update(scale) => {
+                editor.update_scale_transaction(scale).map(|()| true)
+            }
+            ViewportScaleAction::Commit => editor.commit_transaction(),
+        };
+        match result {
+            Ok(changed) => repaint |= changed,
+            Err(error) => {
+                let _ = editor.cancel_transaction();
+                return Err(error);
+            }
+        }
+    }
+    Ok(repaint)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ViewportPositionDrag {
     start: Vec2,
     base_position: Vec2,
+}
+
+/// Mouse-down geometry is fixed while the object is rescaled. The inverse
+/// rotation converts composition-space pointer delta into local X/Y deltas,
+/// so rotation, negative Scale, and a noncentral Anchor behave consistently.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportScaleDrag {
+    start: Vec2,
+    base_scale: Vec2,
+    local_corner: [f64; 2],
+    sin: f64,
+    cos: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -150,6 +195,7 @@ pub struct EditorSession {
     selected_objects: Vec<ObjectId>,
     viewport_box_selection: Option<ViewportBoxSelection>,
     viewport_position_drag: Option<ViewportPositionDrag>,
+    viewport_scale_drag: Option<ViewportScaleDrag>,
     viewport_pan_points: [f32; 2],
     viewport_zoom: f32,
     viewport_pan_origin: Option<[f32; 2]>,
@@ -173,6 +219,7 @@ impl Default for EditorSession {
             selected_objects: Vec::new(),
             viewport_box_selection: None,
             viewport_position_drag: None,
+            viewport_scale_drag: None,
             viewport_pan_points: [0.0, 0.0],
             viewport_zoom: 1.0,
             viewport_pan_origin: None,
@@ -229,7 +276,7 @@ impl EditorSession {
     /// Absolute position updates are computed from the original mouse-down
     /// composition point, preventing frame-to-frame drift.
     pub fn begin_viewport_position_drag(&mut self, start: Vec2, base_position: Vec2) -> bool {
-        if self.viewport_position_drag.is_some() {
+        if self.viewport_position_drag.is_some() || self.viewport_scale_drag.is_some() {
             return false;
         }
         self.viewport_position_drag = Some(ViewportPositionDrag {
@@ -267,6 +314,86 @@ impl EditorSession {
     #[must_use]
     pub const fn viewport_position_drag_active(&self) -> bool {
         self.viewport_position_drag.is_some()
+    }
+
+    /// A corner is expressed as local normalized coordinates (0 or 1).
+    /// Axes whose corner lies exactly on the Anchor cannot be resized from
+    /// this handle: preserve that component rather than divide by zero.
+    pub fn begin_viewport_scale_drag(
+        &mut self,
+        start: Vec2,
+        base_scale: Vec2,
+        size: Vec2,
+        anchor: Vec2,
+        rotation_degrees: f32,
+        corner: [f32; 2],
+    ) -> bool {
+        if self.viewport_scale_drag.is_some()
+            || self.viewport_position_drag.is_some()
+            || !rotation_degrees.is_finite()
+            || size.x() <= 0.0
+            || size.y() <= 0.0
+            || corner.iter().any(|c| *c != 0.0 && *c != 1.0)
+        {
+            return false;
+        }
+        let local_corner = [
+            f64::from(corner[0] - anchor.x()) * f64::from(size.x()),
+            f64::from(corner[1] - anchor.y()) * f64::from(size.y()),
+        ];
+        if local_corner == [0.0, 0.0] {
+            return false;
+        }
+        let (sin, cos) = f64::from(rotation_degrees).to_radians().sin_cos();
+        self.viewport_scale_drag = Some(ViewportScaleDrag {
+            start,
+            base_scale,
+            local_corner,
+            sin,
+            cos,
+        });
+        true
+    }
+
+    /// Absolute total pointer delta, not a frame-relative change.
+    #[must_use]
+    pub fn update_viewport_scale_drag(&self, pointer: Vec2) -> Option<Vec2> {
+        let drag = self.viewport_scale_drag?;
+        let dx = f64::from(pointer.x()) - f64::from(drag.start.x());
+        let dy = f64::from(pointer.y()) - f64::from(drag.start.y());
+        let local_dx = drag.cos * dx + drag.sin * dy;
+        let local_dy = -drag.sin * dx + drag.cos * dy;
+        let x = if drag.local_corner[0] == 0.0 {
+            f64::from(drag.base_scale.x())
+        } else {
+            f64::from(drag.base_scale.x()) + local_dx / drag.local_corner[0]
+        };
+        let y = if drag.local_corner[1] == 0.0 {
+            f64::from(drag.base_scale.y())
+        } else {
+            f64::from(drag.base_scale.y()) + local_dy / drag.local_corner[1]
+        };
+        if !x.is_finite()
+            || !y.is_finite()
+            || x.abs() > f64::from(f32::MAX)
+            || y.abs() > f64::from(f32::MAX)
+        {
+            return None;
+        }
+        Vec2::new(x as f32, y as f32).ok()
+    }
+
+    pub fn finish_viewport_scale_drag(&mut self) -> bool {
+        self.viewport_scale_drag.take().is_some()
+    }
+
+    pub fn cancel_viewport_scale_drag(&mut self) -> bool {
+        self.viewport_scale_drag.take().is_some()
+    }
+
+    #[must_use]
+    pub const fn viewport_scale_drag_active(&self) -> bool {
+        self.viewport_scale_drag.is_some()
     }
 
     /// Camera-only translation in egui logical points, never Project pixels.
@@ -1592,6 +1719,61 @@ mod tests {
         assert!(session.cancel_viewport_position_drag());
         assert!(!session.cancel_viewport_position_drag());
         assert_eq!(session.update_viewport_position_drag(v(80.0, 90.0)), None);
+    }
+
+
+    #[test]
+    fn corner_scale_uses_inverse_rotation_anchor_and_total_delta() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_scale_drag(
+            v(100.0, 100.0),
+            v(1.0, 2.0),
+            v(200.0, 100.0),
+            v(0.5, 0.5),
+            90.0,
+            [1.0, 1.0],
+        ));
+        // At 90 degrees, a +50 pointer Y delta is a +50 local X delta.
+        assert_eq!(
+            session.update_viewport_scale_drag(v(100.0, 150.0)),
+            Some(v(1.5, 2.0))
+        );
+        assert_eq!(
+            session.update_viewport_scale_drag(v(100.0, 150.0)),
+            Some(v(1.5, 2.0))
+        );
+        assert_eq!(
+            session.update_viewport_scale_drag(v(150.0, 100.0)),
+            Some(v(1.0, 1.0))
+        );
+        assert!(session.finish_viewport_scale_drag());
+        assert_eq!(session.update_viewport_scale_drag(v(0.0, 0.0)), None);
+    }
+
+    #[test]
+    fn corner_scale_handles_mirroring_anchor_edges_and_invalid_input() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(!session.begin_viewport_scale_drag(
+            v(0.0, 0.0), v(1.0, 1.0), v(100.0, 100.0),
+            v(0.0, 0.0), 0.0, [0.0, 0.0],
+        ));
+        assert!(session.begin_viewport_scale_drag(
+            v(0.0, 0.0), v(-1.0, 1.0), v(100.0, 100.0),
+            v(0.0, 0.0), 0.0, [1.0, 0.0],
+        ));
+        assert_eq!(session.update_viewport_scale_drag(v(-100.0, 20.0)), Some(v(-2.0, 1.0)));
+        assert!(session.cancel_viewport_scale_drag());
+        assert!(!session.cancel_viewport_scale_drag());
+        assert!(!session.begin_viewport_scale_drag(
+            v(0.0, 0.0), v(1.0, 1.0), v(100.0, 100.0),
+            v(0.5, 0.5), f32::NAN, [1.0, 1.0],
+        ));
+        assert!(!session.begin_viewport_scale_drag(
+            v(0.0, 0.0), v(1.0, 1.0), v(0.0, 100.0),
+            v(0.5, 0.5), 0.0, [1.0, 1.0],
+        ));
     }
 
     #[test]
