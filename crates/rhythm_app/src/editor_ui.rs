@@ -1,7 +1,5 @@
 use crate::{
-    editor_session::{
-        EditorSession, PreviewQuality, ViewportPositionAction, ViewportScaleAction,
-    },
+    editor_session::{EditorSession, PreviewQuality, ViewportPositionAction, ViewportScaleAction},
     timeline::{draw_easing_preset_menu, draw_timeline},
 };
 use rhythm_core::{
@@ -195,21 +193,19 @@ fn paint_selection_bounds(painter: &egui::Painter, bounds: egui::Rect, stroke: e
     ));
 }
 
-
 /// Corners are in local normalized shape coordinates, not the rotated AABB.
-const SCALE_CORNERS: [[f32; 2]; 4] = [
-    [0.0, 0.0],
-    [1.0, 0.0],
-    [1.0, 1.0],
-    [0.0, 1.0],
-];
+const SCALE_CORNERS: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
 
 fn editable_scale_object<'a>(project: &'a Project, session: &EditorSession) -> Option<&'a Object> {
     if session.selected_objects().len() != 1 {
         return None;
     }
     let id = session.selected_object()?;
-    let object = project.composition.objects.iter().find(|object| object.id == id)?;
+    let object = project
+        .composition
+        .objects
+        .iter()
+        .find(|object| object.id == id)?;
     if !object.visible || object.locked || !object.transform.scale.keyframes().is_empty() {
         return None;
     }
@@ -313,9 +309,7 @@ fn draw_selection_overlays(
                 if corner == [anchor.x(), anchor.y()] {
                     continue;
                 }
-                if let Some(point) =
-                    geometry.point(f64::from(corner[0]), f64::from(corner[1]))
-                {
+                if let Some(point) = geometry.point(f64::from(corner[0]), f64::from(corner[1])) {
                     let center = preview_point(preview, point, composition_size);
                     if center.x.is_finite() && center.y.is_finite() {
                         painter.rect_filled(
@@ -1039,7 +1033,8 @@ pub fn draw_editor_shell(
                             actions
                                 .viewport_scale_actions
                                 .push(ViewportScaleAction::Update(scale));
-                        } else if let Some(position) = session.update_viewport_position_drag(point) {
+                        } else if let Some(position) = session.update_viewport_position_drag(point)
+                        {
                             actions
                                 .viewport_position_actions
                                 .push(ViewportPositionAction::Update(position));
@@ -1138,7 +1133,7 @@ mod tests {
         InspectorNumericDraft, InspectorPositionEdit, PositionAxis, apply_inspector_position_edits,
         apply_object_click, clamped_drag_point, committed_number, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
-        selection_rect_on_preview, selected_scale_corner_hit, unbounded_composition_point,
+        selected_scale_corner_hit, selection_rect_on_preview, unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
@@ -1256,14 +1251,13 @@ mod tests {
         editor.project().validate().expect("project remains valid");
     }
 
-
     #[test]
     fn scale_corner_hit_uses_actual_rotated_shape_not_aabb_and_skips_ineligible() {
         use rhythm_core::{
             animation::{Animated, Interpolation, Keyframe},
             domain::{LinearRgba, Vec2},
-            ids::KeyframeId,
             hit_test::object_outline,
+            ids::KeyframeId,
             project::{
                 Object, ObjectContent, Project, ProjectSettings, RectangleObject,
                 TransformAnimation,
@@ -1298,8 +1292,7 @@ mod tests {
         });
         let mut session = EditorSession::default();
         session.select_viewport_object(Some(id));
-        let preview =
-            egui::Rect::from_min_size(egui::pos2(40.0, 80.0), egui::vec2(960.0, 540.0));
+        let preview = egui::Rect::from_min_size(egui::pos2(40.0, 80.0), egui::vec2(960.0, 540.0));
         let geometry = object_outline(&project.composition.objects[0], 0.0).expect("geometry");
         let point = geometry.point(1.0, 1.0).expect("rotated corner");
         let pointer = preview_point(preview, point, [1920, 1080]);
