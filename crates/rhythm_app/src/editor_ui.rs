@@ -1003,10 +1003,9 @@ pub fn draw_editor_shell(
                                     corner,
                                 )
                             {
-                                    actions
-                                        .viewport_scale_actions
-                                        .push(ViewportScaleAction::Begin(id));
-                                }
+                                actions
+                                    .viewport_scale_actions
+                                    .push(ViewportScaleAction::Begin(id));
                             }
                         } else {
                             let picked = pick_topmost_object(
