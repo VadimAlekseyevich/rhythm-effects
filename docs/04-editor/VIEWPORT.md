@@ -136,6 +136,22 @@ Scale acts around Anchor.
 
 Negative scale through crossing the anchor may be allowed if interaction remains stable; numeric inspector always supports negative values.
 
+**AI-175 implementation scope:** four constant-screen-size corner squares appear at the
+transformed local Rectangle/Ellipse corners for exactly one selected, visible,
+unlocked shape with static Scale. The markers follow the same composition
+camera and geometric pivot as the outlines, including rotation, noncentral
+Anchor and negative Scale. Pointer movement is converted into object-local
+coordinates by the inverse rotation; each axis is changed relative to its
+mouse-down Scale and corner-to-Anchor distance. An axis whose corner coincides
+with the Anchor is kept unchanged. A corner exactly at the Anchor is not
+interactive. The scale drag can extend outside the composition and uses one
+`ProjectEditor` transaction and Undo entry, with Escape/focus-loss rollback.
+Dragging the shape interior still moves static Position; Ctrl selection and
+marquee gestures are unchanged. Image/Text require real layout bounds, animated
+Scale requires AI-180, multi-object scale is deferred, and **Shift uniform
+scaling is AI-176**, not silently implemented here. Scale handles are editor
+overlays only and do not make primitive GPU rendering/export complete.
+
 ## 12. Rotation gizmo
 
 Rotation handle adjusts rotation around Anchor.
