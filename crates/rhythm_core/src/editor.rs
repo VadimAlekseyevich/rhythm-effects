@@ -205,6 +205,11 @@ pub enum HistoryPayload {
         before: Vec2,
         after: Vec2,
     },
+    ScaleBaseChanged {
+        object_id: ObjectId,
+        before: Vec2,
+        after: Vec2,
+    },
     OpacityBaseChanged {
         object_id: ObjectId,
         before: f32,
@@ -382,6 +387,7 @@ impl History {
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
     ObjectPosition { object_id: ObjectId, before: Vec2 },
+    ObjectScale { object_id: ObjectId, before: Vec2 },
 }
 
 #[derive(Debug)]
@@ -647,6 +653,38 @@ impl ProjectEditor {
         Ok(())
     }
 
+    /// Live editing of a static Scale follows the same one-gesture history
+    /// invariant as Position. Animated Scale is reserved for keyframe edits.
+    pub fn begin_scale_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+
+        let index = self.object_index(object_id)?;
+        let scale = &self.project.composition.objects[index].transform.scale;
+        if !scale.keyframes().is_empty() {
+            return Err(EditError::InvalidValue("cannot directly drag animated Scale"));
+        }
+        self.transaction = Some(ActiveTransaction::ObjectScale {
+            object_id,
+            before: *scale.base_value(),
+        });
+        Ok(())
+    }
+
+    pub fn update_scale_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
+        let object_id = match self.transaction {
+            Some(ActiveTransaction::ObjectScale { object_id, .. }) => object_id,
+            _ => return Err(EditError::HistoryInvariant("no active scale transaction")),
+        };
+        let index = self.object_index(object_id)?;
+        *self.project.composition.objects[index]
+            .transform
+            .scale
+            .base_value_mut() = value;
+        Ok(())
+    }
+
     pub fn commit_transaction(&mut self) -> Result<bool, EditError> {
         let Some(transaction) = self.transaction.take() else {
             return Ok(false);
@@ -674,6 +712,27 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::ObjectScale { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                let after = *self.project.composition.objects[index]
+                    .transform
+                    .scale
+                    .base_value();
+
+                if before == after {
+                    return Ok(false);
+                }
+
+                self.history.push(PendingHistoryEntry::new(
+                    "Scale Object",
+                    HistoryPayload::ScaleBaseChanged {
+                        object_id,
+                        before,
+                        after,
+                    },
+                ));
+                Ok(true)
+            }
         }
     }
 
@@ -688,6 +747,13 @@ impl ProjectEditor {
                 *self.project.composition.objects[index]
                     .transform
                     .position
+                    .base_value_mut() = before;
+            }
+            ActiveTransaction::ObjectScale { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .scale
                     .base_value_mut() = before;
             }
         }
@@ -1479,6 +1545,21 @@ impl ProjectEditor {
                     .base_value_mut() = value;
             }
             (
+                HistoryPayload::ScaleBaseChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let value = *direction.pick(before, after);
+                let index = self.object_index(*object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .scale
+                    .base_value_mut() = value;
+            }
+            (
                 HistoryPayload::OpacityBaseChanged {
                     object_id,
                     before,
@@ -1822,6 +1903,73 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+
+    #[test]
+    fn scale_transaction_is_single_undo_entry_and_cancel_restores_value() {
+        let mut editor = editor_with_object();
+        let id = ObjectId::new(1).expect("object id");
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let scale = |editor: &ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value()
+        };
+
+        editor.begin_scale_transaction(id).expect("begin");
+        editor.update_scale_transaction(v(2.0, 3.0)).expect("update");
+        editor.update_scale_transaction(v(-1.0, 4.0)).expect("update");
+        assert_eq!(editor.history_len(), 0);
+        assert!(editor.commit_transaction().expect("commit"));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(scale(&editor), v(-1.0, 4.0));
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(scale(&editor), v(1.0, 1.0));
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(scale(&editor), v(-1.0, 4.0));
+
+        editor.begin_scale_transaction(id).expect("begin cancel");
+        editor.update_scale_transaction(v(9.0, 9.0)).expect("update cancel");
+        assert!(editor.cancel_transaction().expect("cancel"));
+        assert_eq!(scale(&editor), v(-1.0, 4.0));
+        assert_eq!(editor.history_len(), 1);
+
+        editor.begin_scale_transaction(id).expect("no op");
+        assert!(!editor.commit_transaction().expect("no change"));
+        assert_eq!(editor.history_len(), 1);
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn scale_drag_refuses_animation_and_concurrent_position_transaction() {
+        let mut editor = editor_with_object();
+        let id = ObjectId::new(1).expect("object id");
+        editor.begin_position_transaction(id).expect("begin position");
+        assert!(matches!(
+            editor.begin_scale_transaction(id),
+            Err(super::EditError::HistoryInvariant(_))
+        ));
+        assert!(editor.cancel_transaction().expect("cancel"));
+
+        let mut project = editor.into_project();
+        project.composition.objects[0]
+            .transform
+            .scale
+            .insert_keyframe(Keyframe {
+                id: KeyframeId::new(2).expect("id"),
+                tick: MusicalTick::new(0),
+                value: Vec2::new(1.0, 1.0).expect("scale"),
+                interpolation: Interpolation::Linear,
+            })
+            .expect("insert");
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        assert!(matches!(
+            editor.begin_scale_transaction(id),
+            Err(super::EditError::InvalidValue(_))
+        ));
     }
 
     #[test]
