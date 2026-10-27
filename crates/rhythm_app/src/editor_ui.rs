@@ -1138,7 +1138,7 @@ mod tests {
         InspectorNumericDraft, InspectorPositionEdit, PositionAxis, apply_inspector_position_edits,
         apply_object_click, clamped_drag_point, committed_number, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
-        selection_rect_on_preview, unbounded_composition_point,
+        selection_rect_on_preview, selected_scale_corner_hit, unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
@@ -1254,6 +1254,79 @@ mod tests {
         assert!(editor.redo().expect("redo y"));
         assert_eq!(position(&editor), v(320.0, -50.0));
         editor.project().validate().expect("project remains valid");
+    }
+
+
+    #[test]
+    fn scale_corner_hit_uses_actual_rotated_shape_not_aabb_and_skips_ineligible() {
+        use rhythm_core::{
+            animation::{Animated, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            ids::KeyframeId,
+            hit_test::object_outline,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, MusicalTick, TempoMap},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let id = ObjectId::new(1).expect("object");
+        let mut project = Project::new(
+            "scale pick",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id,
+            name: "shape".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(900.0, 500.0)),
+                Animated::new_static(v(-1.0, 2.0)),
+                Animated::new_static(90.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(200.0, 100.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        let mut session = EditorSession::default();
+        session.select_viewport_object(Some(id));
+        let preview =
+            egui::Rect::from_min_size(egui::pos2(40.0, 80.0), egui::vec2(960.0, 540.0));
+        let geometry = object_outline(&project.composition.objects[0], 0.0).expect("geometry");
+        let point = geometry.point(1.0, 1.0).expect("rotated corner");
+        let pointer = preview_point(preview, point, [1920, 1080]);
+        assert_eq!(
+            selected_scale_corner_hit(&project, &session, preview, preview, 0.0, pointer),
+            Some((id, [1.0, 1.0]))
+        );
+        project.composition.objects[0].locked = true;
+        assert_eq!(
+            selected_scale_corner_hit(&project, &session, preview, preview, 0.0, pointer),
+            None
+        );
+        project.composition.objects[0].locked = false;
+        project.composition.objects[0]
+            .transform
+            .scale
+            .insert_keyframe(Keyframe::new(
+                KeyframeId::new(2).expect("key"),
+                MusicalTick::new(0),
+                v(-1.0, 2.0),
+                Interpolation::Linear,
+            ))
+            .expect("keyframe");
+        assert_eq!(
+            selected_scale_corner_hit(&project, &session, preview, preview, 0.0, pointer),
+            None
+        );
     }
 
     #[test]
