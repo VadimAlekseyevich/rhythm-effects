@@ -1721,7 +1721,6 @@ mod tests {
         assert_eq!(session.update_viewport_position_drag(v(80.0, 90.0)), None);
     }
 
-
     #[test]
     fn corner_scale_uses_inverse_rotation_anchor_and_total_delta() {
         let v = |x, y| Vec2::new(x, y).expect("finite");
@@ -1756,23 +1755,42 @@ mod tests {
         let v = |x, y| Vec2::new(x, y).expect("finite");
         let mut session = EditorSession::default();
         assert!(!session.begin_viewport_scale_drag(
-            v(0.0, 0.0), v(1.0, 1.0), v(100.0, 100.0),
-            v(0.0, 0.0), 0.0, [0.0, 0.0],
+            v(0.0, 0.0),
+            v(1.0, 1.0),
+            v(100.0, 100.0),
+            v(0.0, 0.0),
+            0.0,
+            [0.0, 0.0],
         ));
         assert!(session.begin_viewport_scale_drag(
-            v(0.0, 0.0), v(-1.0, 1.0), v(100.0, 100.0),
-            v(0.0, 0.0), 0.0, [1.0, 0.0],
+            v(0.0, 0.0),
+            v(-1.0, 1.0),
+            v(100.0, 100.0),
+            v(0.0, 0.0),
+            0.0,
+            [1.0, 0.0],
         ));
-        assert_eq!(session.update_viewport_scale_drag(v(-100.0, 20.0)), Some(v(-2.0, 1.0)));
+        assert_eq!(
+            session.update_viewport_scale_drag(v(-100.0, 20.0)),
+            Some(v(-2.0, 1.0))
+        );
         assert!(session.cancel_viewport_scale_drag());
         assert!(!session.cancel_viewport_scale_drag());
         assert!(!session.begin_viewport_scale_drag(
-            v(0.0, 0.0), v(1.0, 1.0), v(100.0, 100.0),
-            v(0.5, 0.5), f32::NAN, [1.0, 1.0],
+            v(0.0, 0.0),
+            v(1.0, 1.0),
+            v(100.0, 100.0),
+            v(0.5, 0.5),
+            f32::NAN,
+            [1.0, 1.0],
         ));
         assert!(!session.begin_viewport_scale_drag(
-            v(0.0, 0.0), v(1.0, 1.0), v(0.0, 100.0),
-            v(0.5, 0.5), 0.0, [1.0, 1.0],
+            v(0.0, 0.0),
+            v(1.0, 1.0),
+            v(0.0, 100.0),
+            v(0.5, 0.5),
+            0.0,
+            [1.0, 1.0],
         ));
     }
 
