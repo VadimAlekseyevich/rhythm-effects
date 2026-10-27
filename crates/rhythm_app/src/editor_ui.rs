@@ -1,5 +1,5 @@
 use crate::{
-    editor_session::{EditorSession, PreviewQuality, ViewportPositionAction},
+    editor_session::{EditorSession, PreviewQuality, ViewportPositionAction, ViewportScaleAction},
     timeline::{draw_easing_preset_menu, draw_timeline},
 };
 use rhythm_core::{
@@ -7,7 +7,8 @@ use rhythm_core::{
     editor::{EditCommand, EditError, ProjectEditor},
     hit_test::{OutlineKind, object_outline, pick_topmost_object, select_objects_in_box},
     ids::ObjectId,
-    project::Project,
+    project::{Object, ObjectContent, Project},
+    property::{AnimatableProperty, PropertyValue, evaluate_property_at_tick},
     time::ProjectTimeNs,
 };
 
@@ -192,6 +193,91 @@ fn paint_selection_bounds(painter: &egui::Painter, bounds: egui::Rect, stroke: e
     ));
 }
 
+/// Corners are in local normalized shape coordinates, not the rotated AABB.
+const SCALE_CORNERS: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+
+fn editable_scale_object<'a>(project: &'a Project, session: &EditorSession) -> Option<&'a Object> {
+    if session.selected_objects().len() != 1 {
+        return None;
+    }
+    let id = session.selected_object()?;
+    let object = project
+        .composition
+        .objects
+        .iter()
+        .find(|object| object.id == id)?;
+    if !object.visible || object.locked || !object.transform.scale.keyframes().is_empty() {
+        return None;
+    }
+    match object.content {
+        ObjectContent::Rectangle(_) | ObjectContent::Ellipse(_) => Some(object),
+        _ => None,
+    }
+}
+
+/// Screen-point-sized hit boxes remain invariant under viewport zoom/pan.
+/// A corner coinciding exactly with Anchor cannot produce a scale delta.
+fn selected_scale_corner_hit(
+    project: &Project,
+    session: &EditorSession,
+    preview: egui::Rect,
+    canvas: egui::Rect,
+    continuous_tick: f64,
+    pointer: egui::Pos2,
+) -> Option<(ObjectId, [f32; 2])> {
+    if !preview.intersect(canvas).contains(pointer) {
+        return None;
+    }
+    let object = editable_scale_object(project, session)?;
+    let geometry = object_outline(object, continuous_tick)?;
+    let anchor = scale_anchor(project, object, continuous_tick)?;
+    let size = [
+        project.settings.composition_width,
+        project.settings.composition_height,
+    ];
+    let mut nearest: Option<([f32; 2], f32)> = None;
+    for corner in SCALE_CORNERS {
+        if corner == [anchor.x(), anchor.y()] {
+            continue;
+        }
+        let Some(point) = geometry.point(f64::from(corner[0]), f64::from(corner[1])) else {
+            continue;
+        };
+        let center = preview_point(preview, point, size);
+        let distance_sq = center.distance_sq(pointer);
+        if distance_sq <= 100.0 && nearest.is_none_or(|(_, d)| distance_sq < d) {
+            nearest = Some((corner, distance_sq));
+        }
+    }
+    nearest.map(|(corner, _)| (object.id, corner))
+}
+
+fn scale_anchor(project: &Project, object: &Object, tick: f64) -> Option<Vec2> {
+    match evaluate_property_at_tick(project, object.id, AnimatableProperty::Anchor, tick).ok()? {
+        PropertyValue::Vec2(anchor) => Some(anchor),
+        _ => None,
+    }
+}
+
+fn scale_rotation(project: &Project, object: &Object, tick: f64) -> Option<f32> {
+    match evaluate_property_at_tick(project, object.id, AnimatableProperty::Rotation, tick).ok()? {
+        PropertyValue::Scalar(rotation) => Some(rotation),
+        _ => None,
+    }
+}
+
+fn scale_shape_size(project: &Project, object: &Object, tick: f64) -> Option<Vec2> {
+    let property = match object.content {
+        ObjectContent::Rectangle(_) => AnimatableProperty::RectangleSize,
+        ObjectContent::Ellipse(_) => AnimatableProperty::EllipseSize,
+        _ => return None,
+    };
+    match evaluate_property_at_tick(project, object.id, property, tick).ok()? {
+        PropertyValue::Vec2(size) => Some(size),
+        _ => None,
+    }
+}
+
 /// Viewport-only selection bounds and actual transform pivot markers.
 /// Rendered after the wireframes, clipped to the canvas; no Project mutations,
 /// GPU readback or guessed Image/Text bounds. Locked objects selected from the
@@ -232,6 +318,33 @@ fn draw_selection_overlays(
 
         paint_selection_bounds(&painter, bounds, selected_stroke);
         shown += 1;
+
+        // Corner handles follow local transformed geometry, not the AABB.
+        // Only one visible, unlocked, static-scale shape may be resized.
+        if editable_scale_object(project, session).is_some_and(|shape| shape.id == object.id)
+            && let Some(anchor) = scale_anchor(project, object, continuous_tick)
+        {
+            for corner in SCALE_CORNERS {
+                if corner == [anchor.x(), anchor.y()] {
+                    continue;
+                }
+                if let Some(point) = geometry.point(f64::from(corner[0]), f64::from(corner[1])) {
+                    let center = preview_point(preview, point, composition_size);
+                    if center.x.is_finite() && center.y.is_finite() {
+                        painter.rect_filled(
+                            egui::Rect::from_center_size(center, egui::vec2(10.0, 10.0)),
+                            1.0,
+                            egui::Color32::BLACK,
+                        );
+                        painter.rect_filled(
+                            egui::Rect::from_center_size(center, egui::vec2(7.0, 7.0)),
+                            0.5,
+                            egui::Color32::from_rgb(255, 210, 80),
+                        );
+                    }
+                }
+            }
+        }
 
         // Position marks the actual transform Anchor, not the visual center
         // when the normalized Anchor is noncentral. Keep marker size constant
@@ -528,6 +641,7 @@ fn flush_inspector_draft_on_selection_change(
 pub struct EditorUiActions {
     pub add_rectangle_requested: bool,
     pub viewport_position_actions: Vec<ViewportPositionAction>,
+    pub viewport_scale_actions: Vec<ViewportScaleAction>,
     pub inspector_position_edits: Vec<InspectorPositionEdit>,
     pub undo_requested: bool,
     pub redo_requested: bool,
@@ -766,6 +880,7 @@ pub fn draw_editor_shell(
         ui.small(
             "Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).",
         );
+        ui.small("Drag yellow corner squares on one selected object to adjust static X/Y Scale.");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
         let mut frame_selection_requested = false;
         ui.horizontal(|ui| {
@@ -866,37 +981,62 @@ pub fn draw_editor_shell(
                     if let Some(start) =
                         composition_point_from_preview(preview, origin, composition_size)
                     {
-                        let picked = pick_topmost_object(
-                            &project.composition.objects,
-                            tick,
-                            start,
-                            |_| None,
-                            |_| None,
-                        );
-                        if let Some(id) = picked {
-                            if !ui.input(|input| input.modifiers.ctrl)
-                                && session.selected_objects().len() <= 1
-                                && let Some(object) = project
-                                    .composition
-                                    .objects
-                                    .iter()
-                                    .find(|object| object.id == id)
-                                && object.transform.position.keyframes().is_empty()
-                                && session.begin_viewport_position_drag(
+                        let ctrl = ui.input(|input| input.modifiers.ctrl);
+                        let scale_hit = if ctrl {
+                            None
+                        } else {
+                            selected_scale_corner_hit(
+                                project, session, preview, canvas, tick, origin,
+                            )
+                        };
+                        if let Some((id, corner)) = scale_hit {
+                            if let Some(object) = editable_scale_object(project, session)
+                                && let Some(size) = scale_shape_size(project, object, tick)
+                                && let Some(anchor) = scale_anchor(project, object, tick)
+                                && let Some(rotation) = scale_rotation(project, object, tick)
+                                && session.begin_viewport_scale_drag(
                                     start,
-                                    *object.transform.position.base_value(),
+                                    *object.transform.scale.base_value(),
+                                    size,
+                                    anchor,
+                                    rotation,
+                                    corner,
                                 )
                             {
-                                session.select_viewport_object(Some(id));
                                 actions
-                                    .viewport_position_actions
-                                    .push(ViewportPositionAction::Begin(id));
+                                    .viewport_scale_actions
+                                    .push(ViewportScaleAction::Begin(id));
                             }
                         } else {
-                            session.begin_viewport_box_selection(
+                            let picked = pick_topmost_object(
+                                &project.composition.objects,
+                                tick,
                                 start,
-                                ui.input(|input| input.modifiers.ctrl),
+                                |_| None,
+                                |_| None,
                             );
+                            if let Some(id) = picked {
+                                if !ctrl
+                                    && session.selected_objects().len() <= 1
+                                    && let Some(object) = project
+                                        .composition
+                                        .objects
+                                        .iter()
+                                        .find(|object| object.id == id)
+                                    && object.transform.position.keyframes().is_empty()
+                                    && session.begin_viewport_position_drag(
+                                        start,
+                                        *object.transform.position.base_value(),
+                                    )
+                                {
+                                    session.select_viewport_object(Some(id));
+                                    actions
+                                        .viewport_position_actions
+                                        .push(ViewportPositionAction::Begin(id));
+                                }
+                            } else {
+                                session.begin_viewport_box_selection(start, ctrl);
+                            }
                         }
                     }
                 }
@@ -905,17 +1045,39 @@ pub fn draw_editor_shell(
                 {
                     if let Some(point) =
                         unbounded_composition_point(preview, pointer, composition_size)
-                        && let Some(position) = session.update_viewport_position_drag(point)
                     {
-                        actions
-                            .viewport_position_actions
-                            .push(ViewportPositionAction::Update(position));
+                        if let Some(scale) = session.update_viewport_scale_drag(point) {
+                            actions
+                                .viewport_scale_actions
+                                .push(ViewportScaleAction::Update(scale));
+                        } else if let Some(position) = session.update_viewport_position_drag(point)
+                        {
+                            actions
+                                .viewport_position_actions
+                                .push(ViewportPositionAction::Update(position));
+                        }
                     }
                     if let Some(current) = clamped_drag_point(preview, pointer, composition_size) {
                         session.update_viewport_box_selection(current);
                     }
                 }
                 if response.drag_stopped_by(egui::PointerButton::Primary) {
+                    if session.viewport_scale_drag_active() {
+                        if let Some(pointer) = response.interact_pointer_pos()
+                            && let Some(point) =
+                                unbounded_composition_point(preview, pointer, composition_size)
+                            && let Some(scale) = session.update_viewport_scale_drag(point)
+                        {
+                            actions
+                                .viewport_scale_actions
+                                .push(ViewportScaleAction::Update(scale));
+                        }
+                        if session.finish_viewport_scale_drag() {
+                            actions
+                                .viewport_scale_actions
+                                .push(ViewportScaleAction::Commit);
+                        }
+                    }
                     if session.viewport_position_drag_active() {
                         if let Some(pointer) = response.interact_pointer_pos()
                             && let Some(point) =
@@ -988,7 +1150,7 @@ mod tests {
         InspectorNumericDraft, InspectorPositionEdit, PositionAxis, apply_inspector_position_edits,
         apply_object_click, clamped_drag_point, committed_number, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
-        selection_rect_on_preview, unbounded_composition_point,
+        selected_scale_corner_hit, selection_rect_on_preview, unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
@@ -1104,6 +1266,77 @@ mod tests {
         assert!(editor.redo().expect("redo y"));
         assert_eq!(position(&editor), v(320.0, -50.0));
         editor.project().validate().expect("project remains valid");
+    }
+
+    #[test]
+    fn scale_corner_hit_uses_actual_rotated_shape_not_aabb_and_skips_ineligible() {
+        use rhythm_core::{
+            animation::{Animated, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            hit_test::object_outline,
+            ids::KeyframeId,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, MusicalTick, TempoMap},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let id = ObjectId::new(1).expect("object");
+        let mut project = Project::new(
+            "scale pick",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id,
+            name: "shape".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(900.0, 500.0)),
+                Animated::new_static(v(-1.0, 2.0)),
+                Animated::new_static(90.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(200.0, 100.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        let mut session = EditorSession::default();
+        session.select_viewport_object(Some(id));
+        let preview = egui::Rect::from_min_size(egui::pos2(40.0, 80.0), egui::vec2(960.0, 540.0));
+        let geometry = object_outline(&project.composition.objects[0], 0.0).expect("geometry");
+        let point = geometry.point(1.0, 1.0).expect("rotated corner");
+        let pointer = preview_point(preview, point, [1920, 1080]);
+        assert_eq!(
+            selected_scale_corner_hit(&project, &session, preview, preview, 0.0, pointer),
+            Some((id, [1.0, 1.0]))
+        );
+        project.composition.objects[0].locked = true;
+        assert_eq!(
+            selected_scale_corner_hit(&project, &session, preview, preview, 0.0, pointer),
+            None
+        );
+        project.composition.objects[0].locked = false;
+        project.composition.objects[0]
+            .transform
+            .scale
+            .insert_keyframe(Keyframe::new(
+                KeyframeId::new(2).expect("key"),
+                MusicalTick::new(0),
+                v(-1.0, 2.0),
+                Interpolation::Linear,
+            ))
+            .expect("keyframe");
+        assert_eq!(
+            selected_scale_corner_hit(&project, &session, preview, preview, 0.0, pointer),
+            None
+        );
     }
 
     #[test]
