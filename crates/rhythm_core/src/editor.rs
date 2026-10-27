@@ -663,7 +663,9 @@ impl ProjectEditor {
         let index = self.object_index(object_id)?;
         let scale = &self.project.composition.objects[index].transform.scale;
         if !scale.keyframes().is_empty() {
-            return Err(EditError::InvalidValue("cannot directly drag animated Scale"));
+            return Err(EditError::InvalidValue(
+                "cannot directly drag animated Scale",
+            ));
         }
         self.transaction = Some(ActiveTransaction::ObjectScale {
             object_id,
@@ -1905,7 +1907,6 @@ mod tests {
         ProjectEditor::new(project).expect("valid project")
     }
 
-
     #[test]
     fn scale_transaction_is_single_undo_entry_and_cancel_restores_value() {
         let mut editor = editor_with_object();
@@ -1919,8 +1920,12 @@ mod tests {
         };
 
         editor.begin_scale_transaction(id).expect("begin");
-        editor.update_scale_transaction(v(2.0, 3.0)).expect("update");
-        editor.update_scale_transaction(v(-1.0, 4.0)).expect("update");
+        editor
+            .update_scale_transaction(v(2.0, 3.0))
+            .expect("update");
+        editor
+            .update_scale_transaction(v(-1.0, 4.0))
+            .expect("update");
         assert_eq!(editor.history_len(), 0);
         assert!(editor.commit_transaction().expect("commit"));
         assert_eq!(editor.history_len(), 1);
@@ -1931,7 +1936,9 @@ mod tests {
         assert_eq!(scale(&editor), v(-1.0, 4.0));
 
         editor.begin_scale_transaction(id).expect("begin cancel");
-        editor.update_scale_transaction(v(9.0, 9.0)).expect("update cancel");
+        editor
+            .update_scale_transaction(v(9.0, 9.0))
+            .expect("update cancel");
         assert!(editor.cancel_transaction().expect("cancel"));
         assert_eq!(scale(&editor), v(-1.0, 4.0));
         assert_eq!(editor.history_len(), 1);
@@ -1946,7 +1953,9 @@ mod tests {
     fn scale_drag_refuses_animation_and_concurrent_position_transaction() {
         let mut editor = editor_with_object();
         let id = ObjectId::new(1).expect("object id");
-        editor.begin_position_transaction(id).expect("begin position");
+        editor
+            .begin_position_transaction(id)
+            .expect("begin position");
         assert!(matches!(
             editor.begin_scale_transaction(id),
             Err(super::EditError::HistoryInvariant(_))
