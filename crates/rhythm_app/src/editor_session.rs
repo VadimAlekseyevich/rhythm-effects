@@ -374,10 +374,7 @@ impl EditorSession {
             if base_x == 0.0 || base_y == 0.0 {
                 return None;
             }
-            let relative_x = (drag.local_corner[0] != 0.0)
-                .then(|| local_dx / (drag.local_corner[0] * base_x));
-            let relative_y = (drag.local_corner[1] != 0.0)
-                .then(|| local_dy / (drag.local_corner[1] * base_y));
+1
             let relative = match (relative_x, relative_y) {
                 (Some(x), Some(y)) if x.abs() >= y.abs() => x,
                 (Some(_), Some(y)) => y,
@@ -1925,7 +1922,7 @@ mod tests {
             .expect("Shift on release");
         apply_viewport_scale_actions(
             &mut editor,
-            [ViewportScaleAction::Update(uniform), ViewportScaleAction::Commit],
+1
         )
         .expect("commit");
         assert!(session.finish_viewport_scale_drag());
