@@ -357,21 +357,48 @@ impl EditorSession {
 
     /// Absolute total pointer delta, not a frame-relative change.
     #[must_use]
-    pub fn update_viewport_scale_drag(&self, pointer: Vec2) -> Option<Vec2> {
+    pub fn update_viewport_scale_drag(&self, pointer: Vec2, uniform: bool) -> Option<Vec2> {
         let drag = self.viewport_scale_drag?;
         let dx = f64::from(pointer.x()) - f64::from(drag.start.x());
         let dy = f64::from(pointer.y()) - f64::from(drag.start.y());
         let local_dx = drag.cos * dx + drag.sin * dy;
         let local_dy = -drag.sin * dx + drag.cos * dy;
-        let x = if drag.local_corner[0] == 0.0 {
-            f64::from(drag.base_scale.x())
+        let base_x = f64::from(drag.base_scale.x());
+        let base_y = f64::from(drag.base_scale.y());
+        let (x, y) = if uniform {
+            // Preserve the mouse-down X:Y Scale ratio, including mirrored
+            // signs. The dominant *relative* change drives both axes; raw
+            // composition-pixel movement would bias larger objects/axes.
+            // Re-evaluate from mouse-down on every frame so Shift can toggle
+            // without accumulating scaling drift.
+            if base_x == 0.0 || base_y == 0.0 {
+                return None;
+            }
+            let relative_x = (drag.local_corner[0] != 0.0)
+                .then(|| local_dx / (drag.local_corner[0] * base_x));
+            let relative_y = (drag.local_corner[1] != 0.0)
+                .then(|| local_dy / (drag.local_corner[1] * base_y));
+            let relative = match (relative_x, relative_y) {
+                (Some(x), Some(y)) if x.abs() >= y.abs() => x,
+                (Some(_), Some(y)) => y,
+                (Some(x), None) => x,
+                (None, Some(y)) => y,
+                (None, None) => return None,
+            };
+            let factor = 1.0 + relative;
+            (base_x * factor, base_y * factor)
         } else {
-            f64::from(drag.base_scale.x()) + local_dx / drag.local_corner[0]
-        };
-        let y = if drag.local_corner[1] == 0.0 {
-            f64::from(drag.base_scale.y())
-        } else {
-            f64::from(drag.base_scale.y()) + local_dy / drag.local_corner[1]
+            let x = if drag.local_corner[0] == 0.0 {
+                base_x
+            } else {
+                base_x + local_dx / drag.local_corner[0]
+            };
+            let y = if drag.local_corner[1] == 0.0 {
+                base_y
+            } else {
+                base_y + local_dy / drag.local_corner[1]
+            };
+            (x, y)
         };
         if !x.is_finite()
             || !y.is_finite()
@@ -1403,7 +1430,7 @@ impl EditorSession {
 mod tests {
     use super::{
         EditorSession, KeyframeDragMember, PreviewQuality, ViewportPositionAction,
-        apply_viewport_position_actions,
+        ViewportScaleAction, apply_viewport_position_actions, apply_viewport_scale_actions,
     };
     use rhythm_core::{
         domain::Vec2,
@@ -1735,19 +1762,19 @@ mod tests {
         ));
         // At 90 degrees, a +50 pointer Y delta is a +50 local X delta.
         assert_eq!(
-            session.update_viewport_scale_drag(v(100.0, 150.0)),
+            session.update_viewport_scale_drag(v(100.0, 150.0), false),
             Some(v(1.5, 2.0))
         );
         assert_eq!(
-            session.update_viewport_scale_drag(v(100.0, 150.0)),
+            session.update_viewport_scale_drag(v(100.0, 150.0), false),
             Some(v(1.5, 2.0))
         );
         assert_eq!(
-            session.update_viewport_scale_drag(v(150.0, 100.0)),
+            session.update_viewport_scale_drag(v(150.0, 100.0), false),
             Some(v(1.0, 1.0))
         );
         assert!(session.finish_viewport_scale_drag());
-        assert_eq!(session.update_viewport_scale_drag(v(0.0, 0.0)), None);
+        assert_eq!(session.update_viewport_scale_drag(v(0.0, 0.0), false), None);
     }
 
     #[test]
@@ -1771,7 +1798,7 @@ mod tests {
             [1.0, 0.0],
         ));
         assert_eq!(
-            session.update_viewport_scale_drag(v(-100.0, 20.0)),
+            session.update_viewport_scale_drag(v(-100.0, 20.0), false),
             Some(v(-2.0, 1.0))
         );
         assert!(session.cancel_viewport_scale_drag());
@@ -1792,6 +1819,123 @@ mod tests {
             0.0,
             [1.0, 1.0],
         ));
+    }
+
+    #[test]
+    fn shift_uniform_scale_preserves_ratio_toggles_and_dominant_relative_axis() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_scale_drag(
+            v(0.0, 0.0),
+            v(2.0, -4.0),
+            v(100.0, 200.0),
+            v(0.5, 0.5),
+            0.0,
+            [1.0, 1.0],
+        ));
+
+        // The larger *fractional* X change wins, not the larger pixel Y
+        // travel; the sign of an originally mirrored Y axis is preserved.
+        assert_eq!(
+            session.update_viewport_scale_drag(v(25.0, -25.0), false),
+            Some(v(2.5, -4.25))
+        );
+        assert_eq!(
+            session.update_viewport_scale_drag(v(25.0, -25.0), true),
+            Some(v(2.5, -5.0))
+        );
+        assert_eq!(
+            session.update_viewport_scale_drag(v(25.0, -25.0), false),
+            Some(v(2.5, -4.25))
+        );
+        // Relative axis changes tie in magnitude; X wins.
+        assert_eq!(
+            session.update_viewport_scale_drag(v(25.0, 100.0), true),
+            Some(v(2.5, -5.0))
+        );
+        // Pure Y drag uses that axis as the uniform driver.
+        assert_eq!(
+            session.update_viewport_scale_drag(v(0.0, 100.0), true),
+            Some(v(1.5, -3.0))
+        );
+        assert_eq!(
+            session.update_viewport_scale_drag(v(0.0, 100.0), false),
+            Some(v(2.0, -3.0))
+        );
+        assert!(session.finish_viewport_scale_drag());
+        assert_eq!(session.update_viewport_scale_drag(v(0.0, 0.0), true), None);
+    }
+
+    #[test]
+    fn shift_uniform_scale_uses_available_axis_at_anchor_edge() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_scale_drag(
+            v(0.0, 0.0),
+            v(2.0, 4.0),
+            v(100.0, 100.0),
+            v(0.0, 0.0),
+            0.0,
+            [1.0, 0.0],
+        ));
+        assert_eq!(
+            session.update_viewport_scale_drag(v(25.0, 500.0), false),
+            Some(v(2.25, 4.0))
+        );
+        assert_eq!(
+            session.update_viewport_scale_drag(v(25.0, 500.0), true),
+            Some(v(2.25, 4.5))
+        );
+    }
+
+    #[test]
+    fn shift_uniform_scale_commits_final_modifier_as_one_history_entry() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        let mut editor = editor_with_object_for_drag();
+        let id = ObjectId::new(1).expect("id");
+        let current = |editor: &rhythm_core::editor::ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .scale
+                .base_value()
+        };
+
+        assert!(session.begin_viewport_scale_drag(
+            v(0.0, 0.0),
+            v(1.0, 1.0),
+            v(100.0, 100.0),
+            v(0.5, 0.5),
+            0.0,
+            [1.0, 1.0],
+        ));
+        assert!(
+            !apply_viewport_scale_actions(&mut editor, [ViewportScaleAction::Begin(id)])
+                .expect("begin")
+        );
+        let free = session
+            .update_viewport_scale_drag(v(25.0, 0.0), false)
+            .expect("free");
+        apply_viewport_scale_actions(&mut editor, [ViewportScaleAction::Update(free)])
+            .expect("live preview");
+        assert_eq!(current(&editor), v(1.5, 1.0));
+
+        let uniform = session
+            .update_viewport_scale_drag(v(0.0, 25.0), true)
+            .expect("Shift on release");
+        apply_viewport_scale_actions(
+            &mut editor,
+            [ViewportScaleAction::Update(uniform), ViewportScaleAction::Commit],
+        )
+        .expect("commit");
+        assert!(session.finish_viewport_scale_drag());
+        assert_eq!(current(&editor), v(1.5, 1.5));
+        assert_eq!(editor.history_len(), 1);
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(current(&editor), v(1.0, 1.0));
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(current(&editor), v(1.5, 1.5));
+        editor.project().validate().expect("valid project");
     }
 
     #[test]
