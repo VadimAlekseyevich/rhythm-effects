@@ -290,7 +290,7 @@ impl ApplicationHandler for RhythmApp {
                                 false
                             }
                         }
-                    } else if !control && !shift && !alt && !super_key && code == KeyCode::Escape {
+                    } else if !control && !alt && !super_key && code == KeyCode::Escape {
                         let viewport_cancelled = self.session.cancel_viewport_position_drag()
                             || self.session.cancel_viewport_scale_drag();
                         if viewport_cancelled

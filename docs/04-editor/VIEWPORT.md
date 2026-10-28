@@ -152,6 +152,8 @@ Scale requires AI-180, multi-object scale is deferred, and **Shift uniform
 scaling is AI-176**, not silently implemented here. Scale handles are editor
 overlays only and do not make primitive GPU rendering/export complete.
 
+**AI-176 implementation scope:** while dragging one editable corner, holding Shift preserves the *mouse-down Scale X:Y ratio* by applying one common signed multiplier to both components, including already-mirrored objects. The dominant absolute **fractional** scale change (not the larger raw local-pixel displacement) drives that multiplier; X wins exact ties. If the corner lies on the Anchor for one local axis, the other axis alone drives the uniform change. Pressing or releasing Shift at any point re-evaluates the total pointer delta from mouse-down, without cumulative drift or starting a second history transaction. The final mouse-up update uses the current Shift state. Zero-change drags remain no-ops; Escape (also with Shift held) and focus loss restore the original static Scale. Edge handles, animated Scale, group scaling, and Shift-rotated controls remain outside AI-176.
+
 ## 12. Rotation gizmo
 
 Rotation handle adjusts rotation around Anchor.

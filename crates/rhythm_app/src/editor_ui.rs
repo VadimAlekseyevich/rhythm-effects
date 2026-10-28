@@ -880,7 +880,7 @@ pub fn draw_editor_shell(
         ui.small(
             "Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).",
         );
-        ui.small("Drag yellow corner squares on one selected object to adjust static X/Y Scale.");
+        ui.small("Drag yellow corner squares to adjust static Scale; hold Shift to preserve proportions.");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
         let mut frame_selection_requested = false;
         ui.horizontal(|ui| {
@@ -1046,7 +1046,10 @@ pub fn draw_editor_shell(
                     if let Some(point) =
                         unbounded_composition_point(preview, pointer, composition_size)
                     {
-                        if let Some(scale) = session.update_viewport_scale_drag(point) {
+                        if let Some(scale) = session.update_viewport_scale_drag(
+                            point,
+                            ui.input(|input| input.modifiers.shift),
+                        ) {
                             actions
                                 .viewport_scale_actions
                                 .push(ViewportScaleAction::Update(scale));
@@ -1066,7 +1069,10 @@ pub fn draw_editor_shell(
                         if let Some(pointer) = response.interact_pointer_pos()
                             && let Some(point) =
                                 unbounded_composition_point(preview, pointer, composition_size)
-                            && let Some(scale) = session.update_viewport_scale_drag(point)
+                            && let Some(scale) = session.update_viewport_scale_drag(
+                            point,
+                            ui.input(|input| input.modifiers.shift),
+                        )
                         {
                             actions
                                 .viewport_scale_actions
