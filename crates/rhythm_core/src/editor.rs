@@ -2209,16 +2209,58 @@ mod tests {
     fn object_row_visibility_lock_and_name_have_independent_undo_steps() {
         let mut editor = editor_with_object();
         let id = ObjectId::new(1).expect("id");
-        assert!(editor.execute(EditCommand::SetObjectVisible { object_id: id, visible: false }).expect("hide"));
-        assert!(editor.execute(EditCommand::SetObjectLocked { object_id: id, locked: true }).expect("lock"));
-        assert!(editor.execute(EditCommand::RenameObject { object_id: id, name: "Renamed".into() }).expect("rename"));
+        assert!(
+            editor
+                .execute(EditCommand::SetObjectVisible {
+                    object_id: id,
+                    visible: false
+                })
+                .expect("hide")
+        );
+        assert!(
+            editor
+                .execute(EditCommand::SetObjectLocked {
+                    object_id: id,
+                    locked: true
+                })
+                .expect("lock")
+        );
+        assert!(
+            editor
+                .execute(EditCommand::RenameObject {
+                    object_id: id,
+                    name: "Renamed".into()
+                })
+                .expect("rename")
+        );
         assert_eq!(editor.history_len(), 3);
         let obj = &editor.project().composition.objects[0];
         assert!(!obj.visible && obj.locked && obj.name == "Renamed");
 
-        assert!(!editor.execute(EditCommand::SetObjectVisible { object_id: id, visible: false }).expect("no-op"));
-        assert!(!editor.execute(EditCommand::SetObjectLocked { object_id: id, locked: true }).expect("no-op"));
-        assert!(!editor.execute(EditCommand::RenameObject { object_id: id, name: "Renamed".into() }).expect("no-op"));
+        assert!(
+            !editor
+                .execute(EditCommand::SetObjectVisible {
+                    object_id: id,
+                    visible: false
+                })
+                .expect("no-op")
+        );
+        assert!(
+            !editor
+                .execute(EditCommand::SetObjectLocked {
+                    object_id: id,
+                    locked: true
+                })
+                .expect("no-op")
+        );
+        assert!(
+            !editor
+                .execute(EditCommand::RenameObject {
+                    object_id: id,
+                    name: "Renamed".into()
+                })
+                .expect("no-op")
+        );
         assert_eq!(editor.history_len(), 3);
 
         assert!(editor.undo().expect("undo rename"));
