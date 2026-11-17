@@ -1063,7 +1063,8 @@ fn draw_inspector_transform_row(
         )
     };
     ui.horizontal(|ui| {
-        let focused = session.focused_property()
+        let focused = session
+            .focused_property()
             .is_some_and(|focused| focused.object_id == object.id && focused.property == property);
         ui.label(if focused { "▶" } else { "  " })
             .on_hover_text("Focused property for K keyframe shortcut");
