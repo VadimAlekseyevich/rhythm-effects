@@ -974,7 +974,7 @@ pub fn draw_editor_shell(
             "Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).",
         );
         ui.small("Drag yellow corner squares to adjust static Scale; hold Shift to preserve proportions.");
-        ui.small("Drag the blue circular handle to rotate one selected shape around its Anchor.");
+        ui.small("Drag the blue circular handle to rotate; hold Shift to snap to 15°.");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
         let mut frame_selection_requested = false;
         ui.horizontal(|ui| {
@@ -1164,7 +1164,10 @@ pub fn draw_editor_shell(
                         unbounded_composition_point(preview, pointer, composition_size)
                     {
                         if session.viewport_rotation_drag_active() {
-                            if let Some(degrees) = session.update_viewport_rotation_drag(point) {
+                            if let Some(degrees) = session.update_viewport_rotation_drag(
+                                point,
+                                ui.input(|input| input.modifiers.shift),
+                            ) {
                                 actions
                                     .viewport_rotation_actions
                                     .push(ViewportRotationAction::Update(degrees));
@@ -1192,7 +1195,10 @@ pub fn draw_editor_shell(
                         if let Some(pointer) = response.interact_pointer_pos()
                             && let Some(point) =
                                 unbounded_composition_point(preview, pointer, composition_size)
-                            && let Some(degrees) = session.update_viewport_rotation_drag(point)
+                            && let Some(degrees) = session.update_viewport_rotation_drag(
+                                point,
+                                ui.input(|input| input.modifiers.shift),
+                            )
                         {
                             actions
                                 .viewport_rotation_actions
