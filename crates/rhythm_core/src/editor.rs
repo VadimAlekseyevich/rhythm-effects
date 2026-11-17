@@ -1141,13 +1141,19 @@ impl ProjectEditor {
                     },
                 )))
             }
-            EditCommand::SetPropertyBase { object_id, property, value } => {
+            EditCommand::SetPropertyBase {
+                object_id,
+                property,
+                value,
+            } => {
                 let index = self.object_index(object_id)?;
                 if self.project.composition.objects[index].locked {
                     return Err(EditError::InvalidValue("locked property edit"));
                 }
                 if property_keyframe_count(&self.project, object_id, property)? != 0 {
-                    return Err(EditError::InvalidValue("animated property requires a keyframe edit"));
+                    return Err(EditError::InvalidValue(
+                        "animated property requires a keyframe edit",
+                    ));
                 }
                 let before = property_base_value(&self.project, object_id, property)?;
                 if before == value {
@@ -2258,20 +2264,38 @@ mod tests {
         let id = ObjectId::new(1).expect("id");
         let v = |x, y| Vec2::new(x, y).expect("finite");
         let entries = [
-            (AnimatableProperty::Position, PropertyValue::Vec2(v(40.0, 90.0))),
+            (
+                AnimatableProperty::Position,
+                PropertyValue::Vec2(v(40.0, 90.0)),
+            ),
             (AnimatableProperty::Scale, PropertyValue::Vec2(v(2.0, -1.0))),
             (AnimatableProperty::Rotation, PropertyValue::Scalar(123.5)),
             (AnimatableProperty::Anchor, PropertyValue::Vec2(v(0.3, 0.6))),
             (AnimatableProperty::Opacity, PropertyValue::Scalar(0.65)),
         ];
         for (property, value) in entries {
-            assert!(editor.execute(EditCommand::SetPropertyBase {
-                object_id: id, property, value
-            }).expect("edit property"));
-            assert_eq!(property_base_value(editor.project(), id, property), Ok(value));
-            assert!(!editor.execute(EditCommand::SetPropertyBase {
-                object_id: id, property, value
-            }).expect("no-op"));
+            assert!(
+                editor
+                    .execute(EditCommand::SetPropertyBase {
+                        object_id: id,
+                        property,
+                        value
+                    })
+                    .expect("edit property")
+            );
+            assert_eq!(
+                property_base_value(editor.project(), id, property),
+                Ok(value)
+            );
+            assert!(
+                !editor
+                    .execute(EditCommand::SetPropertyBase {
+                        object_id: id,
+                        property,
+                        value
+                    })
+                    .expect("no-op")
+            );
         }
         assert_eq!(editor.history_len(), entries.len());
         assert!(editor.undo().expect("undo opacity"));
@@ -2298,7 +2322,8 @@ mod tests {
         use crate::property::{AnimatableProperty, PropertyValue, property_base_value};
         let id = ObjectId::new(1).expect("id");
         let mut editor = editor_with_object();
-        let original = property_base_value(editor.project(), id, AnimatableProperty::Opacity).expect("base");
+        let original =
+            property_base_value(editor.project(), id, AnimatableProperty::Opacity).expect("base");
         assert!(matches!(
             editor.execute(EditCommand::SetPropertyBase {
                 object_id: id,
@@ -2307,23 +2332,34 @@ mod tests {
             }),
             Err(super::EditError::PropertyAccess(_))
         ));
-        assert_eq!(property_base_value(editor.project(), id, AnimatableProperty::Opacity), Ok(original));
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Opacity),
+            Ok(original)
+        );
         editor.project.composition.objects[0].locked = true;
         assert!(matches!(
             editor.execute(EditCommand::SetPropertyBase {
-                object_id: id, property: AnimatableProperty::Opacity,
+                object_id: id,
+                property: AnimatableProperty::Opacity,
                 value: PropertyValue::Scalar(0.5),
             }),
             Err(super::EditError::InvalidValue(_))
         ));
         editor.project.composition.objects[0].locked = false;
-        editor.project.composition.objects[0].transform.opacity.insert_keyframe(Keyframe::new(
-            KeyframeId::new(2).expect("key"),
-            MusicalTick::new(0), 1.0, Interpolation::Linear
-        )).expect("insert");
+        editor.project.composition.objects[0]
+            .transform
+            .opacity
+            .insert_keyframe(Keyframe::new(
+                KeyframeId::new(2).expect("key"),
+                MusicalTick::new(0),
+                1.0,
+                Interpolation::Linear,
+            ))
+            .expect("insert");
         assert!(matches!(
             editor.execute(EditCommand::SetPropertyBase {
-                object_id: id, property: AnimatableProperty::Opacity,
+                object_id: id,
+                property: AnimatableProperty::Opacity,
                 value: PropertyValue::Scalar(0.5),
             }),
             Err(super::EditError::InvalidValue(_))
