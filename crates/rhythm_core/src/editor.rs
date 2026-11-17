@@ -2032,6 +2032,58 @@ impl ProjectEditor {
                     .position
                     .base_value_mut() = value;
             }
+            (
+                HistoryPayload::GroupPropertyValuesChanged {
+                    base_changes,
+                    key_changes,
+                },
+                direction,
+            ) => {
+                for change in base_changes {
+                    set_property_base_value(
+                        &mut self.project,
+                        change.object_id,
+                        change.property,
+                        *direction.pick(&change.before, &change.after),
+                    )?;
+                }
+                for change in key_changes {
+                    match direction {
+                        HistoryDirection::Undo => {
+                            remove_property_keyframe_by_id(
+                                &mut self.project,
+                                change.object_id,
+                                change.property,
+                                change.after.id,
+                            )?.ok_or(EditError::KeyframeNotFound(change.after.id))?;
+                            if let Some(before) = change.before {
+                                insert_property_keyframe(
+                                    &mut self.project,
+                                    change.object_id,
+                                    change.property,
+                                    before,
+                                )?;
+                            }
+                        }
+                        HistoryDirection::Redo => {
+                            if let Some(before) = change.before {
+                                remove_property_keyframe_by_id(
+                                    &mut self.project,
+                                    change.object_id,
+                                    change.property,
+                                    before.id,
+                                )?.ok_or(EditError::KeyframeNotFound(before.id))?;
+                            }
+                            insert_property_keyframe(
+                                &mut self.project,
+                                change.object_id,
+                                change.property,
+                                change.after,
+                            )?;
+                        }
+                    }
+                }
+            }
             (HistoryPayload::PropertyBaseChanged { change }, direction) => {
                 set_property_base_value(
                     &mut self.project,
