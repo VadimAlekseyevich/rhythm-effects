@@ -148,6 +148,44 @@ pub fn apply_viewport_rotation_actions(
     Ok(repaint)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ViewportGroupPositionAction {
+    Begin(Vec<ObjectId>),
+    Update(Vec2),
+    Commit,
+}
+
+pub fn apply_viewport_group_position_actions(
+    editor: &mut ProjectEditor,
+    actions: impl IntoIterator<Item = ViewportGroupPositionAction>,
+) -> Result<bool, EditError> {
+    let mut repaint = false;
+    for action in actions {
+        let result = match action {
+            ViewportGroupPositionAction::Begin(ids) => editor
+                .begin_group_position_transaction(&ids)
+                .map(|()| false),
+            ViewportGroupPositionAction::Update(delta) => editor
+                .update_group_position_transaction(delta)
+                .map(|()| true),
+            ViewportGroupPositionAction::Commit => editor.commit_transaction(),
+        };
+        match result {
+            Ok(changed) => repaint |= changed,
+            Err(error) => {
+                let _ = editor.cancel_transaction();
+                return Err(error);
+            }
+        }
+    }
+    Ok(repaint)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportGroupPositionDrag {
+    start: Vec2,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ViewportPositionDrag {
     start: Vec2,
@@ -240,6 +278,7 @@ pub struct EditorSession {
     selected_objects: Vec<ObjectId>,
     viewport_box_selection: Option<ViewportBoxSelection>,
     viewport_position_drag: Option<ViewportPositionDrag>,
+    viewport_group_position_drag: Option<ViewportGroupPositionDrag>,
     viewport_scale_drag: Option<ViewportScaleDrag>,
     viewport_rotation_drag: Option<ViewportRotationDrag>,
     viewport_pan_points: [f32; 2],
@@ -265,6 +304,7 @@ impl Default for EditorSession {
             selected_objects: Vec::new(),
             viewport_box_selection: None,
             viewport_position_drag: None,
+            viewport_group_position_drag: None,
             viewport_scale_drag: None,
             viewport_rotation_drag: None,
             viewport_pan_points: [0.0, 0.0],
@@ -320,12 +360,56 @@ impl EditorSession {
         }
     }
 
+    /// Group drags produce a common absolute composition-space delta. The
+    /// core transaction stores all original Positions for stable preview.
+    pub fn begin_viewport_group_position_drag(&mut self, start: Vec2) -> bool {
+        if self.selected_objects.len() < 2
+            || self.viewport_group_position_drag.is_some()
+            || self.viewport_position_drag.is_some()
+            || self.viewport_scale_drag.is_some()
+            || self.viewport_rotation_drag.is_some()
+        {
+            return false;
+        }
+        self.viewport_group_position_drag = Some(ViewportGroupPositionDrag { start });
+        true
+    }
+
+    #[must_use]
+    pub fn update_viewport_group_position_drag(&self, pointer: Vec2) -> Option<Vec2> {
+        let drag = self.viewport_group_position_drag?;
+        let dx = f64::from(pointer.x()) - f64::from(drag.start.x());
+        let dy = f64::from(pointer.y()) - f64::from(drag.start.y());
+        if !dx.is_finite()
+            || !dy.is_finite()
+            || dx.abs() > f64::from(f32::MAX)
+            || dy.abs() > f64::from(f32::MAX)
+        {
+            return None;
+        }
+        Vec2::new(dx as f32, dy as f32).ok()
+    }
+
+    pub fn finish_viewport_group_position_drag(&mut self) -> bool {
+        self.viewport_group_position_drag.take().is_some()
+    }
+
+    pub fn cancel_viewport_group_position_drag(&mut self) -> bool {
+        self.viewport_group_position_drag.take().is_some()
+    }
+
+    #[must_use]
+    pub const fn viewport_group_position_drag_active(&self) -> bool {
+        self.viewport_group_position_drag.is_some()
+    }
+
     /// Absolute position updates are computed from the original mouse-down
     /// composition point, preventing frame-to-frame drift.
     pub fn begin_viewport_position_drag(&mut self, start: Vec2, base_position: Vec2) -> bool {
         if self.viewport_position_drag.is_some()
             || self.viewport_scale_drag.is_some()
             || self.viewport_rotation_drag.is_some()
+            || self.viewport_group_position_drag.is_some()
         {
             return false;
         }
@@ -381,6 +465,7 @@ impl EditorSession {
         if self.viewport_scale_drag.is_some()
             || self.viewport_position_drag.is_some()
             || self.viewport_rotation_drag.is_some()
+            || self.viewport_group_position_drag.is_some()
             || !rotation_degrees.is_finite()
             || size.x() <= 0.0
             || size.y() <= 0.0
@@ -485,6 +570,7 @@ impl EditorSession {
         if self.viewport_rotation_drag.is_some()
             || self.viewport_scale_drag.is_some()
             || self.viewport_position_drag.is_some()
+            || self.viewport_group_position_drag.is_some()
             || !base_degrees.is_finite()
         {
             return false;
@@ -1559,8 +1645,9 @@ impl EditorSession {
 #[cfg(test)]
 mod tests {
     use super::{
-        EditorSession, KeyframeDragMember, PreviewQuality, ViewportPositionAction,
-        ViewportRotationAction, ViewportScaleAction, apply_viewport_position_actions,
+        EditorSession, KeyframeDragMember, PreviewQuality, ViewportGroupPositionAction,
+        ViewportPositionAction, ViewportRotationAction, ViewportScaleAction,
+        apply_viewport_group_position_actions, apply_viewport_position_actions,
         apply_viewport_rotation_actions, apply_viewport_scale_actions,
     };
     use rhythm_core::{
@@ -2070,6 +2157,111 @@ mod tests {
         assert!(editor.redo().expect("redo"));
         assert_eq!(current(&editor), v(1.5, 1.5));
         editor.project().validate().expect("valid project");
+    }
+
+    #[test]
+    fn multi_position_drag_uses_one_delta_and_preserves_selection() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        let a = ObjectId::new(1).expect("a");
+        let b = ObjectId::new(2).expect("b");
+        session.select_viewport_object(Some(a));
+        assert!(!session.begin_viewport_group_position_drag(v(0.0, 0.0)));
+        session.toggle_viewport_object(Some(b));
+        assert!(session.begin_viewport_group_position_drag(v(100.0, 50.0)));
+        assert!(session.viewport_group_position_drag_active());
+        assert!(!session.begin_viewport_scale_drag(
+            v(100.0, 50.0),
+            v(1.0, 1.0),
+            v(100.0, 100.0),
+            v(0.5, 0.5),
+            0.0,
+            [1.0, 1.0],
+        ));
+        assert_eq!(
+            session.update_viewport_group_position_drag(v(145.0, 20.0)),
+            Some(v(45.0, -30.0))
+        );
+        assert_eq!(
+            session.update_viewport_group_position_drag(v(145.0, 20.0)),
+            Some(v(45.0, -30.0))
+        );
+        assert_eq!(session.selected_objects(), &[a, b]);
+        assert!(session.cancel_viewport_group_position_drag());
+        assert!(!session.cancel_viewport_group_position_drag());
+        assert_eq!(
+            session.update_viewport_group_position_drag(v(200.0, 200.0)),
+            None
+        );
+    }
+
+    #[test]
+    fn multi_position_action_dispatch_commits_single_history_entry() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::LinearRgba,
+            project::{ObjectContent, RectangleObject, TransformAnimation},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut editor = editor_with_object_for_drag();
+        let mut second = editor.project().composition.objects[0].clone();
+        second.id = ObjectId::new(2).expect("second");
+        second.name = "second".to_string();
+        second.transform = TransformAnimation::new(
+            Animated::new_static(v(100.0, 200.0)),
+            Animated::new_static(v(1.0, 1.0)),
+            Animated::new_static(0.0),
+            Animated::new_static(v(0.5, 0.5)),
+            Animated::new_static(1.0),
+        );
+        second.content = ObjectContent::Rectangle(RectangleObject {
+            size: Animated::new_static(v(100.0, 50.0)),
+            fill: Animated::new_static(LinearRgba::black_opaque()),
+            corner_radius: Animated::new_static(0.0),
+        });
+        let mut project = editor.into_project();
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+        editor = rhythm_core::editor::ProjectEditor::new(project).expect("valid");
+        let a = ObjectId::new(1).expect("first");
+        let b = ObjectId::new(2).expect("second");
+        let mut session = EditorSession::default();
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        assert!(session.begin_viewport_group_position_drag(v(50.0, 50.0)));
+        apply_viewport_group_position_actions(
+            &mut editor,
+            [ViewportGroupPositionAction::Begin(vec![a, b])],
+        )
+        .expect("begin");
+        let delta = session
+            .update_viewport_group_position_drag(v(70.0, 90.0))
+            .expect("delta");
+        apply_viewport_group_position_actions(
+            &mut editor,
+            [ViewportGroupPositionAction::Update(delta)],
+        )
+        .expect("preview");
+        assert_eq!(editor.history_len(), 0);
+        assert!(session.finish_viewport_group_position_drag());
+        apply_viewport_group_position_actions(&mut editor, [ViewportGroupPositionAction::Commit])
+            .expect("commit");
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            v(120.0, 240.0)
+        );
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            v(100.0, 200.0)
+        );
     }
 
     #[test]
