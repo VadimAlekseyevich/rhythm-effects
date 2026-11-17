@@ -1179,6 +1179,91 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetGroupPropertyValues { edits } => {
+                if edits.len() < 2 {
+                    return Err(EditError::InvalidValue("group edit requires two or more objects"));
+                }
+                let property = edits[0].property;
+                let mut seen = HashSet::new();
+                // Work on a separate candidate so any failing member leaves
+                // all selections, ID allocation and history untouched.
+                let mut candidate = self.project.clone();
+                let mut allocator = EntityIdAllocator::new(candidate.next_entity_id)?;
+                let mut base_changes = Vec::new();
+                let mut key_changes = Vec::new();
+                for edit in edits {
+                    if edit.property != property || !seen.insert(edit.object_id) {
+                        return Err(EditError::InvalidValue("duplicate or incompatible group edit"));
+                    }
+                    let object = candidate.composition.objects.iter()
+                        .find(|object| object.id == edit.object_id)
+                        .ok_or(EditError::ObjectNotFound(edit.object_id))?;
+                    if object.locked {
+                        return Err(EditError::InvalidValue("locked group member"));
+                    }
+                    let count = property_keyframe_count(&candidate, edit.object_id, edit.property)?;
+                    if count == 0 {
+                        if edit.key_tick.is_some() {
+                            return Err(EditError::InvalidValue("static property cannot implicitly become animated"));
+                        }
+                        let before = property_base_value(&candidate, edit.object_id, edit.property)?;
+                        if before != edit.value {
+                            set_property_base_value(&mut candidate, edit.object_id, edit.property, edit.value)?;
+                            base_changes.push(PropertyBaseChange {
+                                object_id: edit.object_id,
+                                property: edit.property,
+                                before,
+                                after: edit.value,
+                            });
+                        }
+                    } else {
+                        let tick = edit.key_tick.ok_or(EditError::InvalidValue(
+                            "animated group member requires resolved tick",
+                        ))?;
+                        let previous = crate::property::remove_property_keyframe_at_tick(
+                            &mut candidate, edit.object_id, edit.property, tick,
+                        )?;
+                        if previous.is_some_and(|key| key.value == edit.value) {
+                            if let Some(previous) = previous {
+                                insert_property_keyframe(
+                                    &mut candidate, edit.object_id, edit.property, previous,
+                                )?;
+                            }
+                            continue;
+                        }
+                        let after = if let Some(key) = previous {
+                            PropertyKeyframe { value: edit.value, ..key }
+                        } else {
+                            PropertyKeyframe {
+                                id: allocator.allocate_keyframe()?,
+                                tick,
+                                value: edit.value,
+                                interpolation: Interpolation::Linear,
+                            }
+                        };
+                        insert_property_keyframe(&mut candidate, edit.object_id, edit.property, after)?;
+                        key_changes.push(GroupKeyframeValueChange {
+                            object_id: edit.object_id,
+                            property: edit.property,
+                            before: previous,
+                            after,
+                        });
+                    }
+                }
+                if base_changes.is_empty() && key_changes.is_empty() {
+                    return Ok(None);
+                }
+                candidate.next_entity_id = allocator.next_entity_id();
+                candidate.validate().map_err(EditError::InvalidProject)?;
+                self.project = candidate;
+                Ok(Some(PendingHistoryEntry::new(
+                    "Edit Transform Group",
+                    HistoryPayload::GroupPropertyValuesChanged {
+                        base_changes,
+                        key_changes,
+                    },
+                )))
+            }
             EditCommand::SetPropertyBase {
                 object_id,
                 property,
