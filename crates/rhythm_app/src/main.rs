@@ -12,7 +12,10 @@ use editor_session::{
     EditorSession, apply_viewport_group_position_actions, apply_viewport_position_actions,
     apply_viewport_rotation_actions, apply_viewport_scale_actions,
 };
-use editor_ui::{DiagnosticsView, EditorUiActions, apply_inspector_position_edits};
+use editor_ui::{
+    DiagnosticsView, EditorUiActions, apply_inspector_position_edits,
+    apply_inspector_transform_edits,
+};
 use gpu::GpuContext;
 use rhythm_core::{
     APP_NAME,
@@ -413,6 +416,24 @@ impl ApplicationHandler for RhythmApp {
                             Ok(true) => window.request_redraw(),
                             Ok(false) => {}
                             Err(error) => warn!(?error, "Inspector Position edit failed"),
+                        }
+                    }
+                    if !ui_actions.inspector_transform_edits.is_empty() {
+                        match apply_inspector_transform_edits(
+                            &mut self.project_editor,
+                            ui_actions.inspector_transform_edits,
+                        ) {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => warn!(?error, "Inspector transform edit failed"),
+                        }
+                    }
+                    for (id, property) in ui_actions.inspector_keyframe_requests {
+                        self.session.focus_property(id, property);
+                        match self.session.keyframe_action(&mut self.project_editor) {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => warn!(?error, "Inspector keyframe action failed"),
                         }
                     }
                     if !ui_actions.viewport_group_position_actions.is_empty() {

@@ -140,6 +140,11 @@ pub enum EditCommand {
         object_id: ObjectId,
         value: f32,
     },
+    SetPropertyBase {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        value: PropertyValue,
+    },
     AddOpacityKeyframe {
         object_id: ObjectId,
         keyframe: Keyframe<f32>,
@@ -183,6 +188,7 @@ impl EditCommand {
             Self::SetObjectLocked { .. } => "SetObjectLocked",
             Self::SetPositionBase { .. } => "SetPositionBase",
             Self::SetOpacityBase { .. } => "SetOpacityBase",
+            Self::SetPropertyBase { .. } => "SetPropertyBase",
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
             Self::InsertPropertyKeyframe { .. } => "InsertPropertyKeyframe",
             Self::RemovePropertyKeyframe { .. } => "RemovePropertyKeyframe",
@@ -234,6 +240,9 @@ pub enum HistoryPayload {
     },
     GroupPositionsChanged {
         changes: Vec<PositionBaseChange>,
+    },
+    PropertyBaseChanged {
+        change: PropertyBaseChange,
     },
     ScaleBaseChanged {
         object_id: ObjectId,
@@ -1132,6 +1141,41 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetPropertyBase {
+                object_id,
+                property,
+                value,
+            } => {
+                let index = self.object_index(object_id)?;
+                if self.project.composition.objects[index].locked {
+                    return Err(EditError::InvalidValue("locked property edit"));
+                }
+                if property_keyframe_count(&self.project, object_id, property)? != 0 {
+                    return Err(EditError::InvalidValue(
+                        "animated property requires a keyframe edit",
+                    ));
+                }
+                let before = property_base_value(&self.project, object_id, property)?;
+                if before == value {
+                    return Ok(None);
+                }
+                set_property_base_value(&mut self.project, object_id, property, value)?;
+                if let Err(error) = self.project.validate() {
+                    let _ = set_property_base_value(&mut self.project, object_id, property, before);
+                    return Err(EditError::InvalidProject(error));
+                }
+                Ok(Some(PendingHistoryEntry::new(
+                    "Edit Property",
+                    HistoryPayload::PropertyBaseChanged {
+                        change: PropertyBaseChange {
+                            object_id,
+                            property,
+                            before,
+                            after: value,
+                        },
+                    },
+                )))
+            }
             EditCommand::SetOpacityBase { object_id, value } => {
                 if !value.is_finite() || !(0.0..=1.0).contains(&value) {
                     return Err(EditError::InvalidValue("opacity"));
@@ -1817,6 +1861,14 @@ impl ProjectEditor {
                     .position
                     .base_value_mut() = value;
             }
+            (HistoryPayload::PropertyBaseChanged { change }, direction) => {
+                set_property_base_value(
+                    &mut self.project,
+                    change.object_id,
+                    change.property,
+                    *direction.pick(&change.before, &change.after),
+                )?;
+            }
             (HistoryPayload::GroupPositionsChanged { changes }, direction) => {
                 let indices = changes
                     .iter()
@@ -2203,6 +2255,116 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn inspector_static_properties_commit_independent_history_entries() {
+        use crate::property::{AnimatableProperty, PropertyValue, property_base_value};
+        let mut editor = editor_with_object();
+        let id = ObjectId::new(1).expect("id");
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let entries = [
+            (
+                AnimatableProperty::Position,
+                PropertyValue::Vec2(v(40.0, 90.0)),
+            ),
+            (AnimatableProperty::Scale, PropertyValue::Vec2(v(2.0, -1.0))),
+            (AnimatableProperty::Rotation, PropertyValue::Scalar(123.5)),
+            (AnimatableProperty::Anchor, PropertyValue::Vec2(v(0.3, 0.6))),
+            (AnimatableProperty::Opacity, PropertyValue::Scalar(0.65)),
+        ];
+        for (property, value) in entries {
+            assert!(
+                editor
+                    .execute(EditCommand::SetPropertyBase {
+                        object_id: id,
+                        property,
+                        value
+                    })
+                    .expect("edit property")
+            );
+            assert_eq!(
+                property_base_value(editor.project(), id, property),
+                Ok(value)
+            );
+            assert!(
+                !editor
+                    .execute(EditCommand::SetPropertyBase {
+                        object_id: id,
+                        property,
+                        value
+                    })
+                    .expect("no-op")
+            );
+        }
+        assert_eq!(editor.history_len(), entries.len());
+        assert!(editor.undo().expect("undo opacity"));
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert!(editor.undo().expect("undo anchor"));
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Anchor),
+            Ok(PropertyValue::Vec2(v(0.5, 0.5)))
+        );
+        assert!(editor.redo().expect("redo anchor"));
+        assert!(editor.redo().expect("redo opacity"));
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(0.65))
+        );
+        editor.project().validate().expect("valid project");
+    }
+
+    #[test]
+    fn inspector_static_property_command_rejects_animated_locked_and_invalid_data() {
+        use crate::property::{AnimatableProperty, PropertyValue, property_base_value};
+        let id = ObjectId::new(1).expect("id");
+        let mut editor = editor_with_object();
+        let original =
+            property_base_value(editor.project(), id, AnimatableProperty::Opacity).expect("base");
+        assert!(matches!(
+            editor.execute(EditCommand::SetPropertyBase {
+                object_id: id,
+                property: AnimatableProperty::Opacity,
+                value: PropertyValue::Scalar(f32::NAN),
+            }),
+            Err(super::EditError::PropertyAccess(_))
+        ));
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Opacity),
+            Ok(original)
+        );
+        editor.project.composition.objects[0].locked = true;
+        assert!(matches!(
+            editor.execute(EditCommand::SetPropertyBase {
+                object_id: id,
+                property: AnimatableProperty::Opacity,
+                value: PropertyValue::Scalar(0.5),
+            }),
+            Err(super::EditError::InvalidValue(_))
+        ));
+        editor.project.composition.objects[0].locked = false;
+        editor.project.composition.objects[0]
+            .transform
+            .opacity
+            .insert_keyframe(Keyframe::new(
+                KeyframeId::new(2).expect("key"),
+                MusicalTick::new(0),
+                1.0,
+                Interpolation::Linear,
+            ))
+            .expect("insert");
+        assert!(matches!(
+            editor.execute(EditCommand::SetPropertyBase {
+                object_id: id,
+                property: AnimatableProperty::Opacity,
+                value: PropertyValue::Scalar(0.5),
+            }),
+            Err(super::EditError::InvalidValue(_))
+        ));
+        assert_eq!(editor.history_len(), 0);
     }
 
     #[test]

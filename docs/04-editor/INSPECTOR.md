@@ -24,6 +24,8 @@ Label | value/control | keyframe state/button
 
 Animation affordance stays in the same horizontal location across property types.
 
+**AI-183–AI-185 implementation scope:** every singly selected object displays the five Transform animatable property rows in a stable Label | numeric value | keyframe state/button layout: Position X/Y in pixels, Scale X/Y percent, Rotation degrees, Anchor X/Y percent and Opacity percent. The keyframe affordance distinguishes Static, Animated off-key and Key present with explicit glyph and text (not color alone) and dispatches the existing property-scoped `K` action at the current authoring grid when a tempo map exists. Locked properties and animated values are displayed read-only; editing animated values is reserved for AI-186. Editing a static numeric field commits valid finite input on Enter or focus loss; Escape restores the original without changing the project, invalid partial input remains an editor-only draft. Switching object selection flushes valid draft edits for the previous static editable object. All edits use an undoable generic core `SetPropertyBase` command, validate ranges/compatibility, and restore previous values on validation errors; each field commit is one history entry and Vec2 edits preserve the current other component. Animated properties are never silently converted to static.
+
 ## 3. Transform
 
 Always available for editable object:
