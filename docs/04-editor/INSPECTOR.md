@@ -116,12 +116,16 @@ MVP:
 
 Size and Fill are animatable.
 
+**AI-189 implementation scope:** when a Rectangle is the sole selected, unlocked object, its Inspector shows Size X/Y (composition pixels), a Fill with a visual swatch and four explicitly labeled **linear-light RGBA percent** channel fields, and Corner Radius (pixels). Every value is edited via Enter/focus-loss with Escape discard. Static edits use one generic undoable `SetPropertyBase` command; animated Size/Fill/Corner Radius edits create a key on the nearest authoring-grid tick, or update an existing key while preserving ID and interpolation. The linear RGBA channels are edited as floats rather than converting semantic color values to 8-bit sRGB (a display-only preview swatch clamps to output range), so negative/HDR linear channel values and alpha semantics are not silently lost. Invalid alpha outside 0..100 percent is rejected. The shared property keyframe state/affordance also works for Rectangle content.
+
 ## 10. Ellipse
 
 - Size X/Y;
 - Fill color.
 
 Animatable.
+
+**AI-190 implementation scope:** the Ellipse Inspector exposes Size X/Y and the same four-channel linear Fill and keyframe affordance. Existing animated Ellipse Fill edits preserve stable keyframe IDs and interpolation. There is no Rectangle-only Corner Radius field on Ellipse. The same numeric draft lifecycle, group-selection exclusion, core validation and Undo/Redo semantics apply.
 
 ## 11. Image
 
