@@ -1082,19 +1082,20 @@ fn flush_inspector_draft_on_selection_change(
             }
         }
         for property in [
+            AnimatableProperty::Position,
             AnimatableProperty::Scale,
             AnimatableProperty::Rotation,
             AnimatableProperty::Anchor,
             AnimatableProperty::Opacity,
         ] {
             let editable = project.composition.objects.iter().any(|object| {
-                object.id == old_id
-                    && !object.locked
-                    && property_keyframe_count(project, old_id, property) == Ok(0)
+                object.id == old_id && !object.locked
             });
+            let animated = property_keyframe_count(project, old_id, property)
+                .is_ok_and(|count| count > 0);
             let axes = if matches!(
                 property,
-                AnimatableProperty::Scale | AnimatableProperty::Anchor
+                AnimatableProperty::Position | AnimatableProperty::Scale | AnimatableProperty::Anchor
             ) {
                 vec![Some(PositionAxis::X), Some(PositionAxis::Y)]
             } else {
@@ -1108,14 +1109,17 @@ fn flush_inspector_draft_on_selection_change(
                     draft
                 });
                 if editable && let Some(display_value) = draft.as_ref().and_then(committed_number) {
-                    actions
-                        .inspector_transform_edits
-                        .push(InspectorTransformEdit {
-                            object_id: old_id,
-                            property,
-                            axis,
-                            display_value,
-                        });
+                    let edit = InspectorTransformEdit {
+                        object_id: old_id,
+                        property,
+                        axis,
+                        display_value,
+                    };
+                    if animated {
+                        actions.inspector_animated_edits.push(edit);
+                    } else if property != AnimatableProperty::Position {
+                        actions.inspector_transform_edits.push(edit);
+                    }
                 }
             }
         }
