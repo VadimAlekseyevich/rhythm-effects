@@ -673,12 +673,17 @@ impl ProjectEditor {
     /// Begin one atomic gesture for all selected objects. Reject the whole
     /// group if any member is missing, hidden, locked or animated, rather than
     /// silently moving only a subset and breaking the shared-delta contract.
-    pub fn begin_group_position_transaction(&mut self, object_ids: &[ObjectId]) -> Result<(), EditError> {
+    pub fn begin_group_position_transaction(
+        &mut self,
+        object_ids: &[ObjectId],
+    ) -> Result<(), EditError> {
         if self.transaction.is_some() {
             return Err(EditError::HistoryInvariant("transaction already active"));
         }
         if object_ids.len() < 2 {
-            return Err(EditError::InvalidValue("group move requires two or more objects"));
+            return Err(EditError::InvalidValue(
+                "group move requires two or more objects",
+            ));
         }
         let mut seen = HashSet::new();
         let mut before = Vec::with_capacity(object_ids.len());
@@ -688,7 +693,8 @@ impl ProjectEditor {
             }
             let index = self.object_index(object_id)?;
             let object = &self.project.composition.objects[index];
-            if !object.visible || object.locked || !object.transform.position.keyframes().is_empty() {
+            if !object.visible || object.locked || !object.transform.position.keyframes().is_empty()
+            {
                 return Err(EditError::InvalidValue("group member is not editable"));
             }
             before.push((object_id, *object.transform.position.base_value()));
@@ -703,14 +709,19 @@ impl ProjectEditor {
     pub fn update_group_position_transaction(&mut self, delta: Vec2) -> Result<(), EditError> {
         let before = match &self.transaction {
             Some(ActiveTransaction::GroupPosition { before }) => before,
-            _ => return Err(EditError::HistoryInvariant("no active group move transaction")),
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active group move transaction",
+                ));
+            }
         };
         let values = before
             .iter()
             .map(|(id, position)| {
                 let x = f64::from(position.x()) + f64::from(delta.x());
                 let y = f64::from(position.y()) + f64::from(delta.y());
-                let value = if x.is_finite() && y.is_finite()
+                let value = if x.is_finite()
+                    && y.is_finite()
                     && x.abs() <= f64::from(f32::MAX)
                     && y.abs() <= f64::from(f32::MAX)
                 {
@@ -718,8 +729,9 @@ impl ProjectEditor {
                 } else {
                     None
                 };
-                value.map(|v| (*id, v))
-                    .ok_or(EditError::InvalidValue("group Position delta exceeds finite range"))
+                value.map(|v| (*id, v)).ok_or(EditError::InvalidValue(
+                    "group Position delta exceeds finite range",
+                ))
             })
             .collect::<Result<Vec<_>, _>>()?;
         let indices = values
@@ -847,7 +859,11 @@ impl ProjectEditor {
                             .transform
                             .position
                             .base_value();
-                        Ok(PositionBaseChange { object_id, before, after })
+                        Ok(PositionBaseChange {
+                            object_id,
+                            before,
+                            after,
+                        })
                     })
                     .collect::<Result<Vec<_>, EditError>>()?;
                 if changes.iter().all(|change| change.before == change.after) {
@@ -2121,14 +2137,30 @@ mod tests {
         project.composition.objects.push(object(2, "B"));
         project.next_entity_id = 3;
         let mut editor = ProjectEditor::new(project).expect("project");
-        let ids = [ObjectId::new(1).expect("first"), ObjectId::new(2).expect("second")];
+        let ids = [
+            ObjectId::new(1).expect("first"),
+            ObjectId::new(2).expect("second"),
+        ];
         let v = |x, y| Vec2::new(x, y).expect("finite");
-        let positions = |editor: &ProjectEditor| editor.project().composition.objects.iter()
-            .map(|object| *object.transform.position.base_value()).collect::<Vec<_>>();
+        let positions = |editor: &ProjectEditor| {
+            editor
+                .project()
+                .composition
+                .objects
+                .iter()
+                .map(|object| *object.transform.position.base_value())
+                .collect::<Vec<_>>()
+        };
 
-        editor.begin_group_position_transaction(&ids).expect("begin group");
-        editor.update_group_position_transaction(v(10.0, 20.0)).expect("preview");
-        editor.update_group_position_transaction(v(-5.0, 30.0)).expect("absolute update");
+        editor
+            .begin_group_position_transaction(&ids)
+            .expect("begin group");
+        editor
+            .update_group_position_transaction(v(10.0, 20.0))
+            .expect("preview");
+        editor
+            .update_group_position_transaction(v(-5.0, 30.0))
+            .expect("absolute update");
         assert_eq!(positions(&editor), [v(-5.0, 30.0), v(-5.0, 30.0)]);
         assert_eq!(editor.history_len(), 0);
         assert!(editor.commit_transaction().expect("commit"));
@@ -2138,13 +2170,19 @@ mod tests {
         assert!(editor.redo().expect("redo"));
         assert_eq!(positions(&editor), [v(-5.0, 30.0), v(-5.0, 30.0)]);
 
-        editor.begin_group_position_transaction(&ids).expect("begin cancel");
-        editor.update_group_position_transaction(v(100.0, 200.0)).expect("preview cancel");
+        editor
+            .begin_group_position_transaction(&ids)
+            .expect("begin cancel");
+        editor
+            .update_group_position_transaction(v(100.0, 200.0))
+            .expect("preview cancel");
         assert!(editor.cancel_transaction().expect("cancel"));
         assert_eq!(positions(&editor), [v(-5.0, 30.0), v(-5.0, 30.0)]);
         assert_eq!(editor.history_len(), 1);
 
-        editor.begin_group_position_transaction(&ids).expect("begin no-op");
+        editor
+            .begin_group_position_transaction(&ids)
+            .expect("begin no-op");
         assert!(!editor.commit_transaction().expect("no-op"));
         assert_eq!(editor.history_len(), 1);
         editor.project().validate().expect("valid");
@@ -2159,26 +2197,73 @@ mod tests {
         let b = ObjectId::new(2).expect("b");
         let mut editor = ProjectEditor::new(project).expect("valid");
         let v = |x, y| Vec2::new(x, y).expect("finite");
-        assert!(matches!(editor.begin_group_position_transaction(&[a]), Err(super::EditError::InvalidValue(_))));
-        assert!(matches!(editor.begin_group_position_transaction(&[a, a]), Err(super::EditError::InvalidValue(_))));
+        assert!(matches!(
+            editor.begin_group_position_transaction(&[a]),
+            Err(super::EditError::InvalidValue(_))
+        ));
+        assert!(matches!(
+            editor.begin_group_position_transaction(&[a, a]),
+            Err(super::EditError::InvalidValue(_))
+        ));
         editor.project.composition.objects[1].locked = true;
-        assert!(matches!(editor.begin_group_position_transaction(&[a, b]), Err(super::EditError::InvalidValue(_))));
+        assert!(matches!(
+            editor.begin_group_position_transaction(&[a, b]),
+            Err(super::EditError::InvalidValue(_))
+        ));
         editor.project.composition.objects[1].locked = false;
         editor.project.composition.objects[1].visible = false;
-        assert!(matches!(editor.begin_group_position_transaction(&[a, b]), Err(super::EditError::InvalidValue(_))));
+        assert!(matches!(
+            editor.begin_group_position_transaction(&[a, b]),
+            Err(super::EditError::InvalidValue(_))
+        ));
         editor.project.composition.objects[1].visible = true;
-        editor.project.composition.objects[1].transform.position.insert_keyframe(Keyframe::new(
-            KeyframeId::new(3).expect("key"), MusicalTick::new(0), v(0.0, 0.0), Interpolation::Linear,
-        )).expect("keyframe");
-        assert!(matches!(editor.begin_group_position_transaction(&[a, b]), Err(super::EditError::InvalidValue(_))));
-        editor.project.composition.objects[1].transform.position.remove_keyframe_by_id(KeyframeId::new(3).expect("key"));
-        *editor.project.composition.objects[1].transform.position.base_value_mut() =
-            v(f32::MAX, 0.0);
-        editor.begin_group_position_transaction(&[a, b]).expect("begin");
-        assert!(matches!(editor.begin_scale_transaction(a), Err(super::EditError::HistoryInvariant(_))));
-        assert!(matches!(editor.update_group_position_transaction(v(f32::MAX, f32::MAX)), Err(super::EditError::InvalidValue(_))));
-        assert_eq!(*editor.project.composition.objects[0].transform.position.base_value(), v(0.0, 0.0));
-        assert_eq!(*editor.project.composition.objects[1].transform.position.base_value(), v(f32::MAX, 0.0));
+        editor.project.composition.objects[1]
+            .transform
+            .position
+            .insert_keyframe(Keyframe::new(
+                KeyframeId::new(3).expect("key"),
+                MusicalTick::new(0),
+                v(0.0, 0.0),
+                Interpolation::Linear,
+            ))
+            .expect("keyframe");
+        assert!(matches!(
+            editor.begin_group_position_transaction(&[a, b]),
+            Err(super::EditError::InvalidValue(_))
+        ));
+        editor.project.composition.objects[1]
+            .transform
+            .position
+            .remove_keyframe_by_id(KeyframeId::new(3).expect("key"));
+        *editor.project.composition.objects[1]
+            .transform
+            .position
+            .base_value_mut() = v(f32::MAX, 0.0);
+        editor
+            .begin_group_position_transaction(&[a, b])
+            .expect("begin");
+        assert!(matches!(
+            editor.begin_scale_transaction(a),
+            Err(super::EditError::HistoryInvariant(_))
+        ));
+        assert!(matches!(
+            editor.update_group_position_transaction(v(f32::MAX, f32::MAX)),
+            Err(super::EditError::InvalidValue(_))
+        ));
+        assert_eq!(
+            *editor.project.composition.objects[0]
+                .transform
+                .position
+                .base_value(),
+            v(0.0, 0.0)
+        );
+        assert_eq!(
+            *editor.project.composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            v(f32::MAX, 0.0)
+        );
         assert!(editor.cancel_transaction().expect("cancel"));
     }
 
