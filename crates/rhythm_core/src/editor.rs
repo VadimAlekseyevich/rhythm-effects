@@ -2172,11 +2172,13 @@ mod tests {
         )).expect("keyframe");
         assert!(matches!(editor.begin_group_position_transaction(&[a, b]), Err(super::EditError::InvalidValue(_))));
         editor.project.composition.objects[1].transform.position.remove_keyframe_by_id(KeyframeId::new(3).expect("key"));
+        *editor.project.composition.objects[1].transform.position.base_value_mut() =
+            v(f32::MAX, 0.0);
         editor.begin_group_position_transaction(&[a, b]).expect("begin");
         assert!(matches!(editor.begin_scale_transaction(a), Err(super::EditError::HistoryInvariant(_))));
         assert!(matches!(editor.update_group_position_transaction(v(f32::MAX, f32::MAX)), Err(super::EditError::InvalidValue(_))));
         assert_eq!(*editor.project.composition.objects[0].transform.position.base_value(), v(0.0, 0.0));
-        assert_eq!(*editor.project.composition.objects[1].transform.position.base_value(), v(0.0, 0.0));
+        assert_eq!(*editor.project.composition.objects[1].transform.position.base_value(), v(f32::MAX, 0.0));
         assert!(editor.cancel_transaction().expect("cancel"));
     }
 
