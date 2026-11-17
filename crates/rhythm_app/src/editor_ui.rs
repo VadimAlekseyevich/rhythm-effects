@@ -7,7 +7,7 @@ use crate::{
 };
 use rhythm_core::{
     domain::{LinearRgba, Vec2},
-    editor::{EditCommand, EditError, ProjectEditor},
+    editor::{EditCommand, EditError, GroupPropertyValueEdit, ProjectEditor},
     hit_test::{OutlineKind, object_outline, pick_topmost_object, select_objects_in_box},
     ids::ObjectId,
     project::{Object, ObjectContent, Project},
@@ -789,6 +789,110 @@ pub fn apply_inspector_transform_edits(
     Ok(changed)
 }
 
+/// One displayed group property/axis is changed across the selection with
+/// one compound history entry, retaining each member's other Vec2 component.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InspectorGroupTransformEdit {
+    pub object_ids: Vec<ObjectId>,
+    pub property: AnimatableProperty,
+    pub axis: Option<PositionAxis>,
+    pub display_value: f32,
+}
+
+pub fn apply_inspector_group_transform_edits(
+    session: &mut EditorSession,
+    editor: &mut ProjectEditor,
+    edits: impl IntoIterator<Item = InspectorGroupTransformEdit>,
+) -> Result<bool, EditError> {
+    let mut changed = false;
+    for edit in edits {
+        if edit.object_ids.len() < 2 || !edit.display_value.is_finite() {
+            continue;
+        }
+        let project = editor.project();
+        let tick_position = project.tempo_map.continuous_tick_position(session.playhead()).ok();
+        let resolved_tick = tick_position
+            .and_then(|position| snap_tick_position_to_grid(position, session.authoring_division()).ok());
+        let resolved_time = resolved_tick
+            .and_then(|tick| project.tempo_map.project_time_for_tick(tick).ok());
+        let scalar = if matches!(
+            edit.property,
+            AnimatableProperty::Scale | AnimatableProperty::Anchor | AnimatableProperty::Opacity
+        ) {
+            edit.display_value / 100.0
+        } else {
+            edit.display_value
+        };
+        if !scalar.is_finite() {
+            continue;
+        }
+        let mut drafts = Vec::with_capacity(edit.object_ids.len());
+        let mut any_animated = false;
+        let mut invalid_member = false;
+        for &id in &edit.object_ids {
+            let Some(object) = project.composition.objects.iter().find(|object| object.id == id)
+            else {
+                invalid_member = true;
+                break;
+            };
+            if object.locked {
+                invalid_member = true;
+                break;
+            }
+            let count = property_keyframe_count(project, id, edit.property)?;
+            let (current, key_tick) = if count == 0 {
+                (property_base_value(project, id, edit.property)?, None)
+            } else {
+                any_animated = true;
+                let (Some(continuous), Some(tick)) = (tick_position, resolved_tick) else {
+                    invalid_member = true;
+                    break;
+                };
+                let key = property_keyframe_at_tick(project, id, edit.property, tick)?;
+                let current = if let Some(key) = key {
+                    key.value
+                } else {
+                    evaluate_property_at_tick(project, id, edit.property, continuous)?
+                };
+                (current, Some(tick))
+            };
+            let replacement = match (current, edit.axis) {
+                (PropertyValue::Vec2(v), Some(axis)) => {
+                    let (x, y) = match axis {
+                        PositionAxis::X => (scalar, v.y()),
+                        PositionAxis::Y => (v.x(), scalar),
+                    };
+                    let Ok(value) = Vec2::new(x, y) else {
+                        invalid_member = true;
+                        break;
+                    };
+                    PropertyValue::Vec2(value)
+                }
+                (PropertyValue::Scalar(_), None) => PropertyValue::Scalar(scalar),
+                _ => {
+                    invalid_member = true;
+                    break;
+                }
+            };
+            drafts.push(GroupPropertyValueEdit {
+                object_id: id,
+                property: edit.property,
+                value: replacement,
+                key_tick,
+            });
+        }
+        if invalid_member || drafts.len() != edit.object_ids.len() {
+            continue;
+        }
+        let applied = editor.execute(EditCommand::SetGroupPropertyValues { edits: drafts })?;
+        if applied && any_animated && let Some(time) = resolved_time {
+            session.seek_paused(time);
+        }
+        changed |= applied;
+    }
+    Ok(changed)
+}
+
 /// Keep Fill channels in linear-light percent in the Inspector. This
 /// preserves HDR and negative linear components rather than silently
 /// clamping semantic color data to an 8-bit sRGB widget.
@@ -1529,6 +1633,7 @@ pub struct EditorUiActions {
     pub inspector_transform_edits: Vec<InspectorTransformEdit>,
     pub inspector_animated_edits: Vec<InspectorTransformEdit>,
     pub inspector_color_edits: Vec<InspectorColorEdit>,
+    pub inspector_group_edits: Vec<InspectorGroupTransformEdit>,
     pub inspector_keyframe_requests: Vec<(ObjectId, AnimatableProperty)>,
     pub undo_requested: bool,
     pub redo_requested: bool,
