@@ -767,6 +767,18 @@ fn init_tracing() {
         .init();
 }
 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_tracing();
+
+    info!(app = APP_NAME, "starting application");
+
+    let event_loop = EventLoop::new()?;
+    let mut app = RhythmApp::default();
+    event_loop.run_app(&mut app)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod keyboard_shortcut_tests {
     use super::{can_dispatch_physical_editor_shortcuts, shortcut_transform_property};
@@ -802,16 +814,4 @@ mod keyboard_shortcut_tests {
         assert!(can_dispatch_physical_editor_shortcuts(false));
         assert!(!can_dispatch_physical_editor_shortcuts(true));
     }
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    init_tracing();
-
-    info!(app = APP_NAME, "starting application");
-
-    let event_loop = EventLoop::new()?;
-    let mut app = RhythmApp::default();
-    event_loop.run_app(&mut app)?;
-
-    Ok(())
 }
