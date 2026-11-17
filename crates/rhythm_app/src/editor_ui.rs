@@ -1677,7 +1677,8 @@ pub fn draw_editor_shell(
 #[cfg(test)]
 mod tests {
     use super::{
-        InspectorNumericDraft, InspectorPositionEdit, PositionAxis, apply_inspector_position_edits,
+        InspectorNumericDraft, InspectorPositionEdit, InspectorTransformEdit, PositionAxis,
+        apply_inspector_position_edits, apply_inspector_transform_edits,
         apply_object_click, clamped_drag_point, committed_number, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, rotation_handle_on_preview,
         selected_outline_bounds, selected_rotation_handle_hit, selected_scale_corner_hit,
@@ -1715,6 +1716,78 @@ mod tests {
         for invalid in ["", "-", "1.2.3", "NaN", "inf", "1e999"] {
             assert_eq!(committed_number(&draft(invalid, true)), None);
         }
+    }
+
+    #[test]
+    fn inspector_transform_controls_commit_percent_units_as_static_base_values() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            editor::ProjectEditor,
+            project::{Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation},
+            property::{AnimatableProperty, PropertyValue, property_base_value},
+            time::{GridOffsetNs, TempoMap},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let id = ObjectId::new(1).expect("id");
+        let mut project = Project::new(
+            "Inspector transforms",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id, name: "Shape".to_owned(), visible: true, locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(100.0, 200.0)),
+                Animated::new_static(v(1.0, 1.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(100.0, 50.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        let mut editor = ProjectEditor::new(project).expect("project");
+        let edit = |property, axis, display_value| InspectorTransformEdit {
+            object_id: id, property, axis, display_value,
+        };
+        let changes = [
+            edit(AnimatableProperty::Scale, Some(PositionAxis::X), -150.0),
+            edit(AnimatableProperty::Scale, Some(PositionAxis::Y), 225.0),
+            edit(AnimatableProperty::Rotation, None, 37.5),
+            edit(AnimatableProperty::Anchor, Some(PositionAxis::X), 25.0),
+            edit(AnimatableProperty::Opacity, None, 60.0),
+        ];
+        assert!(apply_inspector_transform_edits(&mut editor, changes).expect("commit"));
+        assert_eq!(editor.history_len(), changes.len());
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Scale),
+            Ok(PropertyValue::Vec2(v(-1.5, 2.25)))
+        );
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Rotation),
+            Ok(PropertyValue::Scalar(37.5))
+        );
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Anchor),
+            Ok(PropertyValue::Vec2(v(0.25, 0.5)))
+        );
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(0.6))
+        );
+        assert!(editor.undo().expect("undo opacity"));
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert!(editor.redo().expect("redo opacity"));
+        editor.project().validate().expect("valid");
     }
 
     #[test]
