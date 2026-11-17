@@ -508,7 +508,11 @@ impl EditorSession {
     /// quantize the absolute resulting angle to 15 degrees without changing
     /// the continuous pointer history, including multi-turn winding.
     #[must_use]
-    pub fn update_viewport_rotation_drag(&mut self, pointer: Vec2, shift_snap: bool) -> Option<f32> {
+    pub fn update_viewport_rotation_drag(
+        &mut self,
+        pointer: Vec2,
+        shift_snap: bool,
+    ) -> Option<f32> {
         let drag = self.viewport_rotation_drag.as_mut()?;
         let dx = f64::from(pointer.x()) - f64::from(drag.pivot.x());
         let dy = f64::from(pointer.y()) - f64::from(drag.pivot.y());
@@ -2095,7 +2099,10 @@ mod tests {
             Some(390.0)
         );
         assert!(session.finish_viewport_rotation_drag());
-        assert_eq!(session.update_viewport_rotation_drag(v(0.0, 100.0), false), None);
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, 100.0), false),
+            None
+        );
 
         assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), -20.0));
         assert_eq!(
@@ -2112,7 +2119,10 @@ mod tests {
         assert!(!session.begin_viewport_rotation_drag(v(0.0, 0.0), v(0.0, 0.0), 0.0));
         assert!(!session.begin_viewport_rotation_drag(v(1.0, 0.0), v(0.0, 0.0), f32::NAN));
         assert!(session.begin_viewport_rotation_drag(v(-100.0, 1.0), v(0.0, 0.0), 0.0));
-        assert_eq!(session.update_viewport_rotation_drag(v(0.0, 0.0), false), None);
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, 0.0), false),
+            None
+        );
         let small = session
             .update_viewport_rotation_drag(v(-100.0, -1.0), false)
             .expect("cross seam");
@@ -2216,7 +2226,10 @@ mod tests {
             Some(105.0)
         );
         assert!(session.finish_viewport_rotation_drag());
-        assert_eq!(session.update_viewport_rotation_drag(v(100.0, 0.0), true), None);
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 0.0), true),
+            None
+        );
     }
 
     #[test]
@@ -2240,9 +2253,13 @@ mod tests {
             session.update_viewport_rotation_drag(v(100.0, -14.0), true),
             Some(-15.0)
         );
-        assert_eq!(session.update_viewport_rotation_drag(v(0.0, 0.0), true), None);
         assert_eq!(
-            session.update_viewport_rotation_drag(v(100.0, -14.0), false)
+            session.update_viewport_rotation_drag(v(0.0, 0.0), true),
+            None
+        );
+        assert_eq!(
+            session
+                .update_viewport_rotation_drag(v(100.0, -14.0), false)
                 .map(|value| value > -9.0 && value < -7.0),
             Some(true)
         );
@@ -2260,7 +2277,10 @@ mod tests {
             (v(100.0, 0.0), 375.0),
             (v(0.0, 100.0), 465.0),
         ] {
-            assert_eq!(session.update_viewport_rotation_drag(point, true), Some(expected));
+            assert_eq!(
+                session.update_viewport_rotation_drag(point, true),
+                Some(expected)
+            );
         }
         assert!(session.finish_viewport_rotation_drag());
         assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), -17.0));
@@ -2270,7 +2290,10 @@ mod tests {
             (v(0.0, 100.0), -285.0),
             (v(100.0, 0.0), -375.0),
         ] {
-            assert_eq!(session.update_viewport_rotation_drag(point, true), Some(expected));
+            assert_eq!(
+                session.update_viewport_rotation_drag(point, true),
+                Some(expected)
+            );
         }
     }
 
