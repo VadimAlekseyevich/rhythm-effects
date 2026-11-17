@@ -786,6 +786,9 @@ pub fn draw_editor_shell(
     waveform: Option<&rhythm_engine::waveform::WaveformData>,
     actions: &mut EditorUiActions,
 ) {
+    // All three editing surfaces use the same stable object-ID selection.
+    // Prune IDs deleted by commands/Undo before drawing any of the panels.
+    session.sync_object_selection(project);
     egui::Panel::top("transport_rhythm")
         .exact_size(54.0)
         .show(ui, |ui| {
@@ -1420,6 +1423,24 @@ mod tests {
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
+
+    #[test]
+    fn object_list_and_viewport_clicks_share_inspector_primary_selection() {
+        let mut session = EditorSession::default();
+        let first = ObjectId::new(1).expect("first");
+        let second = ObjectId::new(2).expect("second");
+        apply_object_click(&mut session, Some(first), false); // Objects panel
+        assert_eq!(session.selected_object(), Some(first));
+        apply_object_click(&mut session, Some(second), true); // Viewport Ctrl-click
+        assert_eq!(session.selected_objects(), &[first, second]);
+        assert_eq!(session.selected_object(), Some(second)); // Inspector primary
+        apply_object_click(&mut session, Some(first), true); // Objects Ctrl-toggle
+        assert_eq!(session.selected_objects(), &[second]);
+        apply_object_click(&mut session, None, true); // Empty Ctrl-click keeps selection
+        assert_eq!(session.selected_object(), Some(second));
+        apply_object_click(&mut session, None, false); // Viewport empty click clears it
+        assert_eq!(session.selected_object(), None);
+    }
 
     #[test]
     fn position_text_accepts_only_changed_finite_numeric_values() {
