@@ -1369,6 +1369,9 @@ fn flush_inspector_draft_on_selection_change(
             AnimatableProperty::Rotation,
             AnimatableProperty::Anchor,
             AnimatableProperty::Opacity,
+            AnimatableProperty::RectangleSize,
+            AnimatableProperty::RectangleCornerRadius,
+            AnimatableProperty::EllipseSize,
         ] {
             let editable = project
                 .composition
@@ -1382,6 +1385,8 @@ fn flush_inspector_draft_on_selection_change(
                 AnimatableProperty::Position
                     | AnimatableProperty::Scale
                     | AnimatableProperty::Anchor
+                    | AnimatableProperty::RectangleSize
+                    | AnimatableProperty::EllipseSize
             ) {
                 vec![Some(PositionAxis::X), Some(PositionAxis::Y)]
             } else {
@@ -1406,6 +1411,37 @@ fn flush_inspector_draft_on_selection_change(
                     } else if property != AnimatableProperty::Position {
                         actions.inspector_transform_edits.push(edit);
                     }
+                }
+            }
+        }
+        for property in [
+            AnimatableProperty::RectangleFill,
+            AnimatableProperty::EllipseFill,
+        ] {
+            let editable = project.composition.objects.iter().any(|object| {
+                object.id == old_id && !object.locked
+            }) && property_keyframe_count(project, old_id, property).is_ok();
+            for channel in [
+                InspectorColorChannel::Red,
+                InspectorColorChannel::Green,
+                InspectorColorChannel::Blue,
+                InspectorColorChannel::Alpha,
+            ] {
+                let draft_id = inspector_color_id(old_id, property, channel).with("draft");
+                let draft = ui.ctx().data_mut(|data| {
+                    let draft = data.get_temp::<InspectorNumericDraft>(draft_id);
+                    data.remove::<InspectorNumericDraft>(draft_id);
+                    draft
+                });
+                if editable
+                    && let Some(percent) = draft.as_ref().and_then(committed_number)
+                {
+                    actions.inspector_color_edits.push(InspectorColorEdit {
+                        object_id: old_id,
+                        property,
+                        channel,
+                        percent,
+                    });
                 }
             }
         }
