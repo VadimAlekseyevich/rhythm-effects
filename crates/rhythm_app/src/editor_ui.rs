@@ -817,8 +817,12 @@ fn draw_inspector_transform_row(
                     }
                 };
                 if property == AnimatableProperty::Position {
-                    draw_inspector_position_field(ui, object.id, PositionAxis::X, v.x(), actions);
-                    draw_inspector_position_field(ui, object.id, PositionAxis::Y, v.y(), actions);
+                    if draw_inspector_position_field(ui, object.id, PositionAxis::X, v.x(), actions) {
+                        session.focus_property(object.id, property);
+                    }
+                    if draw_inspector_position_field(ui, object.id, PositionAxis::Y, v.y(), actions) {
+                        session.focus_property(object.id, property);
+                    }
                 } else {
                     if draw_inspector_transform_field(
                         ui, object.id, property, Some(PositionAxis::X), display(v.x()), actions
@@ -863,7 +867,7 @@ fn draw_inspector_position_field(
     axis: PositionAxis,
     current: f32,
     actions: &mut EditorUiActions,
-) {
+) -> bool {
     let id = inspector_position_id(object_id, axis);
     // TextEdit owns `id` for its internal cursor/selection state; keep
     // application draft data in a separate key to avoid type collisions.
@@ -912,6 +916,7 @@ fn draw_inspector_position_field(
         ui.ctx()
             .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     }
+    response.has_focus()
 }
 
 fn flush_inspector_draft_on_selection_change(
@@ -946,6 +951,39 @@ fn flush_inspector_draft_on_selection_change(
                         axis,
                         value,
                     });
+            }
+        }
+        for property in [
+            AnimatableProperty::Scale,
+            AnimatableProperty::Rotation,
+            AnimatableProperty::Anchor,
+            AnimatableProperty::Opacity,
+        ] {
+            let editable = project.composition.objects.iter().any(|object| {
+                object.id == old_id
+                    && !object.locked
+                    && property_keyframe_count(project, old_id, property) == Ok(0)
+            });
+            let axes = if matches!(property, AnimatableProperty::Scale | AnimatableProperty::Anchor) {
+                vec![Some(PositionAxis::X), Some(PositionAxis::Y)]
+            } else {
+                vec![None]
+            };
+            for axis in axes {
+                let draft_id = inspector_transform_id(old_id, property, axis).with("draft");
+                let draft = ui.ctx().data_mut(|data| {
+                    let draft = data.get_temp::<InspectorNumericDraft>(draft_id);
+                    data.remove::<InspectorNumericDraft>(draft_id);
+                    draft
+                });
+                if editable && let Some(display_value) = draft.as_ref().and_then(committed_number) {
+                    actions.inspector_transform_edits.push(InspectorTransformEdit {
+                        object_id: old_id,
+                        property,
+                        axis,
+                        display_value,
+                    });
+                }
             }
         }
     }
