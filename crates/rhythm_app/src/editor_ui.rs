@@ -2171,8 +2171,10 @@ pub fn draw_editor_shell(
 #[cfg(test)]
 mod tests {
     use super::{
-        InspectorNumericDraft, InspectorPositionEdit, InspectorTransformEdit, PositionAxis,
-        apply_inspector_animated_transform_edits, apply_inspector_position_edits,
+        InspectorColorChannel, InspectorColorEdit, InspectorNumericDraft, InspectorPositionEdit,
+        InspectorTransformEdit, PositionAxis,
+        apply_inspector_animated_transform_edits, apply_inspector_color_edits,
+        apply_inspector_position_edits,
         apply_inspector_transform_edits, apply_object_click, clamped_drag_point, committed_number,
         composition_point_from_preview, fit_composition_preview, panned_preview_rect,
         preview_point, rotation_handle_on_preview, selected_outline_bounds,
@@ -2406,6 +2408,141 @@ mod tests {
             property_base_value(editor.project(), id, property),
             Ok(PropertyValue::Scalar(0.65))
         );
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn rectangle_inspector_edits_size_radius_and_linear_fill_with_history() {
+        use rhythm_core::{
+            domain::{LinearRgba, Vec2},
+            property::{AnimatableProperty, PropertyValue, property_base_value},
+        };
+        let (mut session, mut editor, id) = animated_inspector_fixture();
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let size = AnimatableProperty::RectangleSize;
+        let radius = AnimatableProperty::RectangleCornerRadius;
+        let fill = AnimatableProperty::RectangleFill;
+        let edits = [
+            InspectorTransformEdit { object_id: id, property: size,
+                axis: Some(PositionAxis::X), display_value: 240.0 },
+            InspectorTransformEdit { object_id: id, property: size,
+                axis: Some(PositionAxis::Y), display_value: 120.0 },
+            InspectorTransformEdit { object_id: id, property: radius,
+                axis: None, display_value: 12.0 },
+        ];
+        assert!(apply_inspector_transform_edits(&mut editor, edits).expect("geometry edits"));
+        assert_eq!(
+            property_base_value(editor.project(), id, size),
+            Ok(PropertyValue::Vec2(v(240.0, 120.0)))
+        );
+        assert_eq!(
+            property_base_value(editor.project(), id, radius),
+            Ok(PropertyValue::Scalar(12.0))
+        );
+        let edit = |channel, percent| InspectorColorEdit {
+            object_id: id, property: fill, channel, percent,
+        };
+        assert!(apply_inspector_color_edits(
+            &mut session, &mut editor,
+            [
+                edit(InspectorColorChannel::Red, 25.0),
+                edit(InspectorColorChannel::Green, 50.0),
+                edit(InspectorColorChannel::Blue, 75.0),
+                edit(InspectorColorChannel::Alpha, 80.0),
+            ],
+        ).expect("fill edits"));
+        assert_eq!(
+            property_base_value(editor.project(), id, fill),
+            Ok(PropertyValue::Color(
+                LinearRgba::new(0.25, 0.5, 0.75, 0.8).expect("color")
+            ))
+        );
+        assert_eq!(editor.history_len(), 7);
+        assert!(!apply_inspector_color_edits(
+            &mut session, &mut editor,
+            [edit(InspectorColorChannel::Alpha, 120.0)]
+        ).expect("invalid alpha rejected"));
+        assert_eq!(editor.history_len(), 7);
+        assert!(editor.undo().expect("undo alpha"));
+        let PropertyValue::Color(previous) = property_base_value(editor.project(), id, fill)
+            .expect("previous fill") else { panic!("color property expected") };
+        assert_eq!(previous.a(), 1.0);
+        assert!(editor.redo().expect("redo alpha"));
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn ellipse_inspector_edits_size_and_animated_fill_without_losing_key_identity() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            editor::ProjectEditor,
+            project::{EllipseObject, ObjectContent},
+            property::{
+                AnimatableProperty, PropertyValue, property_base_value,
+                property_keyframe_at_tick, property_keyframe_count,
+            },
+            time::{MusicalTick, ProjectTimeNs},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let (mut session, original, id) = animated_inspector_fixture();
+        let mut project = original.into_project();
+        project.composition.objects[0].content =
+            ObjectContent::Ellipse(EllipseObject {
+                size: Animated::new_static(v(120.0, 90.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+            });
+        let mut editor = ProjectEditor::new(project).expect("ellipse");
+        assert!(apply_inspector_transform_edits(
+            &mut editor,
+            [InspectorTransformEdit {
+                object_id: id, property: AnimatableProperty::EllipseSize,
+                axis: Some(PositionAxis::X), display_value: 160.0,
+            }],
+        ).expect("size edit"));
+        assert_eq!(
+            property_base_value(editor.project(), id, AnimatableProperty::EllipseSize),
+            Ok(PropertyValue::Vec2(v(160.0, 90.0)))
+        );
+
+        let property = AnimatableProperty::EllipseFill;
+        let black = PropertyValue::Color(LinearRgba::black_opaque());
+        editor.create_property_keyframe(id, property, MusicalTick::new(0), black)
+            .expect("first key");
+        editor.create_property_keyframe(id, property, MusicalTick::new(480), black)
+            .expect("second key");
+        let edit = |channel, percent| InspectorColorEdit {
+            object_id: id, property, channel, percent
+        };
+        assert!(apply_inspector_color_edits(
+            &mut session, &mut editor, [edit(InspectorColorChannel::Green, 40.0)]
+        ).expect("off-key Fill"));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(property_keyframe_count(editor.project(), id, property), Ok(3));
+        let first = property_keyframe_at_tick(editor.project(), id, property, MusicalTick::new(240))
+            .expect("property").expect("new key");
+        assert_eq!(
+            first.value,
+            PropertyValue::Color(LinearRgba::new(0.0, 0.4, 0.0, 1.0).expect("color"))
+        );
+
+        assert!(apply_inspector_color_edits(
+            &mut session, &mut editor, [edit(InspectorColorChannel::Blue, 75.0)]
+        ).expect("on-key Fill"));
+        let after = property_keyframe_at_tick(editor.project(), id, property, MusicalTick::new(240))
+            .expect("property").expect("edited key");
+        assert_eq!(after.id, first.id);
+        assert_eq!(after.interpolation, first.interpolation);
+        assert_eq!(
+            after.value,
+            PropertyValue::Color(LinearRgba::new(0.0, 0.4, 0.75, 1.0).expect("color"))
+        );
+        assert!(editor.undo().expect("undo existing-key Fill edit"));
+        let undone = property_keyframe_at_tick(editor.project(), id, property, MusicalTick::new(240))
+            .expect("property").expect("restored key");
+        assert_eq!(undone.value, first.value);
+        assert_eq!(undone.id, first.id);
+        assert!(editor.redo().expect("redo edit"));
         editor.project().validate().expect("valid");
     }
 
