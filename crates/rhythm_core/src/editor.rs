@@ -2508,6 +2508,134 @@ mod tests {
     }
 
     #[test]
+    fn group_property_edit_mixes_static_and_animated_in_one_undo_step() {
+        use crate::property::{
+            AnimatableProperty, PropertyValue, property_base_value,
+            property_keyframe_at_tick, property_keyframe_count,
+        };
+        let mut project = editor_with_object().into_project();
+        let a = ObjectId::new(1).expect("a");
+        let b = ObjectId::new(2).expect("b");
+        let mut second = object(2, "B");
+        second.transform.opacity.insert_keyframe(Keyframe::new(
+            KeyframeId::new(3).expect("key"), MusicalTick::new(0),
+            0.2, Interpolation::Hold,
+        )).expect("insert");
+        project.composition.objects.push(second);
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid");
+        assert!(editor.execute(EditCommand::SetGroupPropertyValues {
+            edits: vec![
+                super::GroupPropertyValueEdit {
+                    object_id: a, property: AnimatableProperty::Opacity,
+                    value: PropertyValue::Scalar(0.75), key_tick: None,
+                },
+                super::GroupPropertyValueEdit {
+                    object_id: b, property: AnimatableProperty::Opacity,
+                    value: PropertyValue::Scalar(0.75), key_tick: Some(MusicalTick::new(240)),
+                },
+            ]
+        }).expect("group edit"));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(0.75))
+        );
+        assert_eq!(property_keyframe_count(editor.project(), b, AnimatableProperty::Opacity), Ok(2));
+        let inserted = property_keyframe_at_tick(
+            editor.project(), b, AnimatableProperty::Opacity, MusicalTick::new(240),
+        ).expect("property").expect("inserted");
+        assert_eq!(inserted.value, PropertyValue::Scalar(0.75));
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert_eq!(property_keyframe_count(editor.project(), b, AnimatableProperty::Opacity), Ok(1));
+        assert!(editor.redo().expect("redo"));
+        let redone = property_keyframe_at_tick(
+            editor.project(), b, AnimatableProperty::Opacity, MusicalTick::new(240),
+        ).expect("property").expect("redone");
+        assert_eq!(redone.id, inserted.id);
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn group_property_edit_rolls_back_all_objects_if_any_member_invalid() {
+        use crate::property::{AnimatableProperty, PropertyValue};
+        let mut project = editor_with_object().into_project();
+        let a = ObjectId::new(1).expect("a");
+        let b = ObjectId::new(2).expect("b");
+        let mut second = object(2, "B");
+        second.locked = true;
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid");
+        let before = editor.project().clone();
+        assert!(matches!(
+            editor.execute(EditCommand::SetGroupPropertyValues {
+                edits: vec![
+                    super::GroupPropertyValueEdit {
+                        object_id: a, property: AnimatableProperty::Rotation,
+                        value: PropertyValue::Scalar(40.0), key_tick: None,
+                    },
+                    super::GroupPropertyValueEdit {
+                        object_id: b, property: AnimatableProperty::Rotation,
+                        value: PropertyValue::Scalar(40.0), key_tick: None,
+                    },
+                ]
+            }),
+            Err(super::EditError::InvalidValue(_))
+        ));
+        assert_eq!(editor.project(), &before);
+        assert_eq!(editor.history_len(), 0);
+    }
+
+    #[test]
+    fn group_property_edit_preserves_existing_animated_key_identity() {
+        use crate::property::{
+            AnimatableProperty, PropertyValue, property_keyframe_at_tick,
+        };
+        let mut project = editor_with_object().into_project();
+        let a = ObjectId::new(1).expect("a");
+        let b = ObjectId::new(2).expect("b");
+        let mut second = object(2, "B");
+        let key_id = KeyframeId::new(3).expect("key");
+        second.transform.rotation_degrees.insert_keyframe(Keyframe::new(
+            key_id, MusicalTick::new(240), 15.0, Interpolation::Hold,
+        )).expect("insert");
+        project.composition.objects.push(second);
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid");
+        assert!(editor.execute(EditCommand::SetGroupPropertyValues {
+            edits: vec![
+                super::GroupPropertyValueEdit {
+                    object_id: a, property: AnimatableProperty::Rotation,
+                    value: PropertyValue::Scalar(60.0), key_tick: None,
+                },
+                super::GroupPropertyValueEdit {
+                    object_id: b, property: AnimatableProperty::Rotation,
+                    value: PropertyValue::Scalar(60.0), key_tick: Some(MusicalTick::new(240)),
+                },
+            ],
+        }).expect("group edit"));
+        let updated = property_keyframe_at_tick(
+            editor.project(), b, AnimatableProperty::Rotation, MusicalTick::new(240),
+        ).expect("property").expect("key");
+        assert_eq!(updated.id, key_id);
+        assert_eq!(updated.interpolation, Interpolation::Hold);
+        assert_eq!(updated.value, PropertyValue::Scalar(60.0));
+        assert!(editor.undo().expect("undo"));
+        let restored = property_keyframe_at_tick(
+            editor.project(), b, AnimatableProperty::Rotation, MusicalTick::new(240),
+        ).expect("property").expect("key");
+        assert_eq!(restored.id, key_id);
+        assert_eq!(restored.value, PropertyValue::Scalar(15.0));
+        assert!(editor.redo().expect("redo"));
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
     fn animated_inspector_value_edit_preserves_key_id_interpolation_and_undo() {
         use crate::property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick};
         let id = ObjectId::new(1).expect("object");
