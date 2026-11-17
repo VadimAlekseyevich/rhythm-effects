@@ -2231,7 +2231,7 @@ mod tests {
             editor.begin_group_position_transaction(&[a, b]),
             Err(super::EditError::InvalidValue(_))
         ));
-        editor.project.composition.objects[1]
+        let _ = editor.project.composition.objects[1]
             .transform
             .position
             .remove_keyframe_by_id(KeyframeId::new(3).expect("key"));
