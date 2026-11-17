@@ -185,6 +185,13 @@ impl EditCommand {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PositionBaseChange {
+    pub object_id: ObjectId,
+    pub before: Vec2,
+    pub after: Vec2,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum HistoryPayload {
     ObjectInserted {
@@ -204,6 +211,9 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         before: Vec2,
         after: Vec2,
+    },
+    GroupPositionsChanged {
+        changes: Vec<PositionBaseChange>,
     },
     ScaleBaseChanged {
         object_id: ObjectId,
@@ -392,6 +402,7 @@ impl History {
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
     Position { object_id: ObjectId, before: Vec2 },
+    GroupPosition { before: Vec<(ObjectId, Vec2)> },
     Scale { object_id: ObjectId, before: Vec2 },
     Rotation { object_id: ObjectId, before: f32 },
 }
@@ -659,6 +670,71 @@ impl ProjectEditor {
         Ok(())
     }
 
+    /// Begin one atomic gesture for all selected objects. Reject the whole
+    /// group if any member is missing, hidden, locked or animated, rather than
+    /// silently moving only a subset and breaking the shared-delta contract.
+    pub fn begin_group_position_transaction(&mut self, object_ids: &[ObjectId]) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+        if object_ids.len() < 2 {
+            return Err(EditError::InvalidValue("group move requires two or more objects"));
+        }
+        let mut seen = HashSet::new();
+        let mut before = Vec::with_capacity(object_ids.len());
+        for &object_id in object_ids {
+            if !seen.insert(object_id) {
+                return Err(EditError::InvalidValue("duplicate group selection object"));
+            }
+            let index = self.object_index(object_id)?;
+            let object = &self.project.composition.objects[index];
+            if !object.visible || object.locked || !object.transform.position.keyframes().is_empty() {
+                return Err(EditError::InvalidValue("group member is not editable"));
+            }
+            before.push((object_id, *object.transform.position.base_value()));
+        }
+        self.transaction = Some(ActiveTransaction::GroupPosition { before });
+        Ok(())
+    }
+
+    /// Recalculate every member from its mouse-down Position and a single
+    /// composition-space delta. Prevalidate all resulting values before
+    /// mutating any member so an invalid pointer never partially moves a group.
+    pub fn update_group_position_transaction(&mut self, delta: Vec2) -> Result<(), EditError> {
+        let before = match &self.transaction {
+            Some(ActiveTransaction::GroupPosition { before }) => before,
+            _ => return Err(EditError::HistoryInvariant("no active group move transaction")),
+        };
+        let values = before
+            .iter()
+            .map(|(id, position)| {
+                let x = f64::from(position.x()) + f64::from(delta.x());
+                let y = f64::from(position.y()) + f64::from(delta.y());
+                let value = if x.is_finite() && y.is_finite()
+                    && x.abs() <= f64::from(f32::MAX)
+                    && y.abs() <= f64::from(f32::MAX)
+                {
+                    Vec2::new(x as f32, y as f32).ok()
+                } else {
+                    None
+                };
+                value.map(|v| (*id, v))
+                    .ok_or(EditError::InvalidValue("group Position delta exceeds finite range"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let indices = values
+            .iter()
+            .map(|(id, _)| self.object_index(*id))
+            .collect::<Result<Vec<_>, _>>()?;
+        for ((_, value), index) in values.into_iter().zip(indices) {
+            *self.project.composition.objects[index]
+                .transform
+                .position
+                .base_value_mut() = value;
+        }
+        Ok(())
+    }
+
     /// Live editing of a static Scale follows the same one-gesture history
     /// invariant as Position. Animated Scale is reserved for keyframe edits.
     pub fn begin_scale_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
@@ -762,6 +838,27 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::GroupPosition { before } => {
+                let changes = before
+                    .into_iter()
+                    .map(|(object_id, before)| {
+                        let index = self.object_index(object_id)?;
+                        let after = *self.project.composition.objects[index]
+                            .transform
+                            .position
+                            .base_value();
+                        Ok(PositionBaseChange { object_id, before, after })
+                    })
+                    .collect::<Result<Vec<_>, EditError>>()?;
+                if changes.iter().all(|change| change.before == change.after) {
+                    return Ok(false);
+                }
+                self.history.push(PendingHistoryEntry::new(
+                    "Move Objects",
+                    HistoryPayload::GroupPositionsChanged { changes },
+                ));
+                Ok(true)
+            }
             ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
@@ -825,6 +922,15 @@ impl ProjectEditor {
                     .transform
                     .scale
                     .base_value_mut() = before;
+            }
+            ActiveTransaction::GroupPosition { before } => {
+                for (object_id, position) in before {
+                    let index = self.object_index(object_id)?;
+                    *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value_mut() = position;
+                }
             }
             ActiveTransaction::Rotation { object_id, before } => {
                 let index = self.object_index(object_id)?;
@@ -1621,6 +1727,18 @@ impl ProjectEditor {
                     .position
                     .base_value_mut() = value;
             }
+            (HistoryPayload::GroupPositionsChanged { changes }, direction) => {
+                let indices = changes
+                    .iter()
+                    .map(|change| self.object_index(change.object_id))
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (change, index) in changes.iter().zip(indices) {
+                    *self.project.composition.objects[index]
+                        .transform
+                        .position
+                        .base_value_mut() = *direction.pick(&change.before, &change.after);
+                }
+            }
             (
                 HistoryPayload::ScaleBaseChanged {
                     object_id,
@@ -1995,6 +2113,71 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn multi_move_one_history_entry_and_full_group_undo_redo_cancel() {
+        let mut project = editor_with_object().into_project();
+        project.composition.objects.push(object(2, "B"));
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("project");
+        let ids = [ObjectId::new(1).expect("first"), ObjectId::new(2).expect("second")];
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let positions = |editor: &ProjectEditor| editor.project().composition.objects.iter()
+            .map(|object| *object.transform.position.base_value()).collect::<Vec<_>>();
+
+        editor.begin_group_position_transaction(&ids).expect("begin group");
+        editor.update_group_position_transaction(v(10.0, 20.0)).expect("preview");
+        editor.update_group_position_transaction(v(-5.0, 30.0)).expect("absolute update");
+        assert_eq!(positions(&editor), [v(-5.0, 30.0), v(-5.0, 30.0)]);
+        assert_eq!(editor.history_len(), 0);
+        assert!(editor.commit_transaction().expect("commit"));
+        assert_eq!(editor.history_len(), 1);
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(positions(&editor), [v(0.0, 0.0), v(0.0, 0.0)]);
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(positions(&editor), [v(-5.0, 30.0), v(-5.0, 30.0)]);
+
+        editor.begin_group_position_transaction(&ids).expect("begin cancel");
+        editor.update_group_position_transaction(v(100.0, 200.0)).expect("preview cancel");
+        assert!(editor.cancel_transaction().expect("cancel"));
+        assert_eq!(positions(&editor), [v(-5.0, 30.0), v(-5.0, 30.0)]);
+        assert_eq!(editor.history_len(), 1);
+
+        editor.begin_group_position_transaction(&ids).expect("begin no-op");
+        assert!(!editor.commit_transaction().expect("no-op"));
+        assert_eq!(editor.history_len(), 1);
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn multi_move_rejects_locked_hidden_animated_duplicate_and_invalid_delta() {
+        let mut project = editor_with_object().into_project();
+        project.composition.objects.push(object(2, "B"));
+        project.next_entity_id = 3;
+        let a = ObjectId::new(1).expect("a");
+        let b = ObjectId::new(2).expect("b");
+        let mut editor = ProjectEditor::new(project).expect("valid");
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        assert!(matches!(editor.begin_group_position_transaction(&[a]), Err(super::EditError::InvalidValue(_))));
+        assert!(matches!(editor.begin_group_position_transaction(&[a, a]), Err(super::EditError::InvalidValue(_))));
+        editor.project.composition.objects[1].locked = true;
+        assert!(matches!(editor.begin_group_position_transaction(&[a, b]), Err(super::EditError::InvalidValue(_))));
+        editor.project.composition.objects[1].locked = false;
+        editor.project.composition.objects[1].visible = false;
+        assert!(matches!(editor.begin_group_position_transaction(&[a, b]), Err(super::EditError::InvalidValue(_))));
+        editor.project.composition.objects[1].visible = true;
+        editor.project.composition.objects[1].transform.position.insert_keyframe(Keyframe::new(
+            KeyframeId::new(3).expect("key"), MusicalTick::new(0), v(0.0, 0.0), Interpolation::Linear,
+        )).expect("keyframe");
+        assert!(matches!(editor.begin_group_position_transaction(&[a, b]), Err(super::EditError::InvalidValue(_))));
+        editor.project.composition.objects[1].transform.position.remove_keyframe_by_id(KeyframeId::new(3).expect("key"));
+        editor.begin_group_position_transaction(&[a, b]).expect("begin");
+        assert!(matches!(editor.begin_scale_transaction(a), Err(super::EditError::HistoryInvariant(_))));
+        assert!(matches!(editor.update_group_position_transaction(v(f32::MAX, f32::MAX)), Err(super::EditError::InvalidValue(_))));
+        assert_eq!(*editor.project.composition.objects[0].transform.position.base_value(), v(0.0, 0.0));
+        assert_eq!(*editor.project.composition.objects[1].transform.position.base_value(), v(0.0, 0.0));
+        assert!(editor.cancel_transaction().expect("cancel"));
     }
 
     #[test]
