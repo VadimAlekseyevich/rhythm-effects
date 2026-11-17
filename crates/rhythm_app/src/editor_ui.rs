@@ -789,6 +789,127 @@ pub fn apply_inspector_transform_edits(
     Ok(changed)
 }
 
+/// Keep Fill channels in linear-light percent in the Inspector. This
+/// preserves HDR and negative linear components rather than silently
+/// clamping semantic color data to an 8-bit sRGB widget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InspectorColorChannel {
+    Red,
+    Green,
+    Blue,
+    Alpha,
+}
+
+impl InspectorColorChannel {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Red => "R",
+            Self::Green => "G",
+            Self::Blue => "B",
+            Self::Alpha => "A",
+        }
+    }
+
+    const fn value(self, color: LinearRgba) -> f32 {
+        match self {
+            Self::Red => color.r(),
+            Self::Green => color.g(),
+            Self::Blue => color.b(),
+            Self::Alpha => color.a(),
+        }
+    }
+
+    fn replaced(self, before: LinearRgba, value: f32) -> Option<LinearRgba> {
+        let (r, g, b, a) = match self {
+            Self::Red => (value, before.g(), before.b(), before.a()),
+            Self::Green => (before.r(), value, before.b(), before.a()),
+            Self::Blue => (before.r(), before.g(), value, before.a()),
+            Self::Alpha => (before.r(), before.g(), before.b(), value),
+        };
+        LinearRgba::new(r, g, b, a).ok()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InspectorColorEdit {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub channel: InspectorColorChannel,
+    /// Linear-light channel in percent. Alpha remains normalized to 0..100%.
+    pub percent: f32,
+}
+
+pub fn apply_inspector_color_edits(
+    session: &mut EditorSession,
+    editor: &mut ProjectEditor,
+    edits: impl IntoIterator<Item = InspectorColorEdit>,
+) -> Result<bool, EditError> {
+    let mut changed = false;
+    for edit in edits {
+        let project = editor.project();
+        let Some(object) = project.composition.objects.iter()
+            .find(|object| object.id == edit.object_id) else {
+            continue;
+        };
+        if object.locked || !edit.percent.is_finite() {
+            continue;
+        }
+        let property = edit.property;
+        let key_count = property_keyframe_count(project, edit.object_id, property)?;
+        let resolved = if key_count == 0 {
+            None
+        } else {
+            let Ok(continuous) = project.tempo_map.continuous_tick_position(session.playhead())
+            else { continue };
+            let Ok(tick) = snap_tick_position_to_grid(
+                continuous, session.authoring_division(),
+            ) else { continue };
+            let Ok(time) = project.tempo_map.project_time_for_tick(tick) else { continue };
+            Some((continuous, tick, time))
+        };
+        let existing = if let Some((_, tick, _)) = resolved {
+            property_keyframe_at_tick(project, edit.object_id, property, tick)?
+        } else {
+            None
+        };
+        let current = if let Some(key) = existing {
+            key.value
+        } else if let Some((continuous, _, _)) = resolved {
+            evaluate_property_at_tick(project, edit.object_id, property, continuous)?
+        } else {
+            property_base_value(project, edit.object_id, property)?
+        };
+        let PropertyValue::Color(before) = current else { continue };
+        let Some(after) = edit.channel.replaced(before, edit.percent / 100.0)
+        else { continue };
+        let value = PropertyValue::Color(after);
+        let applied = if let Some((_, tick, _)) = resolved {
+            if let Some(key) = existing {
+                editor.execute(EditCommand::SetPropertyKeyframeValue {
+                    object_id: edit.object_id,
+                    property,
+                    keyframe_id: key.id,
+                    value,
+                })?
+            } else {
+                editor.create_property_keyframe(edit.object_id, property, tick, value)?
+                    .is_some()
+            }
+        } else {
+            editor.execute(EditCommand::SetPropertyBase {
+                object_id: edit.object_id,
+                property,
+                value,
+            })?
+        };
+        if applied && let Some((_, _, time)) = resolved {
+            session.seek_paused(time);
+        }
+        changed |= applied;
+    }
+    Ok(changed)
+}
+
 fn inspector_transform_id(
     object_id: ObjectId,
     property: AnimatableProperty,
@@ -1011,6 +1132,141 @@ fn draw_inspector_transform_row(
             actions
                 .inspector_keyframe_requests
                 .push((object.id, property));
+        }
+    });
+}
+
+fn inspector_color_id(
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    channel: InspectorColorChannel,
+) -> egui::Id {
+    egui::Id::new(("inspector_color", object_id.get(), property, channel.label()))
+}
+
+fn draw_inspector_color_field(
+    ui: &mut egui::Ui,
+    object_id: ObjectId,
+    property: AnimatableProperty,
+    channel: InspectorColorChannel,
+    percent: f32,
+    actions: &mut EditorUiActions,
+) -> bool {
+    let id = inspector_color_id(object_id, property, channel);
+    let draft_id = id.with("draft");
+    let mut draft = ui.ctx().data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
+        .unwrap_or_else(|| InspectorNumericDraft {
+            text: format!("{percent:.2}"),
+            dirty: false,
+        });
+    ui.label(channel.label());
+    let previously_focused = ui.memory(|memory| memory.has_focus(id));
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut draft.text)
+            .id(id)
+            .desired_width(49.0),
+    );
+    draft.dirty |= response.changed();
+    let escape = (previously_focused || response.has_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if escape {
+        ui.memory_mut(|memory| memory.surrender_focus(id));
+        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+    } else if enter || response.lost_focus() {
+        if let Some(value) = committed_number(&draft) {
+            actions.inspector_color_edits.push(InspectorColorEdit {
+                object_id,
+                property,
+                channel,
+                percent: value,
+            });
+        }
+        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        if enter {
+            ui.memory_mut(|memory| memory.surrender_focus(id));
+        }
+    } else if response.has_focus() {
+        ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
+    } else {
+        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+    }
+    response.has_focus()
+}
+
+fn linear_to_srgb8(value: f32) -> u8 {
+    let x = value.clamp(0.0, 1.0);
+    let srgb = if x <= 0.0031308 { x * 12.92 } else { 1.055 * x.powf(1.0 / 2.4) - 0.055 };
+    (srgb * 255.0).round() as u8
+}
+
+fn draw_inspector_color_row(
+    ui: &mut egui::Ui,
+    project: &Project,
+    session: &mut EditorSession,
+    object: &Object,
+    property: AnimatableProperty,
+    actions: &mut EditorUiActions,
+) {
+    let Ok(count) = property_keyframe_count(project, object.id, property) else { return };
+    let tick = project.tempo_map.continuous_tick_position(session.playhead()).unwrap_or(0.0);
+    let value = if count == 0 {
+        property_base_value(project, object.id, property)
+    } else {
+        evaluate_property_at_tick(project, object.id, property, tick)
+    };
+    let Ok(PropertyValue::Color(color)) = value else { return };
+    let editable = !object.locked && (count == 0 || project.tempo_map.initial_segment().is_some());
+    let resolved = project.tempo_map.continuous_tick_position(session.playhead()).ok()
+        .and_then(|tick| snap_tick_position_to_grid(tick, session.authoring_division()).ok());
+    let at_key = resolved.is_some_and(|tick| property_keyframe_at_tick(
+        project, object.id, property, tick
+    ).ok().flatten().is_some());
+    let key_label = if count == 0 {
+        "◇ Static"
+    } else if at_key {
+        "◆ Key"
+    } else {
+        "◇ Anim"
+    };
+    ui.horizontal(|ui| {
+        ui.label("Fill · linear RGBA %");
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+        ui.painter().rect_filled(
+            rect,
+            2.0,
+            egui::Color32::from_rgba_unmultiplied(
+                linear_to_srgb8(color.r()),
+                linear_to_srgb8(color.g()),
+                linear_to_srgb8(color.b()),
+                (color.a() * 255.0).round() as u8,
+            ),
+        );
+        if ui.add_enabled(!object.locked && resolved.is_some(), egui::Button::new(key_label))
+            .on_hover_text("Create or remove a keyframe at the nearest grid position")
+            .clicked()
+        {
+            session.focus_property(object.id, property);
+            actions.inspector_keyframe_requests.push((object.id, property));
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        for channel in [
+            InspectorColorChannel::Red,
+            InspectorColorChannel::Green,
+            InspectorColorChannel::Blue,
+            InspectorColorChannel::Alpha,
+        ] {
+            if editable {
+                if draw_inspector_color_field(
+                    ui, object.id, property, channel,
+                    channel.value(color) * 100.0, actions,
+                ) {
+                    session.focus_property(object.id, property);
+                }
+            } else {
+                ui.label(format!("{} {:.2}", channel.label(), channel.value(color) * 100.0));
+            }
         }
     });
 }
