@@ -22,8 +22,8 @@ use rhythm_core::{
     animation::Animated,
     domain::{LinearRgba, Vec2},
     ids::ObjectId,
-    property::AnimatableProperty,
     project::{Object, ObjectContent, RectangleObject, TransformAnimation},
+    property::AnimatableProperty,
 };
 use rhythm_engine::renderer::Renderer;
 use tracing::{error, info, warn};
@@ -325,7 +325,10 @@ impl ApplicationHandler for RhythmApp {
                             warn!(?error, "cancel viewport transform drag failed");
                         }
                         self.session.cancel_keyframe_drag() || viewport_cancelled
-                    } else if !control && !shift && !alt && !super_key
+                    } else if !control
+                        && !shift
+                        && !alt
+                        && !super_key
                         && !event.repeat
                         && let Some(property) = shortcut_transform_property(code)
                     {
@@ -772,10 +775,22 @@ mod keyboard_shortcut_tests {
 
     #[test]
     fn physical_transform_shortcuts_are_explicit_and_k_remains_separate() {
-        assert_eq!(shortcut_transform_property(KeyCode::KeyP), Some(AnimatableProperty::Position));
-        assert_eq!(shortcut_transform_property(KeyCode::KeyS), Some(AnimatableProperty::Scale));
-        assert_eq!(shortcut_transform_property(KeyCode::KeyR), Some(AnimatableProperty::Rotation));
-        assert_eq!(shortcut_transform_property(KeyCode::KeyO), Some(AnimatableProperty::Opacity));
+        assert_eq!(
+            shortcut_transform_property(KeyCode::KeyP),
+            Some(AnimatableProperty::Position)
+        );
+        assert_eq!(
+            shortcut_transform_property(KeyCode::KeyS),
+            Some(AnimatableProperty::Scale)
+        );
+        assert_eq!(
+            shortcut_transform_property(KeyCode::KeyR),
+            Some(AnimatableProperty::Rotation)
+        );
+        assert_eq!(
+            shortcut_transform_property(KeyCode::KeyO),
+            Some(AnimatableProperty::Opacity)
+        );
         assert_eq!(shortcut_transform_property(KeyCode::KeyK), None);
         assert_eq!(shortcut_transform_property(KeyCode::KeyD), None);
     }
