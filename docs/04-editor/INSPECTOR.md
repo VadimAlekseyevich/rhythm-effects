@@ -69,6 +69,10 @@ Animated property:
 
 This is property-scoped animation behavior, not global Auto-Key.
 
+**AI-186 implementation scope:** edit a numeric value on an already animated Transform row using Enter/focus-loss to resolve the current playhead to the nearest authoring-grid tick. When a key is present at that resolved tick, update its value while preserving KeyframeId, tick and interpolation; otherwise insert one new key with only the edited component replaced, preserving the other evaluated Vec2 axis. Move playhead to the exact grid time after successful change and write one undoable history entry per numeric commit. Never overwrite an animated property's base_value, create a global Auto-Key mode or start a second transaction; static fields continue using AI-185. Animated edits are disabled without a valid tempo/grid resolution.
+
+**AI-187 implementation scope:** the Inspector keyframe indicator/button uses the existing per-property K action; removing the last key makes the property static and assigns its removed value to base_value so the visible value does not jump. Undo restores that key and the prior base_value; Redo removes it again. Tests cover on-grid last-key removal and base restoration.
+
 ## 6. Keyframe indicator
 
 The property control distinguishes:
