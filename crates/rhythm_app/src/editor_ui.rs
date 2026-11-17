@@ -1,5 +1,8 @@
 use crate::{
-    editor_session::{EditorSession, PreviewQuality, ViewportPositionAction, ViewportScaleAction},
+    editor_session::{
+        EditorSession, PreviewQuality, ViewportPositionAction, ViewportRotationAction,
+        ViewportScaleAction,
+    },
     timeline::{draw_easing_preset_menu, draw_timeline},
 };
 use rhythm_core::{
@@ -215,6 +218,80 @@ fn editable_scale_object<'a>(project: &'a Project, session: &EditorSession) -> O
     }
 }
 
+/// Rotation is independently editable from Scale: animated Scale may have
+/// a static Rotation and vice versa. Only one visible, unlocked shape qualifies.
+fn editable_rotation_object<'a>(
+    project: &'a Project,
+    session: &EditorSession,
+) -> Option<&'a Object> {
+    if session.selected_objects().len() != 1 {
+        return None;
+    }
+    let id = session.selected_object()?;
+    let object = project
+        .composition
+        .objects
+        .iter()
+        .find(|object| object.id == id)?;
+    if !object.visible || object.locked || !object.transform.rotation_degrees.keyframes().is_empty()
+    {
+        return None;
+    }
+    match object.content {
+        ObjectContent::Rectangle(_) | ObjectContent::Ellipse(_) => Some(object),
+        _ => None,
+    }
+}
+
+/// Place a rotation knob 28 egui logical points outward from the transformed
+/// local top edge. The offset and 11-point hit radius do not scale with zoom.
+/// Mirrored Y scales reverse the local outward normal, as the visible shape does.
+fn rotation_handle_on_preview(
+    object: &Object,
+    preview: egui::Rect,
+    composition_size: [u32; 2],
+    continuous_tick: f64,
+) -> Option<(egui::Pos2, egui::Pos2)> {
+    if composition_size.contains(&0) {
+        return None;
+    }
+    let geometry = object_outline(object, continuous_tick)?;
+    let top = preview_point(preview, geometry.point(0.5, 0.0)?, composition_size);
+    let bottom = preview_point(preview, geometry.point(0.5, 1.0)?, composition_size);
+    let outward = top - bottom;
+    let length = outward.length();
+    if !length.is_finite() || length <= 1e-3 {
+        return None;
+    }
+    let knob = top + outward / length * 28.0;
+    if !knob.x.is_finite() || !knob.y.is_finite() {
+        return None;
+    }
+    Some((top, knob))
+}
+
+/// Unlike corner handles, the rotation knob may lie just outside the
+/// composition texture, but never outside the editor canvas.
+fn selected_rotation_handle_hit(
+    project: &Project,
+    session: &EditorSession,
+    preview: egui::Rect,
+    canvas: egui::Rect,
+    continuous_tick: f64,
+    pointer: egui::Pos2,
+) -> Option<ObjectId> {
+    if !canvas.contains(pointer) {
+        return None;
+    }
+    let object = editable_rotation_object(project, session)?;
+    let composition_size = [
+        project.settings.composition_width,
+        project.settings.composition_height,
+    ];
+    let (_, knob) = rotation_handle_on_preview(object, preview, composition_size, continuous_tick)?;
+    (knob.distance_sq(pointer) <= 121.0).then_some(object.id)
+}
+
 /// Screen-point-sized hit boxes remain invariant under viewport zoom/pan.
 /// A corner coinciding exactly with Anchor cannot produce a scale delta.
 fn selected_scale_corner_hit(
@@ -344,6 +421,21 @@ fn draw_selection_overlays(
                     }
                 }
             }
+        }
+
+        if editable_rotation_object(project, session).is_some_and(|shape| shape.id == object.id)
+            && let Some((top, knob)) =
+                rotation_handle_on_preview(object, preview, composition_size, continuous_tick)
+        {
+            // This knob deliberately extends beyond the texture when a shape
+            // touches the top edge; only the containing editor canvas clips it.
+            let rotation_painter = ui.painter().with_clip_rect(canvas);
+            rotation_painter.line_segment(
+                [top, knob],
+                egui::Stroke::new(1.5, egui::Color32::from_rgb(130, 210, 255)),
+            );
+            rotation_painter.circle_filled(knob, 7.0, egui::Color32::BLACK);
+            rotation_painter.circle_filled(knob, 4.5, egui::Color32::from_rgb(130, 210, 255));
         }
 
         // Position marks the actual transform Anchor, not the visual center
@@ -642,6 +734,7 @@ pub struct EditorUiActions {
     pub add_rectangle_requested: bool,
     pub viewport_position_actions: Vec<ViewportPositionAction>,
     pub viewport_scale_actions: Vec<ViewportScaleAction>,
+    pub viewport_rotation_actions: Vec<ViewportRotationAction>,
     pub inspector_position_edits: Vec<InspectorPositionEdit>,
     pub undo_requested: bool,
     pub redo_requested: bool,
@@ -881,6 +974,7 @@ pub fn draw_editor_shell(
             "Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).",
         );
         ui.small("Drag yellow corner squares to adjust static Scale; hold Shift to preserve proportions.");
+        ui.small("Drag the blue circular handle to rotate one selected shape around its Anchor.");
         ui.small("Middle-drag pans; wheel zooms around cursor (12.5%–1600% of Fit).");
         let mut frame_selection_requested = false;
         ui.horizontal(|ui| {
@@ -978,10 +1072,33 @@ pub fn draw_editor_shell(
                     let origin = ui
                         .input(|input| input.pointer.press_origin())
                         .unwrap_or(pointer);
-                    if let Some(start) =
+                    let ctrl = ui.input(|input| input.modifiers.ctrl);
+                    let rotation_hit = if ctrl {
+                        None
+                    } else {
+                        selected_rotation_handle_hit(
+                            project, session, preview, canvas, tick, origin,
+                        )
+                    };
+                    if let Some(id) = rotation_hit {
+                        if let Some(object) = editable_rotation_object(project, session)
+                            && let Some(pivot) =
+                                object_outline(object, tick).map(|shape| shape.anchor_position())
+                            && let Some(start) =
+                                unbounded_composition_point(preview, origin, composition_size)
+                            && session.begin_viewport_rotation_drag(
+                                start,
+                                pivot,
+                                *object.transform.rotation_degrees.base_value(),
+                            )
+                        {
+                            actions
+                                .viewport_rotation_actions
+                                .push(ViewportRotationAction::Begin(id));
+                        }
+                    } else if let Some(start) =
                         composition_point_from_preview(preview, origin, composition_size)
                     {
-                        let ctrl = ui.input(|input| input.modifiers.ctrl);
                         let scale_hit = if ctrl {
                             None
                         } else {
@@ -1046,7 +1163,13 @@ pub fn draw_editor_shell(
                     if let Some(point) =
                         unbounded_composition_point(preview, pointer, composition_size)
                     {
-                        if let Some(scale) = session.update_viewport_scale_drag(
+                        if session.viewport_rotation_drag_active() {
+                            if let Some(degrees) = session.update_viewport_rotation_drag(point) {
+                                actions
+                                    .viewport_rotation_actions
+                                    .push(ViewportRotationAction::Update(degrees));
+                            }
+                        } else if let Some(scale) = session.update_viewport_scale_drag(
                             point,
                             ui.input(|input| input.modifiers.shift),
                         ) {
@@ -1065,6 +1188,22 @@ pub fn draw_editor_shell(
                     }
                 }
                 if response.drag_stopped_by(egui::PointerButton::Primary) {
+                    if session.viewport_rotation_drag_active() {
+                        if let Some(pointer) = response.interact_pointer_pos()
+                            && let Some(point) =
+                                unbounded_composition_point(preview, pointer, composition_size)
+                            && let Some(degrees) = session.update_viewport_rotation_drag(point)
+                        {
+                            actions
+                                .viewport_rotation_actions
+                                .push(ViewportRotationAction::Update(degrees));
+                        }
+                        if session.finish_viewport_rotation_drag() {
+                            actions
+                                .viewport_rotation_actions
+                                .push(ViewportRotationAction::Commit);
+                        }
+                    }
                     if session.viewport_scale_drag_active() {
                         if let Some(pointer) = response.interact_pointer_pos()
                             && let Some(point) =
@@ -1155,8 +1294,9 @@ mod tests {
     use super::{
         InspectorNumericDraft, InspectorPositionEdit, PositionAxis, apply_inspector_position_edits,
         apply_object_click, clamped_drag_point, committed_number, composition_point_from_preview,
-        fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
-        selected_scale_corner_hit, selection_rect_on_preview, unbounded_composition_point,
+        fit_composition_preview, panned_preview_rect, preview_point, rotation_handle_on_preview,
+        selected_outline_bounds, selected_rotation_handle_hit, selected_scale_corner_hit,
+        selection_rect_on_preview, unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
@@ -1342,6 +1482,150 @@ mod tests {
         assert_eq!(
             selected_scale_corner_hit(&project, &session, preview, preview, 0.0, pointer),
             None
+        );
+    }
+
+    #[test]
+    fn rotation_handle_tracks_rotated_mirrored_shape_and_selection_eligibility() {
+        use rhythm_core::ids::KeyframeId;
+        use rhythm_core::{
+            animation::{Animated, Interpolation, Keyframe},
+            domain::{LinearRgba, Vec2},
+            hit_test::object_outline,
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, MusicalTick, TempoMap},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let id = ObjectId::new(1).expect("id");
+        let mut project = Project::new(
+            "rotation handle",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id,
+            name: "rotated".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(960.0, 500.0)),
+                Animated::new_static(v(-1.0, -2.0)),
+                Animated::new_static(90.0),
+                Animated::new_static(v(0.25, 0.75)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(200.0, 100.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        let mut session = EditorSession::default();
+        session.select_viewport_object(Some(id));
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1200.0, 800.0));
+        let preview = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(960.0, 540.0));
+        let object = &project.composition.objects[0];
+        let geometry = object_outline(object, 0.0).expect("geometry");
+        let (top, knob) =
+            rotation_handle_on_preview(object, preview, [1920, 1080], 0.0).expect("handle");
+        assert!(((top - knob).length() - 28.0).abs() < 1e-3);
+        let pivot = preview_point(preview, geometry.anchor_position(), [1920, 1080]);
+        assert!(pivot.distance(knob) > 20.0);
+        assert_eq!(
+            selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob),
+            Some(id)
+        );
+        assert_eq!(
+            selected_rotation_handle_hit(
+                &project,
+                &session,
+                preview,
+                canvas,
+                0.0,
+                knob + egui::vec2(12.0, 0.0),
+            ),
+            None
+        );
+        let zoomed =
+            egui::Rect::from_min_size(egui::pos2(-200.0, -200.0), egui::vec2(1920.0, 1080.0));
+        let (top_zoomed, knob_zoomed) =
+            rotation_handle_on_preview(object, zoomed, [1920, 1080], 0.0).expect("zoom handle");
+        assert!(((top_zoomed - knob_zoomed).length() - 28.0).abs() < 1e-3);
+
+        project.composition.objects[0].locked = true;
+        assert_eq!(
+            selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob),
+            None
+        );
+        project.composition.objects[0].locked = false;
+        project.composition.objects[0]
+            .transform
+            .rotation_degrees
+            .insert_keyframe(Keyframe::new(
+                KeyframeId::new(2).expect("key"),
+                MusicalTick::new(0),
+                90.0,
+                Interpolation::Linear,
+            ))
+            .expect("insert");
+        assert_eq!(
+            selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob),
+            None
+        );
+    }
+
+    #[test]
+    fn rotation_handle_is_pickable_in_canvas_outside_composition_preview() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{GridOffsetNs, TempoMap},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let id = ObjectId::new(1).expect("id");
+        let mut project = Project::new(
+            "outside preview",
+            ProjectSettings::default(),
+            TempoMap::unset(GridOffsetNs::new(0)),
+        );
+        project.composition.objects.push(Object {
+            id,
+            name: "top edge".to_owned(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(960.0, 0.0)),
+                Animated::new_static(v(1.0, 1.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(200.0, 100.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        let canvas = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1150.0, 760.0));
+        let preview = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(960.0, 540.0));
+        let mut session = EditorSession::default();
+        session.select_viewport_object(Some(id));
+        let (_, knob) =
+            rotation_handle_on_preview(&project.composition.objects[0], preview, [1920, 1080], 0.0)
+                .expect("rotation knob");
+        assert!(knob.y < preview.min.y && canvas.contains(knob));
+        assert_eq!(
+            selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob),
+            Some(id)
         );
     }
 

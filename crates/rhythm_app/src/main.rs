@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use editor_session::{
-    EditorSession, apply_viewport_position_actions, apply_viewport_scale_actions,
+    EditorSession, apply_viewport_position_actions, apply_viewport_rotation_actions,
+    apply_viewport_scale_actions,
 };
 use editor_ui::{DiagnosticsView, EditorUiActions, apply_inspector_position_edits};
 use gpu::GpuContext;
@@ -292,7 +293,8 @@ impl ApplicationHandler for RhythmApp {
                         }
                     } else if !control && !alt && !super_key && code == KeyCode::Escape {
                         let viewport_cancelled = self.session.cancel_viewport_position_drag()
-                            || self.session.cancel_viewport_scale_drag();
+                            || self.session.cancel_viewport_scale_drag()
+                            || self.session.cancel_viewport_rotation_drag();
                         if viewport_cancelled
                             && let Err(error) = self.project_editor.cancel_transaction()
                         {
@@ -347,7 +349,8 @@ impl ApplicationHandler for RhythmApp {
             }
             WindowEvent::Focused(false) => {
                 if (self.session.cancel_viewport_position_drag()
-                    || self.session.cancel_viewport_scale_drag())
+                    || self.session.cancel_viewport_scale_drag()
+                    || self.session.cancel_viewport_rotation_drag())
                     && let Err(error) = self.project_editor.cancel_transaction()
                 {
                     warn!(?error, "lost focus while cancelling viewport drag");
@@ -426,6 +429,19 @@ impl ApplicationHandler for RhythmApp {
                             Err(error) => {
                                 self.session.cancel_viewport_scale_drag();
                                 warn!(?error, "viewport Scale drag failed and was cancelled");
+                            }
+                        }
+                    }
+                    if !ui_actions.viewport_rotation_actions.is_empty() {
+                        match apply_viewport_rotation_actions(
+                            &mut self.project_editor,
+                            ui_actions.viewport_rotation_actions,
+                        ) {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => {
+                                self.session.cancel_viewport_rotation_drag();
+                                warn!(?error, "viewport Rotation drag failed and was cancelled");
                             }
                         }
                     }

@@ -210,6 +210,11 @@ pub enum HistoryPayload {
         before: Vec2,
         after: Vec2,
     },
+    RotationBaseChanged {
+        object_id: ObjectId,
+        before: f32,
+        after: f32,
+    },
     OpacityBaseChanged {
         object_id: ObjectId,
         before: f32,
@@ -386,8 +391,9 @@ impl History {
 
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
-    ObjectPosition { object_id: ObjectId, before: Vec2 },
-    ObjectScale { object_id: ObjectId, before: Vec2 },
+    Position { object_id: ObjectId, before: Vec2 },
+    Scale { object_id: ObjectId, before: Vec2 },
+    Rotation { object_id: ObjectId, before: f32 },
 }
 
 #[derive(Debug)]
@@ -631,13 +637,13 @@ impl ProjectEditor {
             .position
             .base_value();
 
-        self.transaction = Some(ActiveTransaction::ObjectPosition { object_id, before });
+        self.transaction = Some(ActiveTransaction::Position { object_id, before });
         Ok(())
     }
 
     pub fn update_position_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectPosition { object_id, .. }) => object_id,
+            Some(ActiveTransaction::Position { object_id, .. }) => object_id,
             _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active position transaction",
@@ -667,7 +673,7 @@ impl ProjectEditor {
                 "cannot directly drag animated Scale",
             ));
         }
-        self.transaction = Some(ActiveTransaction::ObjectScale {
+        self.transaction = Some(ActiveTransaction::Scale {
             object_id,
             before: *scale.base_value(),
         });
@@ -676,7 +682,7 @@ impl ProjectEditor {
 
     pub fn update_scale_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectScale { object_id, .. }) => object_id,
+            Some(ActiveTransaction::Scale { object_id, .. }) => object_id,
             _ => return Err(EditError::HistoryInvariant("no active scale transaction")),
         };
         let index = self.object_index(object_id)?;
@@ -687,13 +693,55 @@ impl ProjectEditor {
         Ok(())
     }
 
+    /// A static Rotation drag updates preview values live, then commits
+    /// exactly one logical undo step. Keyframed Rotation uses AI-180.
+    pub fn begin_rotation_transaction(&mut self, object_id: ObjectId) -> Result<(), EditError> {
+        if self.transaction.is_some() {
+            return Err(EditError::HistoryInvariant("transaction already active"));
+        }
+        let index = self.object_index(object_id)?;
+        let rotation = &self.project.composition.objects[index]
+            .transform
+            .rotation_degrees;
+        if !rotation.keyframes().is_empty() {
+            return Err(EditError::InvalidValue(
+                "cannot directly drag animated Rotation",
+            ));
+        }
+        self.transaction = Some(ActiveTransaction::Rotation {
+            object_id,
+            before: *rotation.base_value(),
+        });
+        Ok(())
+    }
+
+    pub fn update_rotation_transaction(&mut self, degrees: f32) -> Result<(), EditError> {
+        if !degrees.is_finite() {
+            return Err(EditError::InvalidValue("rotation must be finite"));
+        }
+        let object_id = match self.transaction {
+            Some(ActiveTransaction::Rotation { object_id, .. }) => object_id,
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active rotation transaction",
+                ));
+            }
+        };
+        let index = self.object_index(object_id)?;
+        *self.project.composition.objects[index]
+            .transform
+            .rotation_degrees
+            .base_value_mut() = degrees;
+        Ok(())
+    }
+
     pub fn commit_transaction(&mut self) -> Result<bool, EditError> {
         let Some(transaction) = self.transaction.take() else {
             return Ok(false);
         };
 
         match transaction {
-            ActiveTransaction::ObjectPosition { object_id, before } => {
+            ActiveTransaction::Position { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -714,7 +762,7 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
-            ActiveTransaction::ObjectScale { object_id, before } => {
+            ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -735,6 +783,26 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
+            ActiveTransaction::Rotation { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                let after = *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
+                    .base_value();
+
+                if before == after {
+                    return Ok(false);
+                }
+                self.history.push(PendingHistoryEntry::new(
+                    "Rotate Object",
+                    HistoryPayload::RotationBaseChanged {
+                        object_id,
+                        before,
+                        after,
+                    },
+                ));
+                Ok(true)
+            }
         }
     }
 
@@ -744,18 +812,25 @@ impl ProjectEditor {
         };
 
         match transaction {
-            ActiveTransaction::ObjectPosition { object_id, before } => {
+            ActiveTransaction::Position { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
                     .position
                     .base_value_mut() = before;
             }
-            ActiveTransaction::ObjectScale { object_id, before } => {
+            ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
                     .scale
+                    .base_value_mut() = before;
+            }
+            ActiveTransaction::Rotation { object_id, before } => {
+                let index = self.object_index(object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
                     .base_value_mut() = before;
             }
         }
@@ -1562,6 +1637,21 @@ impl ProjectEditor {
                     .base_value_mut() = value;
             }
             (
+                HistoryPayload::RotationBaseChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let value = *direction.pick(before, after);
+                let index = self.object_index(*object_id)?;
+                *self.project.composition.objects[index]
+                    .transform
+                    .rotation_degrees
+                    .base_value_mut() = value;
+            }
+            (
                 HistoryPayload::OpacityBaseChanged {
                     object_id,
                     before,
@@ -1977,6 +2067,83 @@ mod tests {
         let mut editor = ProjectEditor::new(project).expect("valid project");
         assert!(matches!(
             editor.begin_scale_transaction(id),
+            Err(super::EditError::InvalidValue(_))
+        ));
+    }
+
+    #[test]
+    fn rotation_transaction_is_one_history_entry_and_undo_redo_preserve_winding() {
+        let mut editor = editor_with_object();
+        let id = ObjectId::new(1).expect("object id");
+        let rotation = |editor: &ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value()
+        };
+        editor.begin_rotation_transaction(id).expect("begin");
+        editor.update_rotation_transaction(175.0).expect("update");
+        editor
+            .update_rotation_transaction(450.0)
+            .expect("more than a turn");
+        assert_eq!(editor.history_len(), 0);
+        assert!(editor.commit_transaction().expect("commit"));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(rotation(&editor), 450.0);
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(rotation(&editor), 0.0);
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(rotation(&editor), 450.0);
+
+        editor.begin_rotation_transaction(id).expect("begin cancel");
+        editor
+            .update_rotation_transaction(-30.0)
+            .expect("update cancel");
+        assert!(editor.cancel_transaction().expect("cancel"));
+        assert_eq!(rotation(&editor), 450.0);
+        assert_eq!(editor.history_len(), 1);
+
+        editor.begin_rotation_transaction(id).expect("begin no-op");
+        assert!(!editor.commit_transaction().expect("no-op"));
+        assert_eq!(editor.history_len(), 1);
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn rotation_transaction_rejects_animation_nonfinite_and_concurrent_drag() {
+        let mut editor = editor_with_object();
+        let id = ObjectId::new(1).expect("object id");
+        editor.begin_scale_transaction(id).expect("begin scale");
+        assert!(matches!(
+            editor.begin_rotation_transaction(id),
+            Err(super::EditError::HistoryInvariant(_))
+        ));
+        assert!(editor.cancel_transaction().expect("cancel scale"));
+
+        editor
+            .begin_rotation_transaction(id)
+            .expect("begin rotation");
+        assert!(matches!(
+            editor.update_rotation_transaction(f32::NAN),
+            Err(super::EditError::InvalidValue(_))
+        ));
+        assert!(editor.cancel_transaction().expect("cancel rotation"));
+
+        let mut project = editor.into_project();
+        project.composition.objects[0]
+            .transform
+            .rotation_degrees
+            .insert_keyframe(Keyframe::new(
+                KeyframeId::new(2).expect("id"),
+                MusicalTick::new(0),
+                0.0,
+                Interpolation::Linear,
+            ))
+            .expect("insert");
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid project");
+        assert!(matches!(
+            editor.begin_rotation_transaction(id),
             Err(super::EditError::InvalidValue(_))
         ));
     }

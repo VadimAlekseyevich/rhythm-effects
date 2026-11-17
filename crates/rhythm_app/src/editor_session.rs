@@ -114,6 +114,41 @@ pub fn apply_viewport_scale_actions(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ViewportRotationAction {
+    Begin(ObjectId),
+    Update(f32),
+    Commit,
+}
+
+/// Apply drag preview and final commit through ProjectEditor, not direct
+/// Project mutation. Errors roll back to the pre-drag Rotation.
+pub fn apply_viewport_rotation_actions(
+    editor: &mut ProjectEditor,
+    actions: impl IntoIterator<Item = ViewportRotationAction>,
+) -> Result<bool, EditError> {
+    let mut repaint = false;
+    for action in actions {
+        let result = match action {
+            ViewportRotationAction::Begin(id) => {
+                editor.begin_rotation_transaction(id).map(|()| false)
+            }
+            ViewportRotationAction::Update(degrees) => {
+                editor.update_rotation_transaction(degrees).map(|()| true)
+            }
+            ViewportRotationAction::Commit => editor.commit_transaction(),
+        };
+        match result {
+            Ok(changed) => repaint |= changed,
+            Err(error) => {
+                let _ = editor.cancel_transaction();
+                return Err(error);
+            }
+        }
+    }
+    Ok(repaint)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct ViewportPositionDrag {
     start: Vec2,
     base_position: Vec2,
@@ -129,6 +164,16 @@ struct ViewportScaleDrag {
     local_corner: [f64; 2],
     sin: f64,
     cos: f64,
+}
+
+/// Track signed angular travel around the same composition-space Anchor
+/// throughout the gesture; unwrapping consecutive angles preserves >360°.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ViewportRotationDrag {
+    pivot: Vec2,
+    last_angle: f64,
+    total_radians: f64,
+    base_degrees: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -196,6 +241,7 @@ pub struct EditorSession {
     viewport_box_selection: Option<ViewportBoxSelection>,
     viewport_position_drag: Option<ViewportPositionDrag>,
     viewport_scale_drag: Option<ViewportScaleDrag>,
+    viewport_rotation_drag: Option<ViewportRotationDrag>,
     viewport_pan_points: [f32; 2],
     viewport_zoom: f32,
     viewport_pan_origin: Option<[f32; 2]>,
@@ -220,6 +266,7 @@ impl Default for EditorSession {
             viewport_box_selection: None,
             viewport_position_drag: None,
             viewport_scale_drag: None,
+            viewport_rotation_drag: None,
             viewport_pan_points: [0.0, 0.0],
             viewport_zoom: 1.0,
             viewport_pan_origin: None,
@@ -276,7 +323,10 @@ impl EditorSession {
     /// Absolute position updates are computed from the original mouse-down
     /// composition point, preventing frame-to-frame drift.
     pub fn begin_viewport_position_drag(&mut self, start: Vec2, base_position: Vec2) -> bool {
-        if self.viewport_position_drag.is_some() || self.viewport_scale_drag.is_some() {
+        if self.viewport_position_drag.is_some()
+            || self.viewport_scale_drag.is_some()
+            || self.viewport_rotation_drag.is_some()
+        {
             return false;
         }
         self.viewport_position_drag = Some(ViewportPositionDrag {
@@ -330,6 +380,7 @@ impl EditorSession {
     ) -> bool {
         if self.viewport_scale_drag.is_some()
             || self.viewport_position_drag.is_some()
+            || self.viewport_rotation_drag.is_some()
             || !rotation_degrees.is_finite()
             || size.x() <= 0.0
             || size.y() <= 0.0
@@ -421,6 +472,73 @@ impl EditorSession {
     #[must_use]
     pub const fn viewport_scale_drag_active(&self) -> bool {
         self.viewport_scale_drag.is_some()
+    }
+
+    /// Start at the actual pointer press around the evaluated Anchor, rather
+    /// than snapping the pointer to the displayed rotation knob.
+    pub fn begin_viewport_rotation_drag(
+        &mut self,
+        pointer: Vec2,
+        pivot: Vec2,
+        base_degrees: f32,
+    ) -> bool {
+        if self.viewport_rotation_drag.is_some()
+            || self.viewport_scale_drag.is_some()
+            || self.viewport_position_drag.is_some()
+            || !base_degrees.is_finite()
+        {
+            return false;
+        }
+        let dx = f64::from(pointer.x()) - f64::from(pivot.x());
+        let dy = f64::from(pointer.y()) - f64::from(pivot.y());
+        if !dx.is_finite() || !dy.is_finite() || dx.hypot(dy) <= 1e-6 {
+            return false;
+        }
+        self.viewport_rotation_drag = Some(ViewportRotationDrag {
+            pivot,
+            last_angle: dy.atan2(dx),
+            total_radians: 0.0,
+            base_degrees,
+        });
+        true
+    }
+
+    /// The composition's +Y axis points down, so positive pointer rotation
+    /// is visually clockwise. Unwrap adjacent angles at the -180/180 seam;
+    /// unlike modulo-360 edits, repeated full revolutions stay distinguishable.
+    #[must_use]
+    pub fn update_viewport_rotation_drag(&mut self, pointer: Vec2) -> Option<f32> {
+        let drag = self.viewport_rotation_drag.as_mut()?;
+        let dx = f64::from(pointer.x()) - f64::from(drag.pivot.x());
+        let dy = f64::from(pointer.y()) - f64::from(drag.pivot.y());
+        if !dx.is_finite() || !dy.is_finite() || dx.hypot(dy) <= 1e-6 {
+            return None;
+        }
+        let angle = dy.atan2(dx);
+        let delta = (angle - drag.last_angle + std::f64::consts::PI)
+            .rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        let total = drag.total_radians + delta;
+        let degrees = f64::from(drag.base_degrees) + total.to_degrees();
+        if !degrees.is_finite() || degrees.abs() > f64::from(f32::MAX) {
+            return None;
+        }
+        drag.last_angle = angle;
+        drag.total_radians = total;
+        Some(degrees as f32)
+    }
+
+    pub fn finish_viewport_rotation_drag(&mut self) -> bool {
+        self.viewport_rotation_drag.take().is_some()
+    }
+
+    pub fn cancel_viewport_rotation_drag(&mut self) -> bool {
+        self.viewport_rotation_drag.take().is_some()
+    }
+
+    #[must_use]
+    pub const fn viewport_rotation_drag_active(&self) -> bool {
+        self.viewport_rotation_drag.is_some()
     }
 
     /// Camera-only translation in egui logical points, never Project pixels.
@@ -1430,7 +1548,8 @@ impl EditorSession {
 mod tests {
     use super::{
         EditorSession, KeyframeDragMember, PreviewQuality, ViewportPositionAction,
-        ViewportScaleAction, apply_viewport_position_actions, apply_viewport_scale_actions,
+        ViewportRotationAction, ViewportScaleAction, apply_viewport_position_actions,
+        apply_viewport_rotation_actions, apply_viewport_scale_actions,
     };
     use rhythm_core::{
         domain::Vec2,
@@ -1939,6 +2058,123 @@ mod tests {
         assert!(editor.redo().expect("redo"));
         assert_eq!(current(&editor), v(1.5, 1.5));
         editor.project().validate().expect("valid project");
+    }
+
+    #[test]
+    fn rotation_drag_unwraps_full_turn_and_keeps_clockwise_positive() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 30.0));
+        assert!(!session.begin_viewport_rotation_drag(v(50.0, 0.0), v(0.0, 0.0), 0.0));
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, 100.0)),
+            Some(120.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(-100.0, 0.0)),
+            Some(210.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, -100.0)),
+            Some(300.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 0.0)),
+            Some(390.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 0.0)),
+            Some(390.0)
+        );
+        assert!(session.finish_viewport_rotation_drag());
+        assert_eq!(session.update_viewport_rotation_drag(v(0.0, 100.0)), None);
+
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), -20.0));
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, -100.0)),
+            Some(-110.0)
+        );
+        assert!(session.cancel_viewport_rotation_drag());
+    }
+
+    #[test]
+    fn rotation_drag_crosses_seam_and_skips_near_pivot_without_jump() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(!session.begin_viewport_rotation_drag(v(0.0, 0.0), v(0.0, 0.0), 0.0));
+        assert!(!session.begin_viewport_rotation_drag(v(1.0, 0.0), v(0.0, 0.0), f32::NAN));
+        assert!(session.begin_viewport_rotation_drag(v(-100.0, 1.0), v(0.0, 0.0), 0.0));
+        assert_eq!(session.update_viewport_rotation_drag(v(0.0, 0.0)), None);
+        let small = session
+            .update_viewport_rotation_drag(v(-100.0, -1.0))
+            .expect("cross seam");
+        assert!(small > 1.0 && small < 1.2, "got {small}");
+        let back = session
+            .update_viewport_rotation_drag(v(-100.0, 1.0))
+            .expect("back across seam");
+        assert!(back.abs() < 0.001);
+    }
+
+    #[test]
+    fn rotation_drag_updates_are_one_undo_step_and_escape_restores() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut editor = editor_with_object_for_drag();
+        let id = ObjectId::new(1).expect("id");
+        let mut session = EditorSession::default();
+        let rotation = |editor: &rhythm_core::editor::ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value()
+        };
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 0.0));
+        assert!(
+            !apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Begin(id)])
+                .expect("begin")
+        );
+        let first = session
+            .update_viewport_rotation_drag(v(0.0, 100.0))
+            .expect("angle");
+        assert!(
+            apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Update(first)])
+                .expect("preview")
+        );
+        assert_eq!(rotation(&editor), 90.0);
+        assert_eq!(editor.history_len(), 0);
+
+        let final_angle = session
+            .update_viewport_rotation_drag(v(-100.0, 0.0))
+            .expect("angle");
+        assert!(session.finish_viewport_rotation_drag());
+        assert!(
+            apply_viewport_rotation_actions(
+                &mut editor,
+                [
+                    ViewportRotationAction::Update(final_angle),
+                    ViewportRotationAction::Commit
+                ]
+            )
+            .expect("commit")
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(rotation(&editor), 180.0);
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(rotation(&editor), 0.0);
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(rotation(&editor), 180.0);
+
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 180.0));
+        apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Begin(id)])
+            .expect("begin cancel");
+        let cancelled = session
+            .update_viewport_rotation_drag(v(0.0, 100.0))
+            .expect("angle");
+        apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Update(cancelled)])
+            .expect("preview");
+        assert!(session.cancel_viewport_rotation_drag());
+        assert!(editor.cancel_transaction().expect("cancel"));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(rotation(&editor), 180.0);
     }
 
     #[test]
