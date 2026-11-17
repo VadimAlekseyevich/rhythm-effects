@@ -642,6 +642,80 @@ pub struct InspectorTransformEdit {
     pub display_value: f32,
 }
 
+/// Animated Inspector edits update the nearest authoring-grid key, never
+/// the static base, and move the playhead after a successful commit.
+pub fn apply_inspector_animated_transform_edits(
+    session: &mut EditorSession,
+    editor: &mut ProjectEditor,
+    edits: impl IntoIterator<Item = InspectorTransformEdit>,
+) -> Result<bool, EditError> {
+    let mut changed = false;
+    for edit in edits {
+        let project = editor.project();
+        let Some(object) = project.composition.objects.iter()
+            .find(|object| object.id == edit.object_id) else {
+            continue;
+        };
+        if object.locked || property_keyframe_count(project, edit.object_id, edit.property)? == 0 {
+            continue;
+        }
+        let Ok(continuous_tick) = project.tempo_map.continuous_tick_position(session.playhead())
+        else {
+            continue;
+        };
+        let Ok(resolved_tick) =
+            snap_tick_position_to_grid(continuous_tick, session.authoring_division())
+        else {
+            continue;
+        };
+        let Ok(resolved_time) = project.tempo_map.project_time_for_tick(resolved_tick) else {
+            continue;
+        };
+        let existing =
+            property_keyframe_at_tick(project, edit.object_id, edit.property, resolved_tick)?;
+        let current = if let Some(key) = existing {
+            key.value
+        } else {
+            evaluate_property_at_tick(project, edit.object_id, edit.property, continuous_tick)?
+        };
+        let is_percent = matches!(
+            edit.property,
+            AnimatableProperty::Scale | AnimatableProperty::Anchor | AnimatableProperty::Opacity
+        );
+        let scalar = if is_percent { edit.display_value / 100.0 } else { edit.display_value };
+        if !scalar.is_finite() {
+            continue;
+        }
+        let replacement = match (current, edit.axis) {
+            (PropertyValue::Vec2(previous), Some(axis)) => {
+                let (x, y) = match axis {
+                    PositionAxis::X => (scalar, previous.y()),
+                    PositionAxis::Y => (previous.x(), scalar),
+                };
+                let Ok(value) = Vec2::new(x, y) else { continue };
+                PropertyValue::Vec2(value)
+            }
+            (PropertyValue::Scalar(_), None) => PropertyValue::Scalar(scalar),
+            _ => continue,
+        };
+        let applied = if let Some(key) = existing {
+            editor.execute(EditCommand::SetPropertyKeyframeValue {
+                object_id: edit.object_id, property: edit.property,
+                keyframe_id: key.id, value: replacement,
+            })?
+        } else {
+            editor.create_property_keyframe(
+                edit.object_id, edit.property, resolved_tick, replacement,
+            )?.is_some()
+        };
+        if applied {
+            session.seek_paused(resolved_time);
+        }
+        changed |= applied;
+    }
+    Ok(changed)
+}
+
 pub fn apply_inspector_transform_edits(
     editor: &mut ProjectEditor,
     edits: impl IntoIterator<Item = InspectorTransformEdit>,
@@ -717,6 +791,7 @@ fn draw_inspector_transform_field(
     property: AnimatableProperty,
     axis: Option<PositionAxis>,
     current: f32,
+    animated: bool,
     actions: &mut EditorUiActions,
 ) -> bool {
     let id = inspector_transform_id(object_id, property, axis);
@@ -747,14 +822,17 @@ fn draw_inspector_transform_field(
             .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     } else if enter || response.lost_focus() {
         if let Some(value) = committed_number(&draft) {
-            actions
-                .inspector_transform_edits
-                .push(InspectorTransformEdit {
-                    object_id,
-                    property,
-                    axis,
-                    display_value: value,
-                });
+            let edit = InspectorTransformEdit {
+                object_id,
+                property,
+                axis,
+                display_value: value,
+            };
+            if animated {
+                actions.inspector_animated_edits.push(edit);
+            } else {
+                actions.inspector_transform_edits.push(edit);
+            }
         }
         ui.ctx()
             .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
@@ -801,7 +879,8 @@ fn draw_inspector_transform_row(
     let Ok(value) = value else {
         return;
     };
-    let editable = !object.locked && count == 0;
+    let editable =
+        !object.locked && (count == 0 || project.tempo_map.initial_segment().is_some());
     let keyframe_tick = project
         .tempo_map
         .continuous_tick_position(session.playhead())
@@ -843,7 +922,7 @@ fn draw_inspector_transform_row(
                         value
                     }
                 };
-                if property == AnimatableProperty::Position {
+                if property == AnimatableProperty::Position && count == 0 {
                     if draw_inspector_position_field(ui, object.id, PositionAxis::X, v.x(), actions)
                     {
                         session.focus_property(object.id, property);
@@ -859,6 +938,7 @@ fn draw_inspector_transform_row(
                         property,
                         Some(PositionAxis::X),
                         display(v.x()),
+                        count != 0,
                         actions,
                     ) {
                         session.focus_property(object.id, property);
@@ -869,6 +949,7 @@ fn draw_inspector_transform_row(
                         property,
                         Some(PositionAxis::Y),
                         display(v.y()),
+                        count != 0,
                         actions,
                     ) {
                         session.focus_property(object.id, property);
@@ -881,7 +962,7 @@ fn draw_inspector_transform_row(
                 } else {
                     v
                 };
-                if draw_inspector_transform_field(ui, object.id, property, None, display, actions) {
+                if draw_inspector_transform_field(ui, object.id, property, None, display, count != 0, actions) {
                     session.focus_property(object.id, property);
                 }
             }
@@ -1058,6 +1139,7 @@ pub struct EditorUiActions {
     pub viewport_rotation_actions: Vec<ViewportRotationAction>,
     pub inspector_position_edits: Vec<InspectorPositionEdit>,
     pub inspector_transform_edits: Vec<InspectorTransformEdit>,
+    pub inspector_animated_edits: Vec<InspectorTransformEdit>,
     pub inspector_keyframe_requests: Vec<(ObjectId, AnimatableProperty)>,
     pub undo_requested: bool,
     pub redo_requested: bool,
@@ -1336,7 +1418,7 @@ pub fn draw_editor_shell(
                         );
                     }
                     ui.small("Enter / focus loss commits · Escape restores. Values in %, ° or px.");
-                    ui.small("◇ Static · ◇ Anim · ◆ Key; numeric animated edits are AI-186.");
+                    ui.small("◇ Static · ◇ Anim · ◆ Key; animated edits resolve to the nearest grid.");
                 }
             } else {
                 ui.label("No object selected.");
