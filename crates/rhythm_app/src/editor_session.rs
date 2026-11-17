@@ -162,12 +162,12 @@ pub fn apply_viewport_group_position_actions(
     let mut repaint = false;
     for action in actions {
         let result = match action {
-            ViewportGroupPositionAction::Begin(ids) => {
-                editor.begin_group_position_transaction(&ids).map(|()| false)
-            }
-            ViewportGroupPositionAction::Update(delta) => {
-                editor.update_group_position_transaction(delta).map(|()| true)
-            }
+            ViewportGroupPositionAction::Begin(ids) => editor
+                .begin_group_position_transaction(&ids)
+                .map(|()| false),
+            ViewportGroupPositionAction::Update(delta) => editor
+                .update_group_position_transaction(delta)
+                .map(|()| true),
             ViewportGroupPositionAction::Commit => editor.commit_transaction(),
         };
         match result {
@@ -380,7 +380,8 @@ impl EditorSession {
         let drag = self.viewport_group_position_drag?;
         let dx = f64::from(pointer.x()) - f64::from(drag.start.x());
         let dy = f64::from(pointer.y()) - f64::from(drag.start.y());
-        if !dx.is_finite() || !dy.is_finite()
+        if !dx.is_finite()
+            || !dy.is_finite()
             || dx.abs() > f64::from(f32::MAX)
             || dy.abs() > f64::from(f32::MAX)
         {
@@ -2170,15 +2171,28 @@ mod tests {
         assert!(session.begin_viewport_group_position_drag(v(100.0, 50.0)));
         assert!(session.viewport_group_position_drag_active());
         assert!(!session.begin_viewport_scale_drag(
-            v(100.0, 50.0), v(1.0, 1.0), v(100.0, 100.0),
-            v(0.5, 0.5), 0.0, [1.0, 1.0],
+            v(100.0, 50.0),
+            v(1.0, 1.0),
+            v(100.0, 100.0),
+            v(0.5, 0.5),
+            0.0,
+            [1.0, 1.0],
         ));
-        assert_eq!(session.update_viewport_group_position_drag(v(145.0, 20.0)), Some(v(45.0, -30.0)));
-        assert_eq!(session.update_viewport_group_position_drag(v(145.0, 20.0)), Some(v(45.0, -30.0)));
+        assert_eq!(
+            session.update_viewport_group_position_drag(v(145.0, 20.0)),
+            Some(v(45.0, -30.0))
+        );
+        assert_eq!(
+            session.update_viewport_group_position_drag(v(145.0, 20.0)),
+            Some(v(45.0, -30.0))
+        );
         assert_eq!(session.selected_objects(), &[a, b]);
         assert!(session.cancel_viewport_group_position_drag());
         assert!(!session.cancel_viewport_group_position_drag());
-        assert_eq!(session.update_viewport_group_position_drag(v(200.0, 200.0)), None);
+        assert_eq!(
+            session.update_viewport_group_position_drag(v(200.0, 200.0)),
+            None
+        );
     }
 
     #[test]
@@ -2194,8 +2208,11 @@ mod tests {
         second.id = ObjectId::new(2).expect("second");
         second.name = "second".to_string();
         second.transform = TransformAnimation::new(
-            Animated::new_static(v(100.0, 200.0)), Animated::new_static(v(1.0, 1.0)),
-            Animated::new_static(0.0), Animated::new_static(v(0.5, 0.5)), Animated::new_static(1.0),
+            Animated::new_static(v(100.0, 200.0)),
+            Animated::new_static(v(1.0, 1.0)),
+            Animated::new_static(0.0),
+            Animated::new_static(v(0.5, 0.5)),
+            Animated::new_static(1.0),
         );
         second.content = ObjectContent::Rectangle(RectangleObject {
             size: Animated::new_static(v(100.0, 50.0)),
@@ -2215,22 +2232,36 @@ mod tests {
         apply_viewport_group_position_actions(
             &mut editor,
             [ViewportGroupPositionAction::Begin(vec![a, b])],
-        ).expect("begin");
-        let delta = session.update_viewport_group_position_drag(v(70.0, 90.0)).expect("delta");
+        )
+        .expect("begin");
+        let delta = session
+            .update_viewport_group_position_drag(v(70.0, 90.0))
+            .expect("delta");
         apply_viewport_group_position_actions(
             &mut editor,
             [ViewportGroupPositionAction::Update(delta)],
-        ).expect("preview");
+        )
+        .expect("preview");
         assert_eq!(editor.history_len(), 0);
         assert!(session.finish_viewport_group_position_drag());
-        apply_viewport_group_position_actions(
-            &mut editor,
-            [ViewportGroupPositionAction::Commit],
-        ).expect("commit");
+        apply_viewport_group_position_actions(&mut editor, [ViewportGroupPositionAction::Commit])
+            .expect("commit");
         assert_eq!(editor.history_len(), 1);
-        assert_eq!(*editor.project().composition.objects[1].transform.position.base_value(), v(120.0, 240.0));
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            v(120.0, 240.0)
+        );
         assert!(editor.undo().expect("undo"));
-        assert_eq!(*editor.project().composition.objects[1].transform.position.base_value(), v(100.0, 200.0));
+        assert_eq!(
+            *editor.project().composition.objects[1]
+                .transform
+                .position
+                .base_value(),
+            v(100.0, 200.0)
+        );
     }
 
     #[test]
