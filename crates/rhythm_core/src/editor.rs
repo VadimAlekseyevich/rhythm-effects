@@ -391,9 +391,9 @@ impl History {
 
 #[derive(Debug, Clone, PartialEq)]
 enum ActiveTransaction {
-    ObjectPosition { object_id: ObjectId, before: Vec2 },
-    ObjectScale { object_id: ObjectId, before: Vec2 },
-    ObjectRotation { object_id: ObjectId, before: f32 },
+    Position { object_id: ObjectId, before: Vec2 },
+    Scale { object_id: ObjectId, before: Vec2 },
+    Rotation { object_id: ObjectId, before: f32 },
 }
 
 #[derive(Debug)]
@@ -637,13 +637,13 @@ impl ProjectEditor {
             .position
             .base_value();
 
-        self.transaction = Some(ActiveTransaction::ObjectPosition { object_id, before });
+        self.transaction = Some(ActiveTransaction::Position { object_id, before });
         Ok(())
     }
 
     pub fn update_position_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectPosition { object_id, .. }) => object_id,
+            Some(ActiveTransaction::Position { object_id, .. }) => object_id,
             _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active position transaction",
@@ -673,7 +673,7 @@ impl ProjectEditor {
                 "cannot directly drag animated Scale",
             ));
         }
-        self.transaction = Some(ActiveTransaction::ObjectScale {
+        self.transaction = Some(ActiveTransaction::Scale {
             object_id,
             before: *scale.base_value(),
         });
@@ -682,7 +682,7 @@ impl ProjectEditor {
 
     pub fn update_scale_transaction(&mut self, value: Vec2) -> Result<(), EditError> {
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectScale { object_id, .. }) => object_id,
+            Some(ActiveTransaction::Scale { object_id, .. }) => object_id,
             _ => return Err(EditError::HistoryInvariant("no active scale transaction")),
         };
         let index = self.object_index(object_id)?;
@@ -708,7 +708,7 @@ impl ProjectEditor {
                 "cannot directly drag animated Rotation",
             ));
         }
-        self.transaction = Some(ActiveTransaction::ObjectRotation {
+        self.transaction = Some(ActiveTransaction::Rotation {
             object_id,
             before: *rotation.base_value(),
         });
@@ -720,7 +720,7 @@ impl ProjectEditor {
             return Err(EditError::InvalidValue("rotation must be finite"));
         }
         let object_id = match self.transaction {
-            Some(ActiveTransaction::ObjectRotation { object_id, .. }) => object_id,
+            Some(ActiveTransaction::Rotation { object_id, .. }) => object_id,
             _ => {
                 return Err(EditError::HistoryInvariant(
                     "no active rotation transaction",
@@ -741,7 +741,7 @@ impl ProjectEditor {
         };
 
         match transaction {
-            ActiveTransaction::ObjectPosition { object_id, before } => {
+            ActiveTransaction::Position { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -762,7 +762,7 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
-            ActiveTransaction::ObjectScale { object_id, before } => {
+            ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -783,7 +783,7 @@ impl ProjectEditor {
                 ));
                 Ok(true)
             }
-            ActiveTransaction::ObjectRotation { object_id, before } => {
+            ActiveTransaction::Rotation { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 let after = *self.project.composition.objects[index]
                     .transform
@@ -812,21 +812,21 @@ impl ProjectEditor {
         };
 
         match transaction {
-            ActiveTransaction::ObjectPosition { object_id, before } => {
+            ActiveTransaction::Position { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
                     .position
                     .base_value_mut() = before;
             }
-            ActiveTransaction::ObjectScale { object_id, before } => {
+            ActiveTransaction::Scale { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
                     .scale
                     .base_value_mut() = before;
             }
-            ActiveTransaction::ObjectRotation { object_id, before } => {
+            ActiveTransaction::Rotation { object_id, before } => {
                 let index = self.object_index(object_id)?;
                 *self.project.composition.objects[index]
                     .transform
