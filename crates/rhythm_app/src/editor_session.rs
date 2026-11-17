@@ -503,11 +503,16 @@ impl EditorSession {
         true
     }
 
-    /// The composition's +Y axis points down, so positive pointer rotation
-    /// is visually clockwise. Unwrap adjacent angles at the -180/180 seam;
-    /// unlike modulo-360 edits, repeated full revolutions stay distinguishable.
+    /// Positive rotation is clockwise in top-left-origin coordinates.
+    /// Consecutive angles unwrap across the -180/180 seam. Hold Shift to
+    /// quantize the absolute resulting angle to 15 degrees without changing
+    /// the continuous pointer history, including multi-turn winding.
     #[must_use]
-    pub fn update_viewport_rotation_drag(&mut self, pointer: Vec2) -> Option<f32> {
+    pub fn update_viewport_rotation_drag(
+        &mut self,
+        pointer: Vec2,
+        shift_snap: bool,
+    ) -> Option<f32> {
         let drag = self.viewport_rotation_drag.as_mut()?;
         let dx = f64::from(pointer.x()) - f64::from(drag.pivot.x());
         let dy = f64::from(pointer.y()) - f64::from(drag.pivot.y());
@@ -519,7 +524,14 @@ impl EditorSession {
             .rem_euclid(std::f64::consts::TAU)
             - std::f64::consts::PI;
         let total = drag.total_radians + delta;
-        let degrees = f64::from(drag.base_degrees) + total.to_degrees();
+        let continuous_degrees = f64::from(drag.base_degrees) + total.to_degrees();
+        // A stationary/zero-net drag must not change an off-grid starting
+        // value merely because Shift was held when pressing the handle.
+        let degrees = if shift_snap && total != 0.0 {
+            (continuous_degrees / 15.0).round() * 15.0
+        } else {
+            continuous_degrees
+        };
         if !degrees.is_finite() || degrees.abs() > f64::from(f32::MAX) {
             return None;
         }
@@ -2067,31 +2079,34 @@ mod tests {
         assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 30.0));
         assert!(!session.begin_viewport_rotation_drag(v(50.0, 0.0), v(0.0, 0.0), 0.0));
         assert_eq!(
-            session.update_viewport_rotation_drag(v(0.0, 100.0)),
+            session.update_viewport_rotation_drag(v(0.0, 100.0), false),
             Some(120.0)
         );
         assert_eq!(
-            session.update_viewport_rotation_drag(v(-100.0, 0.0)),
+            session.update_viewport_rotation_drag(v(-100.0, 0.0), false),
             Some(210.0)
         );
         assert_eq!(
-            session.update_viewport_rotation_drag(v(0.0, -100.0)),
+            session.update_viewport_rotation_drag(v(0.0, -100.0), false),
             Some(300.0)
         );
         assert_eq!(
-            session.update_viewport_rotation_drag(v(100.0, 0.0)),
+            session.update_viewport_rotation_drag(v(100.0, 0.0), false),
             Some(390.0)
         );
         assert_eq!(
-            session.update_viewport_rotation_drag(v(100.0, 0.0)),
+            session.update_viewport_rotation_drag(v(100.0, 0.0), false),
             Some(390.0)
         );
         assert!(session.finish_viewport_rotation_drag());
-        assert_eq!(session.update_viewport_rotation_drag(v(0.0, 100.0)), None);
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, 100.0), false),
+            None
+        );
 
         assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), -20.0));
         assert_eq!(
-            session.update_viewport_rotation_drag(v(0.0, -100.0)),
+            session.update_viewport_rotation_drag(v(0.0, -100.0), false),
             Some(-110.0)
         );
         assert!(session.cancel_viewport_rotation_drag());
@@ -2104,13 +2119,16 @@ mod tests {
         assert!(!session.begin_viewport_rotation_drag(v(0.0, 0.0), v(0.0, 0.0), 0.0));
         assert!(!session.begin_viewport_rotation_drag(v(1.0, 0.0), v(0.0, 0.0), f32::NAN));
         assert!(session.begin_viewport_rotation_drag(v(-100.0, 1.0), v(0.0, 0.0), 0.0));
-        assert_eq!(session.update_viewport_rotation_drag(v(0.0, 0.0)), None);
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, 0.0), false),
+            None
+        );
         let small = session
-            .update_viewport_rotation_drag(v(-100.0, -1.0))
+            .update_viewport_rotation_drag(v(-100.0, -1.0), false)
             .expect("cross seam");
         assert!(small > 1.0 && small < 1.2, "got {small}");
         let back = session
-            .update_viewport_rotation_drag(v(-100.0, 1.0))
+            .update_viewport_rotation_drag(v(-100.0, 1.0), false)
             .expect("back across seam");
         assert!(back.abs() < 0.001);
     }
@@ -2133,7 +2151,7 @@ mod tests {
                 .expect("begin")
         );
         let first = session
-            .update_viewport_rotation_drag(v(0.0, 100.0))
+            .update_viewport_rotation_drag(v(0.0, 100.0), false)
             .expect("angle");
         assert!(
             apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Update(first)])
@@ -2143,7 +2161,7 @@ mod tests {
         assert_eq!(editor.history_len(), 0);
 
         let final_angle = session
-            .update_viewport_rotation_drag(v(-100.0, 0.0))
+            .update_viewport_rotation_drag(v(-100.0, 0.0), false)
             .expect("angle");
         assert!(session.finish_viewport_rotation_drag());
         assert!(
@@ -2167,7 +2185,7 @@ mod tests {
         apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Begin(id)])
             .expect("begin cancel");
         let cancelled = session
-            .update_viewport_rotation_drag(v(0.0, 100.0))
+            .update_viewport_rotation_drag(v(0.0, 100.0), false)
             .expect("angle");
         apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Update(cancelled)])
             .expect("preview");
@@ -2175,6 +2193,157 @@ mod tests {
         assert!(editor.cancel_transaction().expect("cancel"));
         assert_eq!(editor.history_len(), 1);
         assert_eq!(rotation(&editor), 180.0);
+    }
+
+    #[test]
+    fn shift_rotation_snaps_absolute_degrees_and_toggles_without_drift() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 17.0));
+        // An off-grid starting Rotation is untouched until pointer motion.
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 0.0), true),
+            Some(17.0)
+        );
+        let free = session
+            .update_viewport_rotation_drag(v(100.0, 100.0), false)
+            .expect("free");
+        assert!((free - 62.0).abs() < 0.001);
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 100.0), true),
+            Some(60.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 100.0), false),
+            Some(free)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 100.0), true),
+            Some(60.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, 100.0), true),
+            Some(105.0)
+        );
+        assert!(session.finish_viewport_rotation_drag());
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 0.0), true),
+            None
+        );
+    }
+
+    #[test]
+    fn shift_rotation_snaps_negative_angles_and_thresholds_symmetrically() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 0.0));
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 13.0), true),
+            Some(0.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 14.0), true),
+            Some(15.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, -13.0), true),
+            Some(0.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, -14.0), true),
+            Some(-15.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, 0.0), true),
+            None
+        );
+        assert_eq!(
+            session
+                .update_viewport_rotation_drag(v(100.0, -14.0), false)
+                .map(|value| value > -9.0 && value < -7.0),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn shift_rotation_preserves_multiple_clockwise_and_counterclockwise_turns() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut session = EditorSession::default();
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 17.0));
+        for (point, expected) in [
+            (v(0.0, 100.0), 105.0),
+            (v(-100.0, 0.0), 195.0),
+            (v(0.0, -100.0), 285.0),
+            (v(100.0, 0.0), 375.0),
+            (v(0.0, 100.0), 465.0),
+        ] {
+            assert_eq!(
+                session.update_viewport_rotation_drag(point, true),
+                Some(expected)
+            );
+        }
+        assert!(session.finish_viewport_rotation_drag());
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), -17.0));
+        for (point, expected) in [
+            (v(0.0, -100.0), -105.0),
+            (v(-100.0, 0.0), -195.0),
+            (v(0.0, 100.0), -285.0),
+            (v(100.0, 0.0), -375.0),
+        ] {
+            assert_eq!(
+                session.update_viewport_rotation_drag(point, true),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn shift_rotation_on_mouse_release_commits_one_undo_entry() {
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let mut editor = editor_with_object_for_drag();
+        let mut session = EditorSession::default();
+        let id = ObjectId::new(1).expect("id");
+        let rotation = |editor: &rhythm_core::editor::ProjectEditor| {
+            *editor.project().composition.objects[0]
+                .transform
+                .rotation_degrees
+                .base_value()
+        };
+        assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 0.0));
+        apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Begin(id)])
+            .expect("begin");
+        let free = session
+            .update_viewport_rotation_drag(v(100.0, 50.0), false)
+            .expect("free preview");
+        assert!(free > 26.0 && free < 27.0);
+        apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Update(free)])
+            .expect("free preview");
+        assert_eq!(editor.history_len(), 0);
+
+        // The mouse-up handler samples Shift again, even if it changed since
+        // the last live frame. The final snapped value is what history saves.
+        let snapped = session
+            .update_viewport_rotation_drag(v(100.0, 50.0), true)
+            .expect("Shift at release");
+        assert_eq!(snapped, 30.0);
+        assert!(session.finish_viewport_rotation_drag());
+        assert!(
+            apply_viewport_rotation_actions(
+                &mut editor,
+                [
+                    ViewportRotationAction::Update(snapped),
+                    ViewportRotationAction::Commit,
+                ]
+            )
+            .expect("commit")
+        );
+        assert_eq!(rotation(&editor), 30.0);
+        assert_eq!(editor.history_len(), 1);
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(rotation(&editor), 0.0);
+        assert!(editor.redo().expect("redo"));
+        assert_eq!(rotation(&editor), 30.0);
+        editor.project().validate().expect("valid project");
     }
 
     #[test]
