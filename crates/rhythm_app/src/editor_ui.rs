@@ -6,7 +6,7 @@ use crate::{
     timeline::{draw_easing_preset_menu, draw_timeline},
 };
 use rhythm_core::{
-    domain::Vec2,
+    domain::{LinearRgba, Vec2},
     editor::{EditCommand, EditError, ProjectEditor},
     hit_test::{OutlineKind, object_outline, pick_topmost_object, select_objects_in_box},
     ids::ObjectId,
@@ -879,6 +879,8 @@ fn draw_inspector_transform_row(
         AnimatableProperty::Rotation => "Rotation °",
         AnimatableProperty::Anchor => "Anchor %",
         AnimatableProperty::Opacity => "Opacity %",
+        AnimatableProperty::RectangleSize | AnimatableProperty::EllipseSize => "Size (px)",
+        AnimatableProperty::RectangleCornerRadius => "Corner radius (px)",
         _ => return,
     };
     let Ok(count) = property_keyframe_count(project, object.id, property) else {
@@ -1172,6 +1174,7 @@ pub struct EditorUiActions {
     pub inspector_position_edits: Vec<InspectorPositionEdit>,
     pub inspector_transform_edits: Vec<InspectorTransformEdit>,
     pub inspector_animated_edits: Vec<InspectorTransformEdit>,
+    pub inspector_color_edits: Vec<InspectorColorEdit>,
     pub inspector_keyframe_requests: Vec<(ObjectId, AnimatableProperty)>,
     pub undo_requested: bool,
     pub redo_requested: bool,
@@ -1450,6 +1453,37 @@ pub fn draw_editor_shell(
                         );
                     }
                     ui.small("Enter / focus loss commits · Escape restores. Values in %, ° or px.");
+                    match &object.content {
+                        ObjectContent::Rectangle(_) => {
+                            ui.separator();
+                            ui.heading("Rectangle");
+                            draw_inspector_transform_row(
+                                ui, project, session, object,
+                                AnimatableProperty::RectangleSize, actions,
+                            );
+                            draw_inspector_color_row(
+                                ui, project, session, object,
+                                AnimatableProperty::RectangleFill, actions,
+                            );
+                            draw_inspector_transform_row(
+                                ui, project, session, object,
+                                AnimatableProperty::RectangleCornerRadius, actions,
+                            );
+                        }
+                        ObjectContent::Ellipse(_) => {
+                            ui.separator();
+                            ui.heading("Ellipse");
+                            draw_inspector_transform_row(
+                                ui, project, session, object,
+                                AnimatableProperty::EllipseSize, actions,
+                            );
+                            draw_inspector_color_row(
+                                ui, project, session, object,
+                                AnimatableProperty::EllipseFill, actions,
+                            );
+                        }
+                        _ => {}
+                    }
                     ui.small(
                         "◇ Static · ◇ Anim · ◆ Key; animated edits resolve to the nearest grid.",
                     );
