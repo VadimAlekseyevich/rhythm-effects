@@ -1260,6 +1260,153 @@ fn draw_inspector_transform_row(
     });
 }
 
+fn draw_inspector_group_numeric_field(
+    ui: &mut egui::Ui,
+    selected: &[ObjectId],
+    property: AnimatableProperty,
+    axis: Option<PositionAxis>,
+    display: Option<f32>,
+    actions: &mut EditorUiActions,
+) {
+    let ids = selected.iter().map(|id| id.get()).collect::<Vec<_>>();
+    let id = egui::Id::new((
+        "inspector_group_transform",
+        ids,
+        property,
+        axis.map(PositionAxis::label),
+    ));
+    let draft_id = id.with("draft");
+    let mut draft = ui.ctx().data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
+        .unwrap_or_else(|| InspectorNumericDraft {
+            text: display.map_or_else(String::new, |value| format!("{value:.2}")),
+            dirty: false,
+        });
+    if let Some(axis) = axis {
+        ui.label(axis.label());
+    }
+    let previously_focused = ui.memory(|memory| memory.has_focus(id));
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut draft.text)
+            .id(id)
+            .desired_width(58.0)
+            .hint_text(if display.is_none() { "Mixed" } else { "" }),
+    );
+    draft.dirty |= response.changed();
+    let escape = (previously_focused || response.has_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if escape {
+        ui.memory_mut(|memory| memory.surrender_focus(id));
+        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+    } else if enter || response.lost_focus() {
+        if let Some(display_value) = committed_number(&draft) {
+            actions.inspector_group_edits.push(InspectorGroupTransformEdit {
+                object_ids: selected.to_vec(),
+                property,
+                axis,
+                display_value,
+            });
+        }
+        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        if enter {
+            ui.memory_mut(|memory| memory.surrender_focus(id));
+        }
+    } else if response.has_focus() {
+        ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
+    } else {
+        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+    }
+}
+
+fn draw_inspector_group_transform_row(
+    ui: &mut egui::Ui,
+    project: &Project,
+    session: &EditorSession,
+    property: AnimatableProperty,
+    actions: &mut EditorUiActions,
+) {
+    let selected = session.selected_objects();
+    if selected.len() < 2 {
+        return;
+    }
+    let label = match property {
+        AnimatableProperty::Position => "Position",
+        AnimatableProperty::Scale => "Scale %",
+        AnimatableProperty::Rotation => "Rotation °",
+        AnimatableProperty::Anchor => "Anchor %",
+        AnimatableProperty::Opacity => "Opacity %",
+        _ => return,
+    };
+    let tick = project.tempo_map.continuous_tick_position(session.playhead()).unwrap_or(0.0);
+    let mut values = Vec::with_capacity(selected.len());
+    let mut animated = 0;
+    let mut locked = false;
+    for &id in selected {
+        let Some(object) = project.composition.objects.iter().find(|object| object.id == id)
+        else {
+            return;
+        };
+        locked |= object.locked;
+        let Ok(count) = property_keyframe_count(project, id, property) else {
+            return;
+        };
+        if count > 0 {
+            animated += 1;
+        }
+        let value = if count == 0 {
+            property_base_value(project, id, property)
+        } else {
+            evaluate_property_at_tick(project, id, property, tick)
+        };
+        let Ok(value) = value else { return };
+        values.push(value);
+    }
+    let editable = !locked && (animated == 0 || project.tempo_map.initial_segment().is_some());
+    let key_state = if animated == 0 {
+        "◇ Static"
+    } else if animated == selected.len() {
+        "◇ Animated"
+    } else {
+        "◇ Mixed keys"
+    };
+    let percent = if matches!(
+        property,
+        AnimatableProperty::Scale | AnimatableProperty::Anchor | AnimatableProperty::Opacity
+    ) { 100.0 } else { 1.0 };
+    let axes: &[Option<PositionAxis>] = if matches!(
+        property,
+        AnimatableProperty::Position | AnimatableProperty::Scale | AnimatableProperty::Anchor
+    ) {
+        &[Some(PositionAxis::X), Some(PositionAxis::Y)]
+    } else {
+        &[None]
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.label(label);
+        for &axis in axes {
+            let samples = values.iter().map(|value| match (value, axis) {
+                (PropertyValue::Scalar(value), None) => Some(*value),
+                (PropertyValue::Vec2(value), Some(PositionAxis::X)) => Some(value.x()),
+                (PropertyValue::Vec2(value), Some(PositionAxis::Y)) => Some(value.y()),
+                _ => None,
+            }).collect::<Option<Vec<_>>>();
+            let Some(samples) = samples else { continue };
+            let common = samples.iter().all(|value| *value == samples[0])
+                .then_some(samples[0] * percent);
+            if editable {
+                draw_inspector_group_numeric_field(
+                    ui, selected, property, axis, common, actions,
+                );
+            } else if let Some(value) = common {
+                ui.label(format!("{value:.2}"));
+            } else {
+                ui.weak("Mixed");
+            }
+        }
+        ui.small(key_state);
+    });
+}
+
 fn inspector_color_id(
     object_id: ObjectId,
     property: AnimatableProperty,
@@ -1894,7 +2041,25 @@ pub fn draw_editor_shell(
                 ui.label(format!("Primary: {}", object.name));
                 ui.label(format!("Primary ID: {}", object.id.get()));
                 if session.selected_objects().len() > 1 {
-                    ui.small("Multi-object mixed transforms are tracked as AI-188.");
+                    ui.heading("Transform · multiple objects");
+                    ui.small("Mixed = differing values. Edits apply to all selected objects in one Undo.");
+                    let locked = session.selected_objects().iter().any(|id| {
+                        project.composition.objects.iter().any(|object| object.id == *id && object.locked)
+                    });
+                    if locked {
+                        ui.small("One or more selected objects are locked; group edits are disabled.");
+                    }
+                    for property in [
+                        AnimatableProperty::Position,
+                        AnimatableProperty::Scale,
+                        AnimatableProperty::Rotation,
+                        AnimatableProperty::Anchor,
+                        AnimatableProperty::Opacity,
+                    ] {
+                        draw_inspector_group_transform_row(
+                            ui, project, session, property, actions,
+                        );
+                    }
                 } else {
                     ui.heading("Transform");
                     ui.small("P Position · S Scale · R Rotation · O Opacity · K keyframe");
