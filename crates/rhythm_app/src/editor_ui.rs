@@ -2525,8 +2525,9 @@ pub fn draw_editor_shell(
 mod tests {
     use super::{
         InspectorColorChannel, InspectorColorEdit, InspectorNumericDraft, InspectorPositionEdit,
-        InspectorTransformEdit, PositionAxis, apply_inspector_animated_transform_edits,
-        apply_inspector_color_edits, apply_inspector_position_edits,
+        InspectorGroupTransformEdit, InspectorTransformEdit, PositionAxis, apply_inspector_animated_transform_edits,
+        apply_inspector_color_edits, apply_inspector_group_transform_edits,
+        apply_inspector_position_edits,
         apply_inspector_transform_edits, apply_object_click, clamped_drag_point, committed_number,
         composition_point_from_preview, fit_composition_preview, panned_preview_rect,
         preview_point, rotation_handle_on_preview, selected_outline_bounds,
@@ -2760,6 +2761,140 @@ mod tests {
             property_base_value(editor.project(), id, property),
             Ok(PropertyValue::Scalar(0.65))
         );
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn mixed_inspector_applies_one_delta_independently_per_axis() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::Vec2,
+            editor::ProjectEditor,
+            project::TransformAnimation,
+            property::{AnimatableProperty, PropertyValue, property_base_value},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let (mut session, original, a) = animated_inspector_fixture();
+        let mut project = original.into_project();
+        let b = ObjectId::new(2).expect("id");
+        let mut second = project.composition.objects[0].clone();
+        second.id = b;
+        second.name = "B".to_owned();
+        second.transform = TransformAnimation::new(
+            Animated::new_static(v(300.0, 400.0)),
+            Animated::new_static(v(2.0, 3.0)),
+            Animated::new_static(0.0),
+            Animated::new_static(v(0.5, 0.5)),
+            Animated::new_static(1.0),
+        );
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("project");
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        let ids = session.selected_objects().to_vec();
+        assert!(apply_inspector_group_transform_edits(
+            &mut session,
+            &mut editor,
+            [InspectorGroupTransformEdit {
+                object_ids: ids.clone(),
+                property: AnimatableProperty::Position,
+                axis: Some(PositionAxis::X),
+                display_value: 125.0,
+            }]
+        ).expect("group Position X"));
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Position),
+            Ok(PropertyValue::Vec2(v(125.0, 200.0)))
+        );
+        assert_eq!(
+            property_base_value(editor.project(), b, AnimatableProperty::Position),
+            Ok(PropertyValue::Vec2(v(125.0, 400.0)))
+        );
+        assert!(editor.undo().expect("undo group Position"));
+        assert_eq!(
+            property_base_value(editor.project(), b, AnimatableProperty::Position),
+            Ok(PropertyValue::Vec2(v(300.0, 400.0)))
+        );
+        assert!(editor.redo().expect("redo group Position"));
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn mixed_inspector_applies_static_and_animated_opacity_in_one_undo() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::Vec2,
+            editor::ProjectEditor,
+            project::TransformAnimation,
+            property::{
+                AnimatableProperty, PropertyValue, property_base_value,
+                property_keyframe_count, property_keyframe_at_tick,
+            },
+            time::{MusicalTick, ProjectTimeNs},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let (mut session, original, a) = animated_inspector_fixture();
+        let mut project = original.into_project();
+        let b = ObjectId::new(2).expect("id");
+        let mut second = project.composition.objects[0].clone();
+        second.id = b;
+        second.transform = TransformAnimation::new(
+            Animated::new_static(v(300.0, 400.0)),
+            Animated::new_static(v(1.0, 2.0)),
+            Animated::new_static(0.0),
+            Animated::new_static(v(0.5, 0.5)),
+            Animated::new_static(1.0),
+        );
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("project");
+        editor.create_property_keyframe(
+            b, AnimatableProperty::Opacity, MusicalTick::new(0),
+            PropertyValue::Scalar(0.5),
+        ).expect("first key");
+        let before = editor.history_len();
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        assert!(apply_inspector_group_transform_edits(
+            &mut session,
+            &mut editor,
+            [InspectorGroupTransformEdit {
+                object_ids: session.selected_objects().to_vec(),
+                property: AnimatableProperty::Opacity,
+                axis: None,
+                display_value: 70.0,
+            }],
+        ).expect("mixed Opacity"));
+        assert_eq!(editor.history_len(), before + 1);
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(0.7))
+        );
+        assert_eq!(
+            property_keyframe_count(editor.project(), b, AnimatableProperty::Opacity),
+            Ok(2)
+        );
+        let inserted = property_keyframe_at_tick(
+            editor.project(), b, AnimatableProperty::Opacity, MusicalTick::new(240),
+        ).expect("property").expect("key");
+        assert_eq!(inserted.value, PropertyValue::Scalar(0.7));
+        assert!(editor.undo().expect("undo mixed"));
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert_eq!(
+            property_keyframe_count(editor.project(), b, AnimatableProperty::Opacity),
+            Ok(1)
+        );
+        assert!(editor.redo().expect("redo mixed"));
+        let after = property_keyframe_at_tick(
+            editor.project(), b, AnimatableProperty::Opacity, MusicalTick::new(240),
+        ).expect("property").expect("key");
+        assert_eq!(after.id, inserted.id);
         editor.project().validate().expect("valid");
     }
 
