@@ -5,6 +5,7 @@ use rhythm_core::{
     domain::Vec2,
     editor::{EditError, ProjectEditor, PropertyKeyframeDraft, PropertyKeyframeMove},
     ids::{KeyframeId, ObjectId},
+    project::Project,
     property::{
         AnimatableProperty, PropertyValue, evaluate_property_at_tick, locate_property_keyframe,
         property_keyframe_at_tick, property_keyframe_count, property_value_compatible,
@@ -337,6 +338,27 @@ impl EditorSession {
     #[must_use]
     pub fn is_object_selected(&self, object_id: ObjectId) -> bool {
         self.selected_objects.contains(&object_id)
+    }
+
+    /// The Objects list and Viewport both edit this one stable-ID selection.
+    /// Remove orphan IDs after object deletion/Undo without clearing valid
+    /// hidden or locked selections (which remain selectable in the list).
+    pub fn sync_object_selection(&mut self, project: &Project) -> bool {
+        let existing = project
+            .composition
+            .objects
+            .iter()
+            .map(|object| object.id)
+            .collect::<HashSet<_>>();
+        let before = self.selected_objects.len();
+        self.selected_objects.retain(|id| existing.contains(id));
+        if self
+            .focused_property
+            .is_some_and(|focused| !existing.contains(&focused.object_id))
+        {
+            self.focused_property = None;
+        }
+        self.selected_objects.len() != before
     }
 
     /// Plain click replaces object selection; empty-space click clears it.
@@ -2157,6 +2179,45 @@ mod tests {
         assert!(editor.redo().expect("redo"));
         assert_eq!(current(&editor), v(1.5, 1.5));
         editor.project().validate().expect("valid project");
+    }
+
+    #[test]
+    fn object_list_viewport_and_inspector_share_one_stable_id_selection() {
+        let mut project = editor_with_object_for_drag().into_project();
+        let first = ObjectId::new(1).expect("first");
+        let second = ObjectId::new(2).expect("second");
+        let mut other = project.composition.objects[0].clone();
+        other.id = second;
+        other.visible = false;
+        other.locked = true;
+        project.composition.objects.push(other);
+        project.next_entity_id = 3;
+        let mut session = EditorSession::default();
+
+        // First click from the Objects list selects the primary Inspector object.
+        session.select_viewport_object(Some(first));
+        assert_eq!(session.selected_object(), Some(first));
+        assert!(session.is_object_selected(first));
+
+        // Ctrl-click in the Viewport (or list) extends the same ID selection.
+        session.toggle_viewport_object(Some(second));
+        assert_eq!(session.selected_objects(), &[first, second]);
+        assert_eq!(session.selected_object(), Some(second));
+        assert!(!session.sync_object_selection(&project));
+        assert!(session.is_object_selected(second));
+
+        // Deletion invalidates only stale IDs and the Inspector focus. Hidden
+        // and locked objects remain selected until deleted or deselected.
+        project.composition.objects.remove(1);
+        assert!(session.sync_object_selection(&project));
+        assert_eq!(session.selected_objects(), &[first]);
+        assert_eq!(session.selected_object(), Some(first));
+        assert!(!session.sync_object_selection(&project));
+
+        session.select_viewport_object(None);
+        assert!(session.selected_objects().is_empty());
+        session.toggle_viewport_object(None);
+        assert!(session.selected_objects().is_empty());
     }
 
     #[test]
