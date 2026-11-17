@@ -112,6 +112,23 @@ pub struct PropertyBaseChange {
     pub after: PropertyValue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroupPropertyValueEdit {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub value: PropertyValue,
+    /// None for a static base; Some for an already-animated property.
+    pub key_tick: Option<MusicalTick>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroupKeyframeValueChange {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub before: Option<PropertyKeyframe>,
+    pub after: PropertyKeyframe,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     AddObject {
@@ -144,6 +161,9 @@ pub enum EditCommand {
         object_id: ObjectId,
         property: AnimatableProperty,
         value: PropertyValue,
+    },
+    SetGroupPropertyValues {
+        edits: Vec<GroupPropertyValueEdit>,
     },
     AddOpacityKeyframe {
         object_id: ObjectId,
@@ -195,6 +215,7 @@ impl EditCommand {
             Self::SetPositionBase { .. } => "SetPositionBase",
             Self::SetOpacityBase { .. } => "SetOpacityBase",
             Self::SetPropertyBase { .. } => "SetPropertyBase",
+            Self::SetGroupPropertyValues { .. } => "SetGroupPropertyValues",
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
             Self::InsertPropertyKeyframe { .. } => "InsertPropertyKeyframe",
             Self::SetPropertyKeyframeValue { .. } => "SetPropertyKeyframeValue",
@@ -250,6 +271,10 @@ pub enum HistoryPayload {
     },
     PropertyBaseChanged {
         change: PropertyBaseChange,
+    },
+    GroupPropertyValuesChanged {
+        base_changes: Vec<PropertyBaseChange>,
+        key_changes: Vec<GroupKeyframeValueChange>,
     },
     ScaleBaseChanged {
         object_id: ObjectId,
