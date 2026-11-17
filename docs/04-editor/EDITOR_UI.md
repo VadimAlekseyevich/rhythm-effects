@@ -99,6 +99,8 @@ Focus is visible but subtle.
 
 Text/numeric fields override physical-key editor shortcuts while editing.
 
+**AI-195/198 implementation scope:** physical `P`, `S`, `R`, `O` keys focus Position, Scale, Rotation and Opacity respectively for the primary selected object's Inspector, and the focused row has an explicit right-pointing marker. Existing physical `K` toggles the focused property's nearest-grid key via the same `EditorSession::keyframe_action` used by the Inspector keyframe button. This routing uses Winit physical `KeyCode`, not locale-dependent produced text. Plain shortcuts require no Ctrl/Shift/Alt/Super and ignore auto-repeat for focus selection. Egui's `egui_wants_keyboard_input` gate is applied before every global editor key dispatch, so typing in an active text/numeric control cannot accidentally invoke P/S/R/O/K, Delete, transport or keyframe movement; egui TextEdit retains Enter/Escape and selection behavior. Dedicated tests cover physical mapping, selection-scoped focus, and the keyboard-input suppression guard.
+
 ## 8. Selection synchronization
 
 Selecting an object anywhere synchronizes:
