@@ -228,8 +228,13 @@ fn editable_rotation_object<'a>(
         return None;
     }
     let id = session.selected_object()?;
-    let object = project.composition.objects.iter().find(|object| object.id == id)?;
-    if !object.visible || object.locked || !object.transform.rotation_degrees.keyframes().is_empty() {
+    let object = project
+        .composition
+        .objects
+        .iter()
+        .find(|object| object.id == id)?;
+    if !object.visible || object.locked || !object.transform.rotation_degrees.keyframes().is_empty()
+    {
         return None;
     }
     match object.content {
@@ -1289,8 +1294,8 @@ mod tests {
     use super::{
         InspectorNumericDraft, InspectorPositionEdit, PositionAxis, apply_inspector_position_edits,
         apply_object_click, clamped_drag_point, committed_number, composition_point_from_preview,
-        fit_composition_preview, panned_preview_rect, preview_point, selected_outline_bounds,
-        rotation_handle_on_preview, selected_rotation_handle_hit, selected_scale_corner_hit,
+        fit_composition_preview, panned_preview_rect, preview_point, rotation_handle_on_preview,
+        selected_outline_bounds, selected_rotation_handle_hit, selected_scale_corner_hit,
         selection_rect_on_preview, unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
@@ -1482,6 +1487,7 @@ mod tests {
 
     #[test]
     fn rotation_handle_tracks_rotated_mirrored_shape_and_selection_eligibility() {
+        use rhythm_core::ids::KeyframeId;
         use rhythm_core::{
             animation::{Animated, Interpolation, Keyframe},
             domain::{LinearRgba, Vec2},
@@ -1492,7 +1498,6 @@ mod tests {
             },
             time::{GridOffsetNs, MusicalTick, TempoMap},
         };
-        use rhythm_core::ids::KeyframeId;
         let v = |x, y| Vec2::new(x, y).expect("finite");
         let id = ObjectId::new(1).expect("id");
         let mut project = Project::new(
@@ -1545,15 +1550,21 @@ mod tests {
             ),
             None
         );
-        let zoomed = egui::Rect::from_min_size(egui::pos2(-200.0, -200.0), egui::vec2(1920.0, 1080.0));
+        let zoomed =
+            egui::Rect::from_min_size(egui::pos2(-200.0, -200.0), egui::vec2(1920.0, 1080.0));
         let (top_zoomed, knob_zoomed) =
             rotation_handle_on_preview(object, zoomed, [1920, 1080], 0.0).expect("zoom handle");
         assert!(((top_zoomed - knob_zoomed).length() - 28.0).abs() < 1e-3);
 
         project.composition.objects[0].locked = true;
-        assert_eq!(selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob), None);
+        assert_eq!(
+            selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob),
+            None
+        );
         project.composition.objects[0].locked = false;
-        project.composition.objects[0].transform.rotation_degrees
+        project.composition.objects[0]
+            .transform
+            .rotation_degrees
             .insert_keyframe(Keyframe::new(
                 KeyframeId::new(2).expect("key"),
                 MusicalTick::new(0),
@@ -1561,7 +1572,10 @@ mod tests {
                 Interpolation::Linear,
             ))
             .expect("insert");
-        assert_eq!(selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob), None);
+        assert_eq!(
+            selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob),
+            None
+        );
     }
 
     #[test]
@@ -1569,7 +1583,10 @@ mod tests {
         use rhythm_core::{
             animation::Animated,
             domain::{LinearRgba, Vec2},
-            project::{Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
             time::{GridOffsetNs, TempoMap},
         };
         let v = |x, y| Vec2::new(x, y).expect("finite");
@@ -1602,9 +1619,9 @@ mod tests {
         let preview = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(960.0, 540.0));
         let mut session = EditorSession::default();
         session.select_viewport_object(Some(id));
-        let (_, knob) = rotation_handle_on_preview(
-            &project.composition.objects[0], preview, [1920, 1080], 0.0
-        ).expect("rotation knob");
+        let (_, knob) =
+            rotation_handle_on_preview(&project.composition.objects[0], preview, [1920, 1080], 0.0)
+                .expect("rotation knob");
         assert!(knob.y < preview.min.y && canvas.contains(knob));
         assert_eq!(
             selected_rotation_handle_hit(&project, &session, preview, canvas, 0.0, knob),

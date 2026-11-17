@@ -2066,16 +2066,34 @@ mod tests {
         let mut session = EditorSession::default();
         assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 30.0));
         assert!(!session.begin_viewport_rotation_drag(v(50.0, 0.0), v(0.0, 0.0), 0.0));
-        assert_eq!(session.update_viewport_rotation_drag(v(0.0, 100.0)), Some(120.0));
-        assert_eq!(session.update_viewport_rotation_drag(v(-100.0, 0.0)), Some(210.0));
-        assert_eq!(session.update_viewport_rotation_drag(v(0.0, -100.0)), Some(300.0));
-        assert_eq!(session.update_viewport_rotation_drag(v(100.0, 0.0)), Some(390.0));
-        assert_eq!(session.update_viewport_rotation_drag(v(100.0, 0.0)), Some(390.0));
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, 100.0)),
+            Some(120.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(-100.0, 0.0)),
+            Some(210.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, -100.0)),
+            Some(300.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 0.0)),
+            Some(390.0)
+        );
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(100.0, 0.0)),
+            Some(390.0)
+        );
         assert!(session.finish_viewport_rotation_drag());
         assert_eq!(session.update_viewport_rotation_drag(v(0.0, 100.0)), None);
 
         assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), -20.0));
-        assert_eq!(session.update_viewport_rotation_drag(v(0.0, -100.0)), Some(-110.0));
+        assert_eq!(
+            session.update_viewport_rotation_drag(v(0.0, -100.0)),
+            Some(-110.0)
+        );
         assert!(session.cancel_viewport_rotation_drag());
     }
 
@@ -2110,24 +2128,34 @@ mod tests {
                 .base_value()
         };
         assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 0.0));
-        assert!(!apply_viewport_rotation_actions(
-            &mut editor,
-            [ViewportRotationAction::Begin(id)]
-        ).expect("begin"));
-        let first = session.update_viewport_rotation_drag(v(0.0, 100.0)).expect("angle");
-        assert!(apply_viewport_rotation_actions(
-            &mut editor,
-            [ViewportRotationAction::Update(first)]
-        ).expect("preview"));
+        assert!(
+            !apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Begin(id)])
+                .expect("begin")
+        );
+        let first = session
+            .update_viewport_rotation_drag(v(0.0, 100.0))
+            .expect("angle");
+        assert!(
+            apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Update(first)])
+                .expect("preview")
+        );
         assert_eq!(rotation(&editor), 90.0);
         assert_eq!(editor.history_len(), 0);
 
-        let final_angle = session.update_viewport_rotation_drag(v(-100.0, 0.0)).expect("angle");
+        let final_angle = session
+            .update_viewport_rotation_drag(v(-100.0, 0.0))
+            .expect("angle");
         assert!(session.finish_viewport_rotation_drag());
-        assert!(apply_viewport_rotation_actions(
-            &mut editor,
-            [ViewportRotationAction::Update(final_angle), ViewportRotationAction::Commit]
-        ).expect("commit"));
+        assert!(
+            apply_viewport_rotation_actions(
+                &mut editor,
+                [
+                    ViewportRotationAction::Update(final_angle),
+                    ViewportRotationAction::Commit
+                ]
+            )
+            .expect("commit")
+        );
         assert_eq!(editor.history_len(), 1);
         assert_eq!(rotation(&editor), 180.0);
         assert!(editor.undo().expect("undo"));
@@ -2138,7 +2166,9 @@ mod tests {
         assert!(session.begin_viewport_rotation_drag(v(100.0, 0.0), v(0.0, 0.0), 180.0));
         apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Begin(id)])
             .expect("begin cancel");
-        let cancelled = session.update_viewport_rotation_drag(v(0.0, 100.0)).expect("angle");
+        let cancelled = session
+            .update_viewport_rotation_drag(v(0.0, 100.0))
+            .expect("angle");
         apply_viewport_rotation_actions(&mut editor, [ViewportRotationAction::Update(cancelled)])
             .expect("preview");
         assert!(session.cancel_viewport_rotation_drag());

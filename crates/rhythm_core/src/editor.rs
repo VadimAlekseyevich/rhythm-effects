@@ -704,7 +704,9 @@ impl ProjectEditor {
             .transform
             .rotation_degrees;
         if !rotation.keyframes().is_empty() {
-            return Err(EditError::InvalidValue("cannot directly drag animated Rotation"));
+            return Err(EditError::InvalidValue(
+                "cannot directly drag animated Rotation",
+            ));
         }
         self.transaction = Some(ActiveTransaction::ObjectRotation {
             object_id,
@@ -719,7 +721,11 @@ impl ProjectEditor {
         }
         let object_id = match self.transaction {
             Some(ActiveTransaction::ObjectRotation { object_id, .. }) => object_id,
-            _ => return Err(EditError::HistoryInvariant("no active rotation transaction")),
+            _ => {
+                return Err(EditError::HistoryInvariant(
+                    "no active rotation transaction",
+                ));
+            }
         };
         let index = self.object_index(object_id)?;
         *self.project.composition.objects[index]
@@ -2077,7 +2083,9 @@ mod tests {
         };
         editor.begin_rotation_transaction(id).expect("begin");
         editor.update_rotation_transaction(175.0).expect("update");
-        editor.update_rotation_transaction(450.0).expect("more than a turn");
+        editor
+            .update_rotation_transaction(450.0)
+            .expect("more than a turn");
         assert_eq!(editor.history_len(), 0);
         assert!(editor.commit_transaction().expect("commit"));
         assert_eq!(editor.history_len(), 1);
@@ -2088,7 +2096,9 @@ mod tests {
         assert_eq!(rotation(&editor), 450.0);
 
         editor.begin_rotation_transaction(id).expect("begin cancel");
-        editor.update_rotation_transaction(-30.0).expect("update cancel");
+        editor
+            .update_rotation_transaction(-30.0)
+            .expect("update cancel");
         assert!(editor.cancel_transaction().expect("cancel"));
         assert_eq!(rotation(&editor), 450.0);
         assert_eq!(editor.history_len(), 1);
@@ -2110,7 +2120,9 @@ mod tests {
         ));
         assert!(editor.cancel_transaction().expect("cancel scale"));
 
-        editor.begin_rotation_transaction(id).expect("begin rotation");
+        editor
+            .begin_rotation_transaction(id)
+            .expect("begin rotation");
         assert!(matches!(
             editor.update_rotation_transaction(f32::NAN),
             Err(super::EditError::InvalidValue(_))
