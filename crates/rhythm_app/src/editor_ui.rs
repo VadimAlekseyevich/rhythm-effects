@@ -1,7 +1,7 @@
 use crate::{
     editor_session::{
-        EditorSession, PreviewQuality, ViewportPositionAction, ViewportRotationAction,
-        ViewportScaleAction,
+        EditorSession, PreviewQuality, ViewportGroupPositionAction,
+        ViewportPositionAction, ViewportRotationAction, ViewportScaleAction,
     },
     timeline::{draw_easing_preset_menu, draw_timeline},
 };
@@ -733,6 +733,7 @@ fn flush_inspector_draft_on_selection_change(
 pub struct EditorUiActions {
     pub add_rectangle_requested: bool,
     pub viewport_position_actions: Vec<ViewportPositionAction>,
+    pub viewport_group_position_actions: Vec<ViewportGroupPositionAction>,
     pub viewport_scale_actions: Vec<ViewportScaleAction>,
     pub viewport_rotation_actions: Vec<ViewportRotationAction>,
     pub inspector_position_edits: Vec<InspectorPositionEdit>,
@@ -971,7 +972,7 @@ pub fn draw_editor_shell(
         ui.small("Click to select; Ctrl+click toggles objects without clearing the others.");
         ui.small("Drag from empty space to box-select; hold Ctrl to toggle intersecting objects.");
         ui.small(
-            "Drag a single unlocked Rectangle/Ellipse to move its static Position (one Undo step).",
+            "Drag an unlocked Rectangle/Ellipse to move; drag a selected member to move a multi-selection together.",
         );
         ui.small("Drag yellow corner squares to adjust static Scale; hold Shift to preserve proportions.");
         ui.small("Drag the blue circular handle to rotate; hold Shift to snap to 15°.");
@@ -1062,10 +1063,9 @@ pub fn draw_editor_shell(
                 // No audio-clock or timeline playback is inferred.
                 draw_editor_outlines(ui, preview, canvas, session, project, tick);
                 draw_selection_overlays(ui, preview, canvas, session, project, tick);
-                // An object drag edits exactly one *static* Position with an
-                // existing ProjectEditor transaction. A drag from empty
-                // composition space is a marquee. Ctrl and multi-object
-                // drags are reserved for dedicated later interactions.
+                // Drags on an already selected member move an entire eligible
+                // multi-selection by one composition-space delta. Otherwise
+                // a single static Position moves or empty space starts a box.
                 if response.drag_started_by(egui::PointerButton::Primary)
                     && let Some(pointer) = response.interact_pointer_pos()
                 {
@@ -1133,7 +1133,25 @@ pub fn draw_editor_shell(
                                 |_| None,
                             );
                             if let Some(id) = picked {
-                                if !ctrl
+                                let group_eligible = session.selected_objects().len() > 1
+                                    && session.is_object_selected(id)
+                                    && session.selected_objects().iter().all(|member_id| {
+                                        project.composition.objects.iter().any(|member| {
+                                            member.id == *member_id
+                                                && member.visible
+                                                && !member.locked
+                                                && member.transform.position.keyframes().is_empty()
+                                        })
+                                    });
+                                if !ctrl && group_eligible
+                                    && session.begin_viewport_group_position_drag(start)
+                                {
+                                    actions.viewport_group_position_actions.push(
+                                        ViewportGroupPositionAction::Begin(
+                                            session.selected_objects().to_vec(),
+                                        ),
+                                    );
+                                } else if !ctrl
                                     && session.selected_objects().len() <= 1
                                     && let Some(object) = project
                                         .composition
@@ -1172,6 +1190,12 @@ pub fn draw_editor_shell(
                                     .viewport_rotation_actions
                                     .push(ViewportRotationAction::Update(degrees));
                             }
+                        } else if let Some(delta) =
+                            session.update_viewport_group_position_drag(point)
+                        {
+                            actions.viewport_group_position_actions.push(
+                                ViewportGroupPositionAction::Update(delta),
+                            );
                         } else if let Some(scale) = session.update_viewport_scale_drag(
                             point,
                             ui.input(|input| input.modifiers.shift),
@@ -1208,6 +1232,22 @@ pub fn draw_editor_shell(
                             actions
                                 .viewport_rotation_actions
                                 .push(ViewportRotationAction::Commit);
+                        }
+                    }
+                    if session.viewport_group_position_drag_active() {
+                        if let Some(pointer) = response.interact_pointer_pos()
+                            && let Some(point) =
+                                unbounded_composition_point(preview, pointer, composition_size)
+                            && let Some(delta) = session.update_viewport_group_position_drag(point)
+                        {
+                            actions.viewport_group_position_actions.push(
+                                ViewportGroupPositionAction::Update(delta),
+                            );
+                        }
+                        if session.finish_viewport_group_position_drag() {
+                            actions.viewport_group_position_actions.push(
+                                ViewportGroupPositionAction::Commit,
+                            );
                         }
                     }
                     if session.viewport_scale_drag_active() {
