@@ -939,6 +939,18 @@ impl EditorSession {
         });
     }
 
+    /// Physical P/S/R/O shortcuts focus a property on the primary selected
+    /// object, never an object remembered from an older Inspector selection.
+    pub fn focus_selected_transform_property(&mut self, property: AnimatableProperty) -> bool {
+        let Some(object_id) = self.selected_object() else {
+            return false;
+        };
+        let next = FocusedProperty { object_id, property };
+        let changed = self.focused_property != Some(next);
+        self.focused_property = Some(next);
+        changed
+    }
+
     pub fn keyframe_action(&mut self, editor: &mut ProjectEditor) -> Result<bool, EditError> {
         let Some(focused) = self.focused_property else {
             return Ok(false);
@@ -2179,6 +2191,35 @@ mod tests {
         assert!(editor.redo().expect("redo"));
         assert_eq!(current(&editor), v(1.5, 1.5));
         editor.project().validate().expect("valid project");
+    }
+
+    #[test]
+    fn physical_transform_focus_uses_selected_primary_object() {
+        let first = ObjectId::new(1).expect("first");
+        let second = ObjectId::new(2).expect("second");
+        let mut session = EditorSession::default();
+        assert!(!session.focus_selected_transform_property(AnimatableProperty::Position));
+        session.select_viewport_object(Some(first));
+        assert!(session.focus_selected_transform_property(AnimatableProperty::Position));
+        assert_eq!(
+            session.focused_property(),
+            Some(super::FocusedProperty {
+                object_id: first,
+                property: AnimatableProperty::Position,
+            })
+        );
+        assert!(!session.focus_selected_transform_property(AnimatableProperty::Position));
+        session.toggle_viewport_object(Some(second));
+        assert!(session.focus_selected_transform_property(AnimatableProperty::Rotation));
+        assert_eq!(
+            session.focused_property(),
+            Some(super::FocusedProperty {
+                object_id: second,
+                property: AnimatableProperty::Rotation,
+            })
+        );
+        session.select_viewport_object(None);
+        assert!(!session.focus_selected_transform_property(AnimatableProperty::Opacity));
     }
 
     #[test]
