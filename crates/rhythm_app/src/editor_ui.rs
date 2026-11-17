@@ -7,7 +7,7 @@ use crate::{
 };
 use rhythm_core::{
     domain::{LinearRgba, Vec2},
-    editor::{EditCommand, EditError, ProjectEditor},
+    editor::{EditCommand, EditError, GroupPropertyValueEdit, ProjectEditor},
     hit_test::{OutlineKind, object_outline, pick_topmost_object, select_objects_in_box},
     ids::ObjectId,
     project::{Object, ObjectContent, Project},
@@ -789,6 +789,121 @@ pub fn apply_inspector_transform_edits(
     Ok(changed)
 }
 
+/// One displayed group property/axis is changed across the selection with
+/// one compound history entry, retaining each member's other Vec2 component.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InspectorGroupTransformEdit {
+    pub object_ids: Vec<ObjectId>,
+    pub property: AnimatableProperty,
+    pub axis: Option<PositionAxis>,
+    pub display_value: f32,
+}
+
+pub fn apply_inspector_group_transform_edits(
+    session: &mut EditorSession,
+    editor: &mut ProjectEditor,
+    edits: impl IntoIterator<Item = InspectorGroupTransformEdit>,
+) -> Result<bool, EditError> {
+    let mut changed = false;
+    for edit in edits {
+        if edit.object_ids.len() < 2 || !edit.display_value.is_finite() {
+            continue;
+        }
+        let project = editor.project();
+        let tick_position = project
+            .tempo_map
+            .continuous_tick_position(session.playhead())
+            .ok();
+        let resolved_tick = tick_position.and_then(|position| {
+            snap_tick_position_to_grid(position, session.authoring_division()).ok()
+        });
+        let resolved_time =
+            resolved_tick.and_then(|tick| project.tempo_map.project_time_for_tick(tick).ok());
+        let scalar = if matches!(
+            edit.property,
+            AnimatableProperty::Scale | AnimatableProperty::Anchor | AnimatableProperty::Opacity
+        ) {
+            edit.display_value / 100.0
+        } else {
+            edit.display_value
+        };
+        if !scalar.is_finite() {
+            continue;
+        }
+        let mut drafts = Vec::with_capacity(edit.object_ids.len());
+        let mut any_animated = false;
+        let mut invalid_member = false;
+        for &id in &edit.object_ids {
+            let Some(object) = project
+                .composition
+                .objects
+                .iter()
+                .find(|object| object.id == id)
+            else {
+                invalid_member = true;
+                break;
+            };
+            if object.locked {
+                invalid_member = true;
+                break;
+            }
+            let count = property_keyframe_count(project, id, edit.property)?;
+            let (current, key_tick) = if count == 0 {
+                (property_base_value(project, id, edit.property)?, None)
+            } else {
+                any_animated = true;
+                let (Some(continuous), Some(tick)) = (tick_position, resolved_tick) else {
+                    invalid_member = true;
+                    break;
+                };
+                let key = property_keyframe_at_tick(project, id, edit.property, tick)?;
+                let current = if let Some(key) = key {
+                    key.value
+                } else {
+                    evaluate_property_at_tick(project, id, edit.property, continuous)?
+                };
+                (current, Some(tick))
+            };
+            let replacement = match (current, edit.axis) {
+                (PropertyValue::Vec2(v), Some(axis)) => {
+                    let (x, y) = match axis {
+                        PositionAxis::X => (scalar, v.y()),
+                        PositionAxis::Y => (v.x(), scalar),
+                    };
+                    let Ok(value) = Vec2::new(x, y) else {
+                        invalid_member = true;
+                        break;
+                    };
+                    PropertyValue::Vec2(value)
+                }
+                (PropertyValue::Scalar(_), None) => PropertyValue::Scalar(scalar),
+                _ => {
+                    invalid_member = true;
+                    break;
+                }
+            };
+            drafts.push(GroupPropertyValueEdit {
+                object_id: id,
+                property: edit.property,
+                value: replacement,
+                key_tick,
+            });
+        }
+        if invalid_member || drafts.len() != edit.object_ids.len() {
+            continue;
+        }
+        let applied = editor.execute(EditCommand::SetGroupPropertyValues { edits: drafts })?;
+        if applied
+            && any_animated
+            && let Some(time) = resolved_time
+        {
+            session.seek_paused(time);
+        }
+        changed |= applied;
+    }
+    Ok(changed)
+}
+
 /// Keep Fill channels in linear-light percent in the Inspector. This
 /// preserves HDR and negative linear components rather than silently
 /// clamping semantic color data to an 8-bit sRGB widget.
@@ -1153,6 +1268,174 @@ fn draw_inspector_transform_row(
                 .inspector_keyframe_requests
                 .push((object.id, property));
         }
+    });
+}
+
+fn draw_inspector_group_numeric_field(
+    ui: &mut egui::Ui,
+    selected: &[ObjectId],
+    property: AnimatableProperty,
+    axis: Option<PositionAxis>,
+    display: Option<f32>,
+    actions: &mut EditorUiActions,
+) {
+    let ids = selected.iter().map(|id| id.get()).collect::<Vec<_>>();
+    let id = egui::Id::new((
+        "inspector_group_transform",
+        ids,
+        property,
+        axis.map(PositionAxis::label),
+    ));
+    let draft_id = id.with("draft");
+    let mut draft = ui
+        .ctx()
+        .data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
+        .unwrap_or_else(|| InspectorNumericDraft {
+            text: display.map_or_else(String::new, |value| format!("{value:.2}")),
+            dirty: false,
+        });
+    if let Some(axis) = axis {
+        ui.label(axis.label());
+    }
+    let previously_focused = ui.memory(|memory| memory.has_focus(id));
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut draft.text)
+            .id(id)
+            .desired_width(58.0)
+            .hint_text(if display.is_none() { "Mixed" } else { "" }),
+    );
+    draft.dirty |= response.changed();
+    let escape = (previously_focused || response.has_focus())
+        && ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if escape {
+        ui.memory_mut(|memory| memory.surrender_focus(id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+    } else if enter || response.lost_focus() {
+        if let Some(display_value) = committed_number(&draft) {
+            actions
+                .inspector_group_edits
+                .push(InspectorGroupTransformEdit {
+                    object_ids: selected.to_vec(),
+                    property,
+                    axis,
+                    display_value,
+                });
+        }
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        if enter {
+            ui.memory_mut(|memory| memory.surrender_focus(id));
+        }
+    } else if response.has_focus() {
+        ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
+    } else {
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+    }
+}
+
+fn draw_inspector_group_transform_row(
+    ui: &mut egui::Ui,
+    project: &Project,
+    session: &EditorSession,
+    property: AnimatableProperty,
+    actions: &mut EditorUiActions,
+) {
+    let selected = session.selected_objects();
+    if selected.len() < 2 {
+        return;
+    }
+    let label = match property {
+        AnimatableProperty::Position => "Position",
+        AnimatableProperty::Scale => "Scale %",
+        AnimatableProperty::Rotation => "Rotation °",
+        AnimatableProperty::Anchor => "Anchor %",
+        AnimatableProperty::Opacity => "Opacity %",
+        _ => return,
+    };
+    let tick = project
+        .tempo_map
+        .continuous_tick_position(session.playhead())
+        .unwrap_or(0.0);
+    let mut values = Vec::with_capacity(selected.len());
+    let mut animated = 0;
+    let mut locked = false;
+    for &id in selected {
+        let Some(object) = project
+            .composition
+            .objects
+            .iter()
+            .find(|object| object.id == id)
+        else {
+            return;
+        };
+        locked |= object.locked;
+        let Ok(count) = property_keyframe_count(project, id, property) else {
+            return;
+        };
+        if count > 0 {
+            animated += 1;
+        }
+        let value = if count == 0 {
+            property_base_value(project, id, property)
+        } else {
+            evaluate_property_at_tick(project, id, property, tick)
+        };
+        let Ok(value) = value else { return };
+        values.push(value);
+    }
+    let editable = !locked && (animated == 0 || project.tempo_map.initial_segment().is_some());
+    let key_state = if animated == 0 {
+        "◇ Static"
+    } else if animated == selected.len() {
+        "◇ Animated"
+    } else {
+        "◇ Mixed keys"
+    };
+    let percent = if matches!(
+        property,
+        AnimatableProperty::Scale | AnimatableProperty::Anchor | AnimatableProperty::Opacity
+    ) {
+        100.0
+    } else {
+        1.0
+    };
+    let axes: &[Option<PositionAxis>] = if matches!(
+        property,
+        AnimatableProperty::Position | AnimatableProperty::Scale | AnimatableProperty::Anchor
+    ) {
+        &[Some(PositionAxis::X), Some(PositionAxis::Y)]
+    } else {
+        &[None]
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.label(label);
+        for &axis in axes {
+            let samples = values
+                .iter()
+                .map(|value| match (value, axis) {
+                    (PropertyValue::Scalar(value), None) => Some(*value),
+                    (PropertyValue::Vec2(value), Some(PositionAxis::X)) => Some(value.x()),
+                    (PropertyValue::Vec2(value), Some(PositionAxis::Y)) => Some(value.y()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>();
+            let Some(samples) = samples else { continue };
+            let common = samples
+                .iter()
+                .all(|value| *value == samples[0])
+                .then_some(samples[0] * percent);
+            if editable {
+                draw_inspector_group_numeric_field(ui, selected, property, axis, common, actions);
+            } else if let Some(value) = common {
+                ui.label(format!("{value:.2}"));
+            } else {
+                ui.weak("Mixed");
+            }
+        }
+        ui.small(key_state);
     });
 }
 
@@ -1529,6 +1812,7 @@ pub struct EditorUiActions {
     pub inspector_transform_edits: Vec<InspectorTransformEdit>,
     pub inspector_animated_edits: Vec<InspectorTransformEdit>,
     pub inspector_color_edits: Vec<InspectorColorEdit>,
+    pub inspector_group_edits: Vec<InspectorGroupTransformEdit>,
     pub inspector_keyframe_requests: Vec<(ObjectId, AnimatableProperty)>,
     pub undo_requested: bool,
     pub redo_requested: bool,
@@ -1789,7 +2073,25 @@ pub fn draw_editor_shell(
                 ui.label(format!("Primary: {}", object.name));
                 ui.label(format!("Primary ID: {}", object.id.get()));
                 if session.selected_objects().len() > 1 {
-                    ui.small("Multi-object mixed transforms are tracked as AI-188.");
+                    ui.heading("Transform · multiple objects");
+                    ui.small("Mixed = differing values. Edits apply to all selected objects in one Undo.");
+                    let locked = session.selected_objects().iter().any(|id| {
+                        project.composition.objects.iter().any(|object| object.id == *id && object.locked)
+                    });
+                    if locked {
+                        ui.small("One or more selected objects are locked; group edits are disabled.");
+                    }
+                    for property in [
+                        AnimatableProperty::Position,
+                        AnimatableProperty::Scale,
+                        AnimatableProperty::Rotation,
+                        AnimatableProperty::Anchor,
+                        AnimatableProperty::Opacity,
+                    ] {
+                        draw_inspector_group_transform_row(
+                            ui, project, session, property, actions,
+                        );
+                    }
                 } else {
                     ui.heading("Transform");
                     ui.small("P Position · S Scale · R Rotation · O Opacity · K keyframe");
@@ -2254,9 +2556,10 @@ pub fn draw_editor_shell(
 #[cfg(test)]
 mod tests {
     use super::{
-        InspectorColorChannel, InspectorColorEdit, InspectorNumericDraft, InspectorPositionEdit,
-        InspectorTransformEdit, PositionAxis, apply_inspector_animated_transform_edits,
-        apply_inspector_color_edits, apply_inspector_position_edits,
+        InspectorColorChannel, InspectorColorEdit, InspectorGroupTransformEdit,
+        InspectorNumericDraft, InspectorPositionEdit, InspectorTransformEdit, PositionAxis,
+        apply_inspector_animated_transform_edits, apply_inspector_color_edits,
+        apply_inspector_group_transform_edits, apply_inspector_position_edits,
         apply_inspector_transform_edits, apply_object_click, clamped_drag_point, committed_number,
         composition_point_from_preview, fit_composition_preview, panned_preview_rect,
         preview_point, rotation_handle_on_preview, selected_outline_bounds,
@@ -2490,6 +2793,161 @@ mod tests {
             property_base_value(editor.project(), id, property),
             Ok(PropertyValue::Scalar(0.65))
         );
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn mixed_inspector_applies_one_delta_independently_per_axis() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::Vec2,
+            editor::ProjectEditor,
+            project::TransformAnimation,
+            property::{AnimatableProperty, PropertyValue, property_base_value},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let (mut session, original, a) = animated_inspector_fixture();
+        let mut project = original.into_project();
+        let b = ObjectId::new(2).expect("id");
+        let mut second = project.composition.objects[0].clone();
+        second.id = b;
+        second.name = "B".to_owned();
+        second.transform = TransformAnimation::new(
+            Animated::new_static(v(300.0, 400.0)),
+            Animated::new_static(v(2.0, 3.0)),
+            Animated::new_static(0.0),
+            Animated::new_static(v(0.5, 0.5)),
+            Animated::new_static(1.0),
+        );
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("project");
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        let ids = session.selected_objects().to_vec();
+        assert!(
+            apply_inspector_group_transform_edits(
+                &mut session,
+                &mut editor,
+                [InspectorGroupTransformEdit {
+                    object_ids: ids.clone(),
+                    property: AnimatableProperty::Position,
+                    axis: Some(PositionAxis::X),
+                    display_value: 125.0,
+                }]
+            )
+            .expect("group Position X")
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Position),
+            Ok(PropertyValue::Vec2(v(125.0, 200.0)))
+        );
+        assert_eq!(
+            property_base_value(editor.project(), b, AnimatableProperty::Position),
+            Ok(PropertyValue::Vec2(v(125.0, 400.0)))
+        );
+        assert!(editor.undo().expect("undo group Position"));
+        assert_eq!(
+            property_base_value(editor.project(), b, AnimatableProperty::Position),
+            Ok(PropertyValue::Vec2(v(300.0, 400.0)))
+        );
+        assert!(editor.redo().expect("redo group Position"));
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn mixed_inspector_applies_static_and_animated_opacity_in_one_undo() {
+        use rhythm_core::{
+            animation::Animated,
+            domain::Vec2,
+            editor::ProjectEditor,
+            project::TransformAnimation,
+            property::{
+                AnimatableProperty, PropertyValue, property_base_value, property_keyframe_at_tick,
+                property_keyframe_count,
+            },
+            time::{MusicalTick, ProjectTimeNs},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let (mut session, original, a) = animated_inspector_fixture();
+        let mut project = original.into_project();
+        let b = ObjectId::new(2).expect("id");
+        let mut second = project.composition.objects[0].clone();
+        second.id = b;
+        second.transform = TransformAnimation::new(
+            Animated::new_static(v(300.0, 400.0)),
+            Animated::new_static(v(1.0, 2.0)),
+            Animated::new_static(0.0),
+            Animated::new_static(v(0.5, 0.5)),
+            Animated::new_static(1.0),
+        );
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("project");
+        editor
+            .create_property_keyframe(
+                b,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("first key");
+        let before = editor.history_len();
+        session.select_viewport_object(Some(a));
+        session.toggle_viewport_object(Some(b));
+        let ids = session.selected_objects().to_vec();
+        assert!(
+            apply_inspector_group_transform_edits(
+                &mut session,
+                &mut editor,
+                [InspectorGroupTransformEdit {
+                    object_ids: ids,
+                    property: AnimatableProperty::Opacity,
+                    axis: None,
+                    display_value: 70.0,
+                }],
+            )
+            .expect("mixed Opacity")
+        );
+        assert_eq!(editor.history_len(), before + 1);
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(0.7))
+        );
+        assert_eq!(
+            property_keyframe_count(editor.project(), b, AnimatableProperty::Opacity),
+            Ok(2)
+        );
+        let inserted = property_keyframe_at_tick(
+            editor.project(),
+            b,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
+        assert_eq!(inserted.value, PropertyValue::Scalar(0.7));
+        assert!(editor.undo().expect("undo mixed"));
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert_eq!(
+            property_keyframe_count(editor.project(), b, AnimatableProperty::Opacity),
+            Ok(1)
+        );
+        assert!(editor.redo().expect("redo mixed"));
+        let after = property_keyframe_at_tick(
+            editor.project(),
+            b,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
+        assert_eq!(after.id, inserted.id);
         editor.project().validate().expect("valid");
     }
 

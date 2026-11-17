@@ -14,7 +14,8 @@ use editor_session::{
 };
 use editor_ui::{
     DiagnosticsView, EditorUiActions, apply_inspector_animated_transform_edits,
-    apply_inspector_color_edits, apply_inspector_position_edits, apply_inspector_transform_edits,
+    apply_inspector_color_edits, apply_inspector_group_transform_edits,
+    apply_inspector_position_edits, apply_inspector_transform_edits,
 };
 use gpu::GpuContext;
 use rhythm_core::{
@@ -465,6 +466,17 @@ impl ApplicationHandler for RhythmApp {
                             Ok(true) => window.request_redraw(),
                             Ok(false) => {}
                             Err(error) => warn!(?error, "Inspector animated transform edit failed"),
+                        }
+                    }
+                    if !ui_actions.inspector_group_edits.is_empty() {
+                        match apply_inspector_group_transform_edits(
+                            &mut self.session,
+                            &mut self.project_editor,
+                            ui_actions.inspector_group_edits,
+                        ) {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => warn!(?error, "Inspector group edit failed"),
                         }
                     }
                     if !ui_actions.inspector_color_edits.is_empty() {

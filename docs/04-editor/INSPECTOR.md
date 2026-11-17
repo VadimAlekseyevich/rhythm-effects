@@ -106,6 +106,8 @@ For each selected property:
 
 Type-specific sections appear only if selection types are compatible.
 
+**AI-188 implementation scope:** for two or more selected objects the Inspector renders shared Position, Scale, Rotation, Anchor and Opacity rows, with a visible `Mixed` placeholder for axes/components whose evaluated values differ. Identical values are displayed normally; keyframe states distinguish all-static, all-animated and mixed static/animated selections. One edited component is applied to **every** selected object without changing the other Vec2 component. Locked group members disable the whole group edit rather than silently editing a subset. Every member's property is resolved independently: static members update base_value; already-animated members update an existing key or create a new nearest-grid key and move the playhead there on success. The edit is staged on a cloned candidate project, validated atomically and recorded as **one** compound Undo/Redo history entry for all static and animated changes, with existing keyframe identity/interpolation preserved. Invalid values, duplicate members, missing objects or failure in any member abort the entire compound edit without changing history or ID allocation. Type-specific sections appear only for compatible single selection; mixed multi-selection shows the common Transform section only.
+
 ## 9. Rectangle
 
 MVP:

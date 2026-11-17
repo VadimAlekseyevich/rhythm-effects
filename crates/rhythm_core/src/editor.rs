@@ -112,6 +112,23 @@ pub struct PropertyBaseChange {
     pub after: PropertyValue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroupPropertyValueEdit {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub value: PropertyValue,
+    /// None for a static base; Some for an already-animated property.
+    pub key_tick: Option<MusicalTick>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroupKeyframeValueChange {
+    pub object_id: ObjectId,
+    pub property: AnimatableProperty,
+    pub before: Option<PropertyKeyframe>,
+    pub after: PropertyKeyframe,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
     AddObject {
@@ -144,6 +161,9 @@ pub enum EditCommand {
         object_id: ObjectId,
         property: AnimatableProperty,
         value: PropertyValue,
+    },
+    SetGroupPropertyValues {
+        edits: Vec<GroupPropertyValueEdit>,
     },
     AddOpacityKeyframe {
         object_id: ObjectId,
@@ -195,6 +215,7 @@ impl EditCommand {
             Self::SetPositionBase { .. } => "SetPositionBase",
             Self::SetOpacityBase { .. } => "SetOpacityBase",
             Self::SetPropertyBase { .. } => "SetPropertyBase",
+            Self::SetGroupPropertyValues { .. } => "SetGroupPropertyValues",
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
             Self::InsertPropertyKeyframe { .. } => "InsertPropertyKeyframe",
             Self::SetPropertyKeyframeValue { .. } => "SetPropertyKeyframeValue",
@@ -250,6 +271,10 @@ pub enum HistoryPayload {
     },
     PropertyBaseChanged {
         change: PropertyBaseChange,
+    },
+    GroupPropertyValuesChanged {
+        base_changes: Vec<PropertyBaseChange>,
+        key_changes: Vec<GroupKeyframeValueChange>,
     },
     ScaleBaseChanged {
         object_id: ObjectId,
@@ -1154,6 +1179,120 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetGroupPropertyValues { edits } => {
+                if edits.len() < 2 {
+                    return Err(EditError::InvalidValue(
+                        "group edit requires two or more objects",
+                    ));
+                }
+                let property = edits[0].property;
+                let mut seen = HashSet::new();
+                // Work on a separate candidate so any failing member leaves
+                // all selections, ID allocation and history untouched.
+                let mut candidate = self.project.clone();
+                let mut allocator = EntityIdAllocator::new(candidate.next_entity_id)?;
+                let mut base_changes = Vec::new();
+                let mut key_changes = Vec::new();
+                for edit in edits {
+                    if edit.property != property || !seen.insert(edit.object_id) {
+                        return Err(EditError::InvalidValue(
+                            "duplicate or incompatible group edit",
+                        ));
+                    }
+                    let object = candidate
+                        .composition
+                        .objects
+                        .iter()
+                        .find(|object| object.id == edit.object_id)
+                        .ok_or(EditError::ObjectNotFound(edit.object_id))?;
+                    if object.locked {
+                        return Err(EditError::InvalidValue("locked group member"));
+                    }
+                    let count = property_keyframe_count(&candidate, edit.object_id, edit.property)?;
+                    if count == 0 {
+                        if edit.key_tick.is_some() {
+                            return Err(EditError::InvalidValue(
+                                "static property cannot implicitly become animated",
+                            ));
+                        }
+                        let before =
+                            property_base_value(&candidate, edit.object_id, edit.property)?;
+                        if before != edit.value {
+                            set_property_base_value(
+                                &mut candidate,
+                                edit.object_id,
+                                edit.property,
+                                edit.value,
+                            )?;
+                            base_changes.push(PropertyBaseChange {
+                                object_id: edit.object_id,
+                                property: edit.property,
+                                before,
+                                after: edit.value,
+                            });
+                        }
+                    } else {
+                        let tick = edit.key_tick.ok_or(EditError::InvalidValue(
+                            "animated group member requires resolved tick",
+                        ))?;
+                        let previous = crate::property::remove_property_keyframe_at_tick(
+                            &mut candidate,
+                            edit.object_id,
+                            edit.property,
+                            tick,
+                        )?;
+                        if previous.is_some_and(|key| key.value == edit.value) {
+                            if let Some(previous) = previous {
+                                insert_property_keyframe(
+                                    &mut candidate,
+                                    edit.object_id,
+                                    edit.property,
+                                    previous,
+                                )?;
+                            }
+                            continue;
+                        }
+                        let after = if let Some(key) = previous {
+                            PropertyKeyframe {
+                                value: edit.value,
+                                ..key
+                            }
+                        } else {
+                            PropertyKeyframe {
+                                id: allocator.allocate_keyframe()?,
+                                tick,
+                                value: edit.value,
+                                interpolation: Interpolation::Linear,
+                            }
+                        };
+                        insert_property_keyframe(
+                            &mut candidate,
+                            edit.object_id,
+                            edit.property,
+                            after,
+                        )?;
+                        key_changes.push(GroupKeyframeValueChange {
+                            object_id: edit.object_id,
+                            property: edit.property,
+                            before: previous,
+                            after,
+                        });
+                    }
+                }
+                if base_changes.is_empty() && key_changes.is_empty() {
+                    return Ok(None);
+                }
+                candidate.next_entity_id = allocator.next_entity_id();
+                candidate.validate().map_err(EditError::InvalidProject)?;
+                self.project = candidate;
+                Ok(Some(PendingHistoryEntry::new(
+                    "Edit Transform Group",
+                    HistoryPayload::GroupPropertyValuesChanged {
+                        base_changes,
+                        key_changes,
+                    },
+                )))
+            }
             EditCommand::SetPropertyBase {
                 object_id,
                 property,
@@ -1922,6 +2061,60 @@ impl ProjectEditor {
                     .position
                     .base_value_mut() = value;
             }
+            (
+                HistoryPayload::GroupPropertyValuesChanged {
+                    base_changes,
+                    key_changes,
+                },
+                direction,
+            ) => {
+                for change in base_changes {
+                    set_property_base_value(
+                        &mut self.project,
+                        change.object_id,
+                        change.property,
+                        *direction.pick(&change.before, &change.after),
+                    )?;
+                }
+                for change in key_changes {
+                    match direction {
+                        HistoryDirection::Undo => {
+                            remove_property_keyframe_by_id(
+                                &mut self.project,
+                                change.object_id,
+                                change.property,
+                                change.after.id,
+                            )?
+                            .ok_or(EditError::KeyframeNotFound(change.after.id))?;
+                            if let Some(before) = change.before {
+                                insert_property_keyframe(
+                                    &mut self.project,
+                                    change.object_id,
+                                    change.property,
+                                    before,
+                                )?;
+                            }
+                        }
+                        HistoryDirection::Redo => {
+                            if let Some(before) = change.before {
+                                remove_property_keyframe_by_id(
+                                    &mut self.project,
+                                    change.object_id,
+                                    change.property,
+                                    before.id,
+                                )?
+                                .ok_or(EditError::KeyframeNotFound(before.id))?;
+                            }
+                            insert_property_keyframe(
+                                &mut self.project,
+                                change.object_id,
+                                change.property,
+                                change.after,
+                            )?;
+                        }
+                    }
+                }
+            }
             (HistoryPayload::PropertyBaseChanged { change }, direction) => {
                 set_property_base_value(
                     &mut self.project,
@@ -2343,6 +2536,191 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn group_property_edit_mixes_static_and_animated_in_one_undo_step() {
+        use crate::property::{
+            AnimatableProperty, PropertyValue, property_base_value, property_keyframe_at_tick,
+            property_keyframe_count,
+        };
+        let mut project = editor_with_object().into_project();
+        let a = ObjectId::new(1).expect("a");
+        let b = ObjectId::new(2).expect("b");
+        let mut second = object(2, "B");
+        second
+            .transform
+            .opacity
+            .insert_keyframe(Keyframe::new(
+                KeyframeId::new(3).expect("key"),
+                MusicalTick::new(0),
+                0.2,
+                Interpolation::Hold,
+            ))
+            .expect("insert");
+        project.composition.objects.push(second);
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid");
+        assert!(
+            editor
+                .execute(EditCommand::SetGroupPropertyValues {
+                    edits: vec![
+                        super::GroupPropertyValueEdit {
+                            object_id: a,
+                            property: AnimatableProperty::Opacity,
+                            value: PropertyValue::Scalar(0.75),
+                            key_tick: None,
+                        },
+                        super::GroupPropertyValueEdit {
+                            object_id: b,
+                            property: AnimatableProperty::Opacity,
+                            value: PropertyValue::Scalar(0.75),
+                            key_tick: Some(MusicalTick::new(240)),
+                        },
+                    ]
+                })
+                .expect("group edit")
+        );
+        assert_eq!(editor.history_len(), 1);
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(0.75))
+        );
+        assert_eq!(
+            property_keyframe_count(editor.project(), b, AnimatableProperty::Opacity),
+            Ok(2)
+        );
+        let inserted = property_keyframe_at_tick(
+            editor.project(),
+            b,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("inserted");
+        assert_eq!(inserted.value, PropertyValue::Scalar(0.75));
+        assert!(editor.undo().expect("undo"));
+        assert_eq!(
+            property_base_value(editor.project(), a, AnimatableProperty::Opacity),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert_eq!(
+            property_keyframe_count(editor.project(), b, AnimatableProperty::Opacity),
+            Ok(1)
+        );
+        assert!(editor.redo().expect("redo"));
+        let redone = property_keyframe_at_tick(
+            editor.project(),
+            b,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("redone");
+        assert_eq!(redone.id, inserted.id);
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn group_property_edit_rolls_back_all_objects_if_any_member_invalid() {
+        use crate::property::{AnimatableProperty, PropertyValue};
+        let mut project = editor_with_object().into_project();
+        let a = ObjectId::new(1).expect("a");
+        let b = ObjectId::new(2).expect("b");
+        let mut second = object(2, "B");
+        second.locked = true;
+        project.composition.objects.push(second);
+        project.next_entity_id = 3;
+        let mut editor = ProjectEditor::new(project).expect("valid");
+        let before = editor.project().clone();
+        assert!(matches!(
+            editor.execute(EditCommand::SetGroupPropertyValues {
+                edits: vec![
+                    super::GroupPropertyValueEdit {
+                        object_id: a,
+                        property: AnimatableProperty::Rotation,
+                        value: PropertyValue::Scalar(40.0),
+                        key_tick: None,
+                    },
+                    super::GroupPropertyValueEdit {
+                        object_id: b,
+                        property: AnimatableProperty::Rotation,
+                        value: PropertyValue::Scalar(40.0),
+                        key_tick: None,
+                    },
+                ]
+            }),
+            Err(super::EditError::InvalidValue(_))
+        ));
+        assert_eq!(editor.project(), &before);
+        assert_eq!(editor.history_len(), 0);
+    }
+
+    #[test]
+    fn group_property_edit_preserves_existing_animated_key_identity() {
+        use crate::property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick};
+        let mut project = editor_with_object().into_project();
+        let a = ObjectId::new(1).expect("a");
+        let b = ObjectId::new(2).expect("b");
+        let mut second = object(2, "B");
+        let key_id = KeyframeId::new(3).expect("key");
+        second
+            .transform
+            .rotation_degrees
+            .insert_keyframe(Keyframe::new(
+                key_id,
+                MusicalTick::new(240),
+                15.0,
+                Interpolation::Hold,
+            ))
+            .expect("insert");
+        project.composition.objects.push(second);
+        project.next_entity_id = 4;
+        let mut editor = ProjectEditor::new(project).expect("valid");
+        assert!(
+            editor
+                .execute(EditCommand::SetGroupPropertyValues {
+                    edits: vec![
+                        super::GroupPropertyValueEdit {
+                            object_id: a,
+                            property: AnimatableProperty::Rotation,
+                            value: PropertyValue::Scalar(60.0),
+                            key_tick: None,
+                        },
+                        super::GroupPropertyValueEdit {
+                            object_id: b,
+                            property: AnimatableProperty::Rotation,
+                            value: PropertyValue::Scalar(60.0),
+                            key_tick: Some(MusicalTick::new(240)),
+                        },
+                    ],
+                })
+                .expect("group edit")
+        );
+        let updated = property_keyframe_at_tick(
+            editor.project(),
+            b,
+            AnimatableProperty::Rotation,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
+        assert_eq!(updated.id, key_id);
+        assert_eq!(updated.interpolation, Interpolation::Hold);
+        assert_eq!(updated.value, PropertyValue::Scalar(60.0));
+        assert!(editor.undo().expect("undo"));
+        let restored = property_keyframe_at_tick(
+            editor.project(),
+            b,
+            AnimatableProperty::Rotation,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
+        assert_eq!(restored.id, key_id);
+        assert_eq!(restored.value, PropertyValue::Scalar(15.0));
+        assert!(editor.redo().expect("redo"));
+        editor.project().validate().expect("valid");
     }
 
     #[test]
