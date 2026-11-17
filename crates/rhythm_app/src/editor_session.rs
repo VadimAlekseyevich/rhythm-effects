@@ -2200,7 +2200,7 @@ mod tests {
         use rhythm_core::{
             animation::Animated,
             domain::LinearRgba,
-            project::{Object, ObjectContent, RectangleObject, TransformAnimation},
+            project::{ObjectContent, RectangleObject, TransformAnimation},
         };
         let v = |x, y| Vec2::new(x, y).expect("finite");
         let mut editor = editor_with_object_for_drag();
@@ -2222,7 +2222,7 @@ mod tests {
         let mut project = editor.into_project();
         project.composition.objects.push(second);
         project.next_entity_id = 3;
-        editor = ProjectEditor::new(project).expect("valid");
+        editor = rhythm_core::editor::ProjectEditor::new(project).expect("valid");
         let a = ObjectId::new(1).expect("first");
         let b = ObjectId::new(2).expect("second");
         let mut session = EditorSession::default();
