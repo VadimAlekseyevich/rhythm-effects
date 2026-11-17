@@ -164,6 +164,12 @@ Without Shift, rotation is continuous degrees.
 
 Rotation animation uses the same keyframing rules.
 
+**AI-177 implementation scope:** exactly one selected, visible, unlocked Rectangle/Ellipse with static Rotation displays an editor-only blue circular rotation handle 28 egui logical points outside its *transformed local top edge*, connected by a short line. The knob and 11-point pointer hit area are constant in logical screen points across camera zoom/pan. Its outward direction follows the transformed edge, including rotated and negatively scaled shapes. The knob may appear outside the composition texture but is clipped to the viewport canvas and remains draggable there; the actual composition is not changed by this overlay.
+
+A primary-button drag that starts on the knob takes priority over Scale corners, object movement and marquee selection. The pointer is mapped through the same camera to composition coordinates and its signed angular movement is measured **around the evaluated Anchor (Position), not the AABB center**. Angle updates unwrap consecutive ±180° crossings to preserve continuous, unnormalized degrees across full revolutions; clockwise is positive in top-left-origin composition coordinates. The value is always based on the static Rotation at mouse-down plus signed angular travel, without numerical wrapping at 360°. A zero-length pivot vector does not invent an angle. One drag uses one `ProjectEditor` history transaction; zero net change is a no-op, and Escape/focus loss restore the original value. The final mouse release updates the angle before committing.
+
+Shift 15° snapping is reserved for AI-178, animated Rotation is AI-180, group rotation is out of scope, and Image/Text require prepared runtime geometry. Rotation handles never become part of creative GPU rendering or exported output.
+
 ## 13. Anchor
 
 Viewport displays anchor marker for selected object.
