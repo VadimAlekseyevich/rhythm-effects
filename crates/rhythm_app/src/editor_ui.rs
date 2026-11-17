@@ -648,8 +648,13 @@ pub fn apply_inspector_transform_edits(
 ) -> Result<bool, EditError> {
     let mut changed = false;
     for edit in edits {
-        let Some(object) = editor.project().composition.objects.iter()
-            .find(|object| object.id == edit.object_id) else {
+        let Some(object) = editor
+            .project()
+            .composition
+            .objects
+            .iter()
+            .find(|object| object.id == edit.object_id)
+        else {
             continue;
         };
         if object.locked
@@ -716,7 +721,9 @@ fn draw_inspector_transform_field(
 ) -> bool {
     let id = inspector_transform_id(object_id, property, axis);
     let draft_id = id.with("draft");
-    let mut draft = ui.ctx().data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
+    let mut draft = ui
+        .ctx()
+        .data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
         .unwrap_or_else(|| InspectorNumericDraft {
             text: current.to_string(),
             dirty: false,
@@ -736,24 +743,29 @@ fn draw_inspector_transform_field(
     let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
     if escape {
         ui.memory_mut(|memory| memory.surrender_focus(id));
-        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     } else if enter || response.lost_focus() {
         if let Some(value) = committed_number(&draft) {
-            actions.inspector_transform_edits.push(InspectorTransformEdit {
-                object_id,
-                property,
-                axis,
-                display_value: value,
-            });
+            actions
+                .inspector_transform_edits
+                .push(InspectorTransformEdit {
+                    object_id,
+                    property,
+                    axis,
+                    display_value: value,
+                });
         }
-        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
         if enter {
             ui.memory_mut(|memory| memory.surrender_focus(id));
         }
     } else if response.has_focus() {
         ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
     } else {
-        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     }
     response.has_focus()
 }
@@ -777,7 +789,10 @@ fn draw_inspector_transform_row(
     let Ok(count) = property_keyframe_count(project, object.id, property) else {
         return;
     };
-    let tick = project.tempo_map.continuous_tick_position(session.playhead()).unwrap_or(0.0);
+    let tick = project
+        .tempo_map
+        .continuous_tick_position(session.playhead())
+        .unwrap_or(0.0);
     let value = if count == 0 {
         property_base_value(project, object.id, property)
     } else {
@@ -799,45 +814,73 @@ fn draw_inspector_transform_row(
             .is_some()
     });
     let (key_label, key_hint) = if count == 0 {
-        ("◇ Static", "Static property: create first key at nearest grid position")
+        (
+            "◇ Static",
+            "Static property: create first key at nearest grid position",
+        )
     } else if at_key {
-        ("◆ Key", "Key exists at current grid position: remove that key")
+        (
+            "◆ Key",
+            "Key exists at current grid position: remove that key",
+        )
     } else {
-        ("◇ Anim", "Animated property: create a key at nearest grid position")
+        (
+            "◇ Anim",
+            "Animated property: create a key at nearest grid position",
+        )
     };
     ui.horizontal(|ui| {
         ui.label(label);
         match value {
             PropertyValue::Vec2(v) if editable => {
                 let display = |value: f32| {
-                    if matches!(property, AnimatableProperty::Scale | AnimatableProperty::Anchor) {
+                    if matches!(
+                        property,
+                        AnimatableProperty::Scale | AnimatableProperty::Anchor
+                    ) {
                         value * 100.0
                     } else {
                         value
                     }
                 };
                 if property == AnimatableProperty::Position {
-                    if draw_inspector_position_field(ui, object.id, PositionAxis::X, v.x(), actions) {
+                    if draw_inspector_position_field(ui, object.id, PositionAxis::X, v.x(), actions)
+                    {
                         session.focus_property(object.id, property);
                     }
-                    if draw_inspector_position_field(ui, object.id, PositionAxis::Y, v.y(), actions) {
+                    if draw_inspector_position_field(ui, object.id, PositionAxis::Y, v.y(), actions)
+                    {
                         session.focus_property(object.id, property);
                     }
                 } else {
                     if draw_inspector_transform_field(
-                        ui, object.id, property, Some(PositionAxis::X), display(v.x()), actions
+                        ui,
+                        object.id,
+                        property,
+                        Some(PositionAxis::X),
+                        display(v.x()),
+                        actions,
                     ) {
                         session.focus_property(object.id, property);
                     }
                     if draw_inspector_transform_field(
-                        ui, object.id, property, Some(PositionAxis::Y), display(v.y()), actions
+                        ui,
+                        object.id,
+                        property,
+                        Some(PositionAxis::Y),
+                        display(v.y()),
+                        actions,
                     ) {
                         session.focus_property(object.id, property);
                     }
                 }
             }
             PropertyValue::Scalar(v) if editable => {
-                let display = if property == AnimatableProperty::Opacity { v * 100.0 } else { v };
+                let display = if property == AnimatableProperty::Opacity {
+                    v * 100.0
+                } else {
+                    v
+                };
                 if draw_inspector_transform_field(ui, object.id, property, None, display, actions) {
                     session.focus_property(object.id, property);
                 }
@@ -850,13 +893,17 @@ fn draw_inspector_transform_row(
             }
             PropertyValue::Color(_) => {}
         }
-        let key = ui.add_enabled(
-            !object.locked && keyframe_tick.is_some(),
-            egui::Button::new(key_label),
-        ).on_hover_text(key_hint);
+        let key = ui
+            .add_enabled(
+                !object.locked && keyframe_tick.is_some(),
+                egui::Button::new(key_label),
+            )
+            .on_hover_text(key_hint);
         if key.clicked() {
             session.focus_property(object.id, property);
-            actions.inspector_keyframe_requests.push((object.id, property));
+            actions
+                .inspector_keyframe_requests
+                .push((object.id, property));
         }
     });
 }
@@ -964,7 +1011,10 @@ fn flush_inspector_draft_on_selection_change(
                     && !object.locked
                     && property_keyframe_count(project, old_id, property) == Ok(0)
             });
-            let axes = if matches!(property, AnimatableProperty::Scale | AnimatableProperty::Anchor) {
+            let axes = if matches!(
+                property,
+                AnimatableProperty::Scale | AnimatableProperty::Anchor
+            ) {
                 vec![Some(PositionAxis::X), Some(PositionAxis::Y)]
             } else {
                 vec![None]
@@ -977,12 +1027,14 @@ fn flush_inspector_draft_on_selection_change(
                     draft
                 });
                 if editable && let Some(display_value) = draft.as_ref().and_then(committed_number) {
-                    actions.inspector_transform_edits.push(InspectorTransformEdit {
-                        object_id: old_id,
-                        property,
-                        axis,
-                        display_value,
-                    });
+                    actions
+                        .inspector_transform_edits
+                        .push(InspectorTransformEdit {
+                            object_id: old_id,
+                            property,
+                            axis,
+                            display_value,
+                        });
                 }
             }
         }
@@ -1678,8 +1730,8 @@ pub fn draw_editor_shell(
 mod tests {
     use super::{
         InspectorNumericDraft, InspectorPositionEdit, InspectorTransformEdit, PositionAxis,
-        apply_inspector_position_edits, apply_inspector_transform_edits,
-        apply_object_click, clamped_drag_point, committed_number, composition_point_from_preview,
+        apply_inspector_position_edits, apply_inspector_transform_edits, apply_object_click,
+        clamped_drag_point, committed_number, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, rotation_handle_on_preview,
         selected_outline_bounds, selected_rotation_handle_hit, selected_scale_corner_hit,
         selection_rect_on_preview, unbounded_composition_point,
@@ -1724,7 +1776,10 @@ mod tests {
             animation::Animated,
             domain::{LinearRgba, Vec2},
             editor::ProjectEditor,
-            project::{Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
             property::{AnimatableProperty, PropertyValue, property_base_value},
             time::{GridOffsetNs, TempoMap},
         };
@@ -1736,7 +1791,10 @@ mod tests {
             TempoMap::unset(GridOffsetNs::new(0)),
         );
         project.composition.objects.push(Object {
-            id, name: "Shape".to_owned(), visible: true, locked: false,
+            id,
+            name: "Shape".to_owned(),
+            visible: true,
+            locked: false,
             transform: TransformAnimation::new(
                 Animated::new_static(v(100.0, 200.0)),
                 Animated::new_static(v(1.0, 1.0)),
@@ -1754,7 +1812,10 @@ mod tests {
         project.next_entity_id = 2;
         let mut editor = ProjectEditor::new(project).expect("project");
         let edit = |property, axis, display_value| InspectorTransformEdit {
-            object_id: id, property, axis, display_value,
+            object_id: id,
+            property,
+            axis,
+            display_value,
         };
         let changes = [
             edit(AnimatableProperty::Scale, Some(PositionAxis::X), -150.0),
