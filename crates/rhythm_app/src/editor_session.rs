@@ -945,7 +945,10 @@ impl EditorSession {
         let Some(object_id) = self.selected_object() else {
             return false;
         };
-        let next = FocusedProperty { object_id, property };
+        let next = FocusedProperty {
+            object_id,
+            property,
+        };
         let changed = self.focused_property != Some(next);
         self.focused_property = Some(next);
         changed
