@@ -112,6 +112,8 @@ MVP transform behavior:
 
 Single-object gizmos are release-critical; multi-object move is required.
 
+**AI-179 implementation scope:** when two or more objects are selected in the Objects panel or viewport, a primary drag beginning on a visible, unlocked, selected Rectangle/Ellipse moves the full selection by one *shared composition-space delta*, not independent per-frame rounded deltas. All selected members must be visible, unlocked and have static Position; an uneditable member blocks the whole gesture instead of silently moving a subset. Clicking a non-member continues normal selection behavior; Ctrl selection/empty-space marquee are unaffected. The core stores all original Position values at mouse-down and recomputes every update from the same total delta; prevalidation prevents partially applying an invalid result. Exactly one Undo/Redo history entry records all moved objects, even if their original positions differ. Zero net movement is a no-op; Escape/focus loss cancel the entire group. Group Scale/Rotate remain out of scope.
+
 ## 10. Move gizmo
 
 Direct drag of selected object/bounds moves Position.
