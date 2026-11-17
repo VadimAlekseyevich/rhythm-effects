@@ -227,10 +227,10 @@ Work strictly top-to-bottom unless a task is explicitly blocked by an external v
 - [ ] **AI-192** — Implement Text content/font/weight/style/size/alignment/color Inspector controls.
 - [ ] **AI-193** — Implement Effect stack Inspector with enable/reorder/remove.
 - [ ] **AI-194** — Implement Add Effect shallow searchable popover.
-- [ ] **AI-195** — Implement physical-key shortcut dispatcher for P/S/R/O/K.
+- [x] **AI-195** — Implement physical-key shortcut dispatcher for P/S/R/O/K.
 - [ ] **AI-196** — Implement Space Play/Pause without Space viewport-pan behavior.
 - [ ] **AI-197** — Implement Ctrl+K command search surface.
-- [ ] **AI-198** — Implement focus routing so active text/numeric controls suppress editor letter shortcuts.
+- [x] **AI-198** — Implement focus routing so active text/numeric controls suppress editor letter shortcuts.
 - [ ] **AI-199** — Implement Ctrl+N/O/S/Shift+S/Z/Shift+Z/Y/C/V/D/A and Delete command bindings.
 - [ ] **AI-200** — Add rfd native file-dialog dependency and Open/Save/Import dialog wrapper.
 - [ ] **AI-201** — Implement PNG image decode worker.

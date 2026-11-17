@@ -1063,6 +1063,11 @@ fn draw_inspector_transform_row(
         )
     };
     ui.horizontal(|ui| {
+        let focused = session
+            .focused_property()
+            .is_some_and(|focused| focused.object_id == object.id && focused.property == property);
+        ui.label(if focused { "▶" } else { "  " })
+            .on_hover_text("Focused property for K keyframe shortcut");
         ui.label(label);
         match value {
             PropertyValue::Vec2(v) if editable => {
@@ -1787,6 +1792,7 @@ pub fn draw_editor_shell(
                     ui.small("Multi-object mixed transforms are tracked as AI-188.");
                 } else {
                     ui.heading("Transform");
+                    ui.small("P Position · S Scale · R Rotation · O Opacity · K keyframe");
                     if object.locked {
                         ui.small("Locked: values are read-only.");
                     }

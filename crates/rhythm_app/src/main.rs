@@ -23,6 +23,7 @@ use rhythm_core::{
     domain::{LinearRgba, Vec2},
     ids::ObjectId,
     project::{Object, ObjectContent, RectangleObject, TransformAnimation},
+    property::AnimatableProperty,
 };
 use rhythm_engine::renderer::Renderer;
 use tracing::{error, info, warn};
@@ -35,6 +36,24 @@ use winit::{
     keyboard::{KeyCode, ModifiersState, PhysicalKey},
     window::{Window, WindowId},
 };
+
+/// Map physical keyboard positions, not localized typed characters, to
+/// the four core transform properties. K remains the active-property key.
+fn shortcut_transform_property(code: KeyCode) -> Option<AnimatableProperty> {
+    match code {
+        KeyCode::KeyP => Some(AnimatableProperty::Position),
+        KeyCode::KeyS => Some(AnimatableProperty::Scale),
+        KeyCode::KeyR => Some(AnimatableProperty::Rotation),
+        KeyCode::KeyO => Some(AnimatableProperty::Opacity),
+        _ => None,
+    }
+}
+
+/// Egui text/numeric editors own every key while typing: no global letter
+/// shortcuts (including K), transport, keyframe nudges or Delete may fire.
+fn can_dispatch_physical_editor_shortcuts(egui_wants_keyboard_input: bool) -> bool {
+    !egui_wants_keyboard_input
+}
 
 fn fail_startup(
     event_loop: &ActiveEventLoop,
@@ -212,10 +231,11 @@ impl ApplicationHandler for RhythmApp {
             } => {
                 if !is_synthetic
                     && event.state == ElementState::Pressed
-                    && !self
-                        .egui_context
-                        .as_ref()
-                        .is_some_and(|context| context.egui_wants_keyboard_input())
+                    && can_dispatch_physical_editor_shortcuts(
+                        self.egui_context
+                            .as_ref()
+                            .is_some_and(|context| context.egui_wants_keyboard_input()),
+                    )
                     && let PhysicalKey::Code(code) = event.physical_key
                 {
                     let control = self.modifiers.control_key();
@@ -305,6 +325,14 @@ impl ApplicationHandler for RhythmApp {
                             warn!(?error, "cancel viewport transform drag failed");
                         }
                         self.session.cancel_keyframe_drag() || viewport_cancelled
+                    } else if !control
+                        && !shift
+                        && !alt
+                        && !super_key
+                        && !event.repeat
+                        && let Some(property) = shortcut_transform_property(code)
+                    {
+                        self.session.focus_selected_transform_property(property)
                     } else if !control && !shift && !alt && !super_key && code == KeyCode::KeyK {
                         match self.session.keyframe_action(&mut self.project_editor) {
                             Ok(changed) => changed,
@@ -749,4 +777,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.run_app(&mut app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod keyboard_shortcut_tests {
+    use super::{can_dispatch_physical_editor_shortcuts, shortcut_transform_property};
+    use rhythm_core::property::AnimatableProperty;
+    use winit::keyboard::KeyCode;
+
+    #[test]
+    fn physical_transform_shortcuts_are_explicit_and_k_remains_separate() {
+        assert_eq!(
+            shortcut_transform_property(KeyCode::KeyP),
+            Some(AnimatableProperty::Position)
+        );
+        assert_eq!(
+            shortcut_transform_property(KeyCode::KeyS),
+            Some(AnimatableProperty::Scale)
+        );
+        assert_eq!(
+            shortcut_transform_property(KeyCode::KeyR),
+            Some(AnimatableProperty::Rotation)
+        );
+        assert_eq!(
+            shortcut_transform_property(KeyCode::KeyO),
+            Some(AnimatableProperty::Opacity)
+        );
+        assert_eq!(shortcut_transform_property(KeyCode::KeyK), None);
+        assert_eq!(shortcut_transform_property(KeyCode::KeyD), None);
+    }
+
+    #[test]
+    fn text_and_numeric_focus_suppresses_editor_physical_keys() {
+        // A focused egui TextEdit requests keyboard input; this gate runs
+        // before *any* global shortcut or viewport transform dispatch.
+        assert!(can_dispatch_physical_editor_shortcuts(false));
+        assert!(!can_dispatch_physical_editor_shortcuts(true));
+    }
 }
