@@ -13,8 +13,8 @@ use editor_session::{
     apply_viewport_rotation_actions, apply_viewport_scale_actions,
 };
 use editor_ui::{
-    DiagnosticsView, EditorUiActions, apply_inspector_position_edits,
-    apply_inspector_transform_edits,
+    DiagnosticsView, EditorUiActions, apply_inspector_animated_transform_edits,
+    apply_inspector_position_edits, apply_inspector_transform_edits,
 };
 use gpu::GpuContext;
 use rhythm_core::{
@@ -426,6 +426,17 @@ impl ApplicationHandler for RhythmApp {
                             Ok(true) => window.request_redraw(),
                             Ok(false) => {}
                             Err(error) => warn!(?error, "Inspector transform edit failed"),
+                        }
+                    }
+                    if !ui_actions.inspector_animated_edits.is_empty() {
+                        match apply_inspector_animated_transform_edits(
+                            &mut self.session,
+                            &mut self.project_editor,
+                            ui_actions.inspector_animated_edits,
+                        ) {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => warn!(?error, "Inspector animated transform edit failed"),
                         }
                     }
                     for (id, property) in ui_actions.inspector_keyframe_requests {
