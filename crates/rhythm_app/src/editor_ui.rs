@@ -810,11 +810,15 @@ pub fn apply_inspector_group_transform_edits(
             continue;
         }
         let project = editor.project();
-        let tick_position = project.tempo_map.continuous_tick_position(session.playhead()).ok();
-        let resolved_tick = tick_position
-            .and_then(|position| snap_tick_position_to_grid(position, session.authoring_division()).ok());
-        let resolved_time = resolved_tick
-            .and_then(|tick| project.tempo_map.project_time_for_tick(tick).ok());
+        let tick_position = project
+            .tempo_map
+            .continuous_tick_position(session.playhead())
+            .ok();
+        let resolved_tick = tick_position.and_then(|position| {
+            snap_tick_position_to_grid(position, session.authoring_division()).ok()
+        });
+        let resolved_time =
+            resolved_tick.and_then(|tick| project.tempo_map.project_time_for_tick(tick).ok());
         let scalar = if matches!(
             edit.property,
             AnimatableProperty::Scale | AnimatableProperty::Anchor | AnimatableProperty::Opacity
@@ -830,7 +834,11 @@ pub fn apply_inspector_group_transform_edits(
         let mut any_animated = false;
         let mut invalid_member = false;
         for &id in &edit.object_ids {
-            let Some(object) = project.composition.objects.iter().find(|object| object.id == id)
+            let Some(object) = project
+                .composition
+                .objects
+                .iter()
+                .find(|object| object.id == id)
             else {
                 invalid_member = true;
                 break;
@@ -885,7 +893,10 @@ pub fn apply_inspector_group_transform_edits(
             continue;
         }
         let applied = editor.execute(EditCommand::SetGroupPropertyValues { edits: drafts })?;
-        if applied && any_animated && let Some(time) = resolved_time {
+        if applied
+            && any_animated
+            && let Some(time) = resolved_time
+        {
             session.seek_paused(time);
         }
         changed |= applied;
@@ -1276,7 +1287,9 @@ fn draw_inspector_group_numeric_field(
         axis.map(PositionAxis::label),
     ));
     let draft_id = id.with("draft");
-    let mut draft = ui.ctx().data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
+    let mut draft = ui
+        .ctx()
+        .data(|data| data.get_temp::<InspectorNumericDraft>(draft_id))
         .unwrap_or_else(|| InspectorNumericDraft {
             text: display.map_or_else(String::new, |value| format!("{value:.2}")),
             dirty: false,
@@ -1297,24 +1310,29 @@ fn draw_inspector_group_numeric_field(
     let enter = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
     if escape {
         ui.memory_mut(|memory| memory.surrender_focus(id));
-        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     } else if enter || response.lost_focus() {
         if let Some(display_value) = committed_number(&draft) {
-            actions.inspector_group_edits.push(InspectorGroupTransformEdit {
-                object_ids: selected.to_vec(),
-                property,
-                axis,
-                display_value,
-            });
+            actions
+                .inspector_group_edits
+                .push(InspectorGroupTransformEdit {
+                    object_ids: selected.to_vec(),
+                    property,
+                    axis,
+                    display_value,
+                });
         }
-        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
         if enter {
             ui.memory_mut(|memory| memory.surrender_focus(id));
         }
     } else if response.has_focus() {
         ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
     } else {
-        ui.ctx().data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     }
 }
 
@@ -1337,12 +1355,19 @@ fn draw_inspector_group_transform_row(
         AnimatableProperty::Opacity => "Opacity %",
         _ => return,
     };
-    let tick = project.tempo_map.continuous_tick_position(session.playhead()).unwrap_or(0.0);
+    let tick = project
+        .tempo_map
+        .continuous_tick_position(session.playhead())
+        .unwrap_or(0.0);
     let mut values = Vec::with_capacity(selected.len());
     let mut animated = 0;
     let mut locked = false;
     for &id in selected {
-        let Some(object) = project.composition.objects.iter().find(|object| object.id == id)
+        let Some(object) = project
+            .composition
+            .objects
+            .iter()
+            .find(|object| object.id == id)
         else {
             return;
         };
@@ -1372,7 +1397,11 @@ fn draw_inspector_group_transform_row(
     let percent = if matches!(
         property,
         AnimatableProperty::Scale | AnimatableProperty::Anchor | AnimatableProperty::Opacity
-    ) { 100.0 } else { 1.0 };
+    ) {
+        100.0
+    } else {
+        1.0
+    };
     let axes: &[Option<PositionAxis>] = if matches!(
         property,
         AnimatableProperty::Position | AnimatableProperty::Scale | AnimatableProperty::Anchor
@@ -1384,19 +1413,22 @@ fn draw_inspector_group_transform_row(
     ui.horizontal_wrapped(|ui| {
         ui.label(label);
         for &axis in axes {
-            let samples = values.iter().map(|value| match (value, axis) {
-                (PropertyValue::Scalar(value), None) => Some(*value),
-                (PropertyValue::Vec2(value), Some(PositionAxis::X)) => Some(value.x()),
-                (PropertyValue::Vec2(value), Some(PositionAxis::Y)) => Some(value.y()),
-                _ => None,
-            }).collect::<Option<Vec<_>>>();
+            let samples = values
+                .iter()
+                .map(|value| match (value, axis) {
+                    (PropertyValue::Scalar(value), None) => Some(*value),
+                    (PropertyValue::Vec2(value), Some(PositionAxis::X)) => Some(value.x()),
+                    (PropertyValue::Vec2(value), Some(PositionAxis::Y)) => Some(value.y()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>();
             let Some(samples) = samples else { continue };
-            let common = samples.iter().all(|value| *value == samples[0])
+            let common = samples
+                .iter()
+                .all(|value| *value == samples[0])
                 .then_some(samples[0] * percent);
             if editable {
-                draw_inspector_group_numeric_field(
-                    ui, selected, property, axis, common, actions,
-                );
+                draw_inspector_group_numeric_field(ui, selected, property, axis, common, actions);
             } else if let Some(value) = common {
                 ui.label(format!("{value:.2}"));
             } else {
@@ -2524,10 +2556,10 @@ pub fn draw_editor_shell(
 #[cfg(test)]
 mod tests {
     use super::{
-        InspectorColorChannel, InspectorColorEdit, InspectorNumericDraft, InspectorPositionEdit,
-        InspectorGroupTransformEdit, InspectorTransformEdit, PositionAxis, apply_inspector_animated_transform_edits,
-        apply_inspector_color_edits, apply_inspector_group_transform_edits,
-        apply_inspector_position_edits,
+        InspectorColorChannel, InspectorColorEdit, InspectorGroupTransformEdit,
+        InspectorNumericDraft, InspectorPositionEdit, InspectorTransformEdit, PositionAxis,
+        apply_inspector_animated_transform_edits, apply_inspector_color_edits,
+        apply_inspector_group_transform_edits, apply_inspector_position_edits,
         apply_inspector_transform_edits, apply_object_click, clamped_drag_point, committed_number,
         composition_point_from_preview, fit_composition_preview, panned_preview_rect,
         preview_point, rotation_handle_on_preview, selected_outline_bounds,
@@ -2793,16 +2825,19 @@ mod tests {
         session.select_viewport_object(Some(a));
         session.toggle_viewport_object(Some(b));
         let ids = session.selected_objects().to_vec();
-        assert!(apply_inspector_group_transform_edits(
-            &mut session,
-            &mut editor,
-            [InspectorGroupTransformEdit {
-                object_ids: ids.clone(),
-                property: AnimatableProperty::Position,
-                axis: Some(PositionAxis::X),
-                display_value: 125.0,
-            }]
-        ).expect("group Position X"));
+        assert!(
+            apply_inspector_group_transform_edits(
+                &mut session,
+                &mut editor,
+                [InspectorGroupTransformEdit {
+                    object_ids: ids.clone(),
+                    property: AnimatableProperty::Position,
+                    axis: Some(PositionAxis::X),
+                    display_value: 125.0,
+                }]
+            )
+            .expect("group Position X")
+        );
         assert_eq!(editor.history_len(), 1);
         assert_eq!(
             property_base_value(editor.project(), a, AnimatableProperty::Position),
@@ -2829,8 +2864,8 @@ mod tests {
             editor::ProjectEditor,
             project::TransformAnimation,
             property::{
-                AnimatableProperty, PropertyValue, property_base_value,
-                property_keyframe_count, property_keyframe_at_tick,
+                AnimatableProperty, PropertyValue, property_base_value, property_keyframe_at_tick,
+                property_keyframe_count,
             },
             time::{MusicalTick, ProjectTimeNs},
         };
@@ -2850,24 +2885,31 @@ mod tests {
         project.composition.objects.push(second);
         project.next_entity_id = 3;
         let mut editor = ProjectEditor::new(project).expect("project");
-        editor.create_property_keyframe(
-            b, AnimatableProperty::Opacity, MusicalTick::new(0),
-            PropertyValue::Scalar(0.5),
-        ).expect("first key");
+        editor
+            .create_property_keyframe(
+                b,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(0),
+                PropertyValue::Scalar(0.5),
+            )
+            .expect("first key");
         let before = editor.history_len();
         session.select_viewport_object(Some(a));
         session.toggle_viewport_object(Some(b));
         let ids = session.selected_objects().to_vec();
-        assert!(apply_inspector_group_transform_edits(
-            &mut session,
-            &mut editor,
-            [InspectorGroupTransformEdit {
-                object_ids: ids,
-                property: AnimatableProperty::Opacity,
-                axis: None,
-                display_value: 70.0,
-            }],
-        ).expect("mixed Opacity"));
+        assert!(
+            apply_inspector_group_transform_edits(
+                &mut session,
+                &mut editor,
+                [InspectorGroupTransformEdit {
+                    object_ids: ids,
+                    property: AnimatableProperty::Opacity,
+                    axis: None,
+                    display_value: 70.0,
+                }],
+            )
+            .expect("mixed Opacity")
+        );
         assert_eq!(editor.history_len(), before + 1);
         assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
         assert_eq!(
@@ -2879,8 +2921,13 @@ mod tests {
             Ok(2)
         );
         let inserted = property_keyframe_at_tick(
-            editor.project(), b, AnimatableProperty::Opacity, MusicalTick::new(240),
-        ).expect("property").expect("key");
+            editor.project(),
+            b,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
         assert_eq!(inserted.value, PropertyValue::Scalar(0.7));
         assert!(editor.undo().expect("undo mixed"));
         assert_eq!(
@@ -2893,8 +2940,13 @@ mod tests {
         );
         assert!(editor.redo().expect("redo mixed"));
         let after = property_keyframe_at_tick(
-            editor.project(), b, AnimatableProperty::Opacity, MusicalTick::new(240),
-        ).expect("property").expect("key");
+            editor.project(),
+            b,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
         assert_eq!(after.id, inserted.id);
         editor.project().validate().expect("valid");
     }
