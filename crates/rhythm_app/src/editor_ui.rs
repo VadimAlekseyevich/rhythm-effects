@@ -2857,11 +2857,12 @@ mod tests {
         let before = editor.history_len();
         session.select_viewport_object(Some(a));
         session.toggle_viewport_object(Some(b));
+        let ids = session.selected_objects().to_vec();
         assert!(apply_inspector_group_transform_edits(
             &mut session,
             &mut editor,
             [InspectorGroupTransformEdit {
-                object_ids: session.selected_objects().to_vec(),
+                object_ids: ids,
                 property: AnimatableProperty::Opacity,
                 axis: None,
                 display_value: 70.0,
