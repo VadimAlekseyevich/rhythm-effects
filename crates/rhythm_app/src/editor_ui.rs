@@ -732,6 +732,7 @@ fn flush_inspector_draft_on_selection_change(
 #[derive(Debug, Default)]
 pub struct EditorUiActions {
     pub add_rectangle_requested: bool,
+    pub object_list_edits: Vec<EditCommand>,
     pub viewport_position_actions: Vec<ViewportPositionAction>,
     pub viewport_group_position_actions: Vec<ViewportGroupPositionAction>,
     pub viewport_scale_actions: Vec<ViewportScaleAction>,
@@ -863,25 +864,98 @@ pub fn draw_editor_shell(
             if project.composition.objects.is_empty() {
                 ui.label("No objects yet. Add a Rectangle to try selection.");
             }
-            for object in &project.composition.objects {
-                let label = format!(
-                    "{}{}{}",
-                    if !object.visible { "[hidden] " } else { "" },
-                    if object.locked { "[locked] " } else { "" },
-                    object.name,
-                );
-                if ui
-                    .selectable_label(session.is_object_selected(object.id), label)
-                    .on_hover_text("Click to select; Ctrl+click to toggle selection")
-                    .clicked()
-                {
-                    apply_object_click(
-                        session,
-                        Some(object.id),
-                        ui.input(|input| input.modifiers.ctrl),
-                    );
-                }
-            }
+            ui.small("V = visible · H = hidden · U = unlocked · L = locked. Double-click name to rename.");
+            egui::ScrollArea::vertical()
+                .id_salt("object_list_scroll")
+                .show(ui, |ui| {
+                    for object in &project.composition.objects {
+                        let edit_id = egui::Id::new(("object_name_edit", object.id.get()));
+                        let draft_id = edit_id.with("draft");
+                        ui.horizontal(|ui| {
+                            let visibility = if object.visible { "V" } else { "H" };
+                            if ui
+                                .small_button(visibility)
+                                .on_hover_text(if object.visible {
+                                    "Hide object (Undo available)"
+                                } else {
+                                    "Show object (Undo available)"
+                                })
+                                .clicked()
+                            {
+                                actions.object_list_edits.push(EditCommand::SetObjectVisible {
+                                    object_id: object.id,
+                                    visible: !object.visible,
+                                });
+                            }
+                            let locking = if object.locked { "L" } else { "U" };
+                            if ui
+                                .small_button(locking)
+                                .on_hover_text(if object.locked {
+                                    "Unlock object (Undo available)"
+                                } else {
+                                    "Lock object (Undo available)"
+                                })
+                                .clicked()
+                            {
+                                actions.object_list_edits.push(EditCommand::SetObjectLocked {
+                                    object_id: object.id,
+                                    locked: !object.locked,
+                                });
+                            }
+                            if let Some(mut draft) =
+                                ui.ctx().data(|data| data.get_temp::<String>(draft_id))
+                            {
+                                let field = ui.add(
+                                    egui::TextEdit::singleline(&mut draft)
+                                        .id(edit_id)
+                                        .desired_width(150.0),
+                                );
+                                let escape = field.has_focus()
+                                    && ui.input(|input| input.key_pressed(egui::Key::Escape));
+                                let enter = field.has_focus()
+                                    && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                                if escape {
+                                    ui.ctx().data_mut(|data| data.remove::<String>(draft_id));
+                                    ui.memory_mut(|memory| memory.surrender_focus(edit_id));
+                                } else if enter || field.lost_focus() {
+                                    let renamed = draft.trim();
+                                    if !renamed.is_empty() && renamed != object.name {
+                                        actions.object_list_edits.push(EditCommand::RenameObject {
+                                            object_id: object.id,
+                                            name: renamed.to_owned(),
+                                        });
+                                    }
+                                    ui.ctx().data_mut(|data| data.remove::<String>(draft_id));
+                                    if enter {
+                                        ui.memory_mut(|memory| memory.surrender_focus(edit_id));
+                                    }
+                                } else {
+                                    ui.ctx().data_mut(|data| data.insert_temp(draft_id, draft));
+                                }
+                            } else {
+                                let response = ui
+                                    .selectable_label(
+                                        session.is_object_selected(object.id),
+                                        &object.name,
+                                    )
+                                    .on_hover_text("Click to select; Ctrl+click toggles; double-click to rename");
+                                if response.clicked() {
+                                    apply_object_click(
+                                        session,
+                                        Some(object.id),
+                                        ui.input(|input| input.modifiers.ctrl),
+                                    );
+                                }
+                                if response.double_clicked() {
+                                    ui.ctx().data_mut(|data| {
+                                        data.insert_temp(draft_id, object.name.clone());
+                                    });
+                                    ui.memory_mut(|memory| memory.request_focus(edit_id));
+                                }
+                            }
+                        });
+                    }
+                });
             ui.take_available_space();
         });
 

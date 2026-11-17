@@ -398,6 +398,13 @@ impl ApplicationHandler for RhythmApp {
                             );
                         }
                     });
+                    for edit in ui_actions.object_list_edits {
+                        match self.project_editor.execute(edit) {
+                            Ok(true) => window.request_redraw(),
+                            Ok(false) => {}
+                            Err(error) => warn!(?error, "Objects list edit failed"),
+                        }
+                    }
                     if !ui_actions.inspector_position_edits.is_empty() {
                         match apply_inspector_position_edits(
                             &mut self.project_editor,

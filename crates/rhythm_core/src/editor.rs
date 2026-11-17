@@ -124,6 +124,14 @@ pub enum EditCommand {
         object_id: ObjectId,
         name: String,
     },
+    SetObjectVisible {
+        object_id: ObjectId,
+        visible: bool,
+    },
+    SetObjectLocked {
+        object_id: ObjectId,
+        locked: bool,
+    },
     SetPositionBase {
         object_id: ObjectId,
         value: Vec2,
@@ -171,6 +179,8 @@ impl EditCommand {
             Self::AddObject { .. } => "AddObject",
             Self::DeleteObject { .. } => "DeleteObject",
             Self::RenameObject { .. } => "RenameObject",
+            Self::SetObjectVisible { .. } => "SetObjectVisible",
+            Self::SetObjectLocked { .. } => "SetObjectLocked",
             Self::SetPositionBase { .. } => "SetPositionBase",
             Self::SetOpacityBase { .. } => "SetOpacityBase",
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
@@ -206,6 +216,16 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         before: String,
         after: String,
+    },
+    ObjectVisibilityChanged {
+        object_id: ObjectId,
+        before: bool,
+        after: bool,
+    },
+    ObjectLockChanged {
+        object_id: ObjectId,
+        before: bool,
+        after: bool,
     },
     PositionBaseChanged {
         object_id: ObjectId,
@@ -1057,6 +1077,38 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetObjectVisible { object_id, visible } => {
+                let index = self.object_index(object_id)?;
+                let before = self.project.composition.objects[index].visible;
+                if before == visible {
+                    return Ok(None);
+                }
+                self.project.composition.objects[index].visible = visible;
+                Ok(Some(PendingHistoryEntry::new(
+                    "Toggle Object Visibility",
+                    HistoryPayload::ObjectVisibilityChanged {
+                        object_id,
+                        before,
+                        after: visible,
+                    },
+                )))
+            }
+            EditCommand::SetObjectLocked { object_id, locked } => {
+                let index = self.object_index(object_id)?;
+                let before = self.project.composition.objects[index].locked;
+                if before == locked {
+                    return Ok(None);
+                }
+                self.project.composition.objects[index].locked = locked;
+                Ok(Some(PendingHistoryEntry::new(
+                    "Toggle Object Lock",
+                    HistoryPayload::ObjectLockChanged {
+                        object_id,
+                        before,
+                        after: locked,
+                    },
+                )))
+            }
             EditCommand::SetPositionBase { object_id, value } => {
                 let index = self.object_index(object_id)?;
                 let before = *self.project.composition.objects[index]
@@ -1729,6 +1781,28 @@ impl ProjectEditor {
                 self.project.composition.objects[index].name = value.clone();
             }
             (
+                HistoryPayload::ObjectVisibilityChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let index = self.object_index(*object_id)?;
+                self.project.composition.objects[index].visible = *direction.pick(before, after);
+            }
+            (
+                HistoryPayload::ObjectLockChanged {
+                    object_id,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let index = self.object_index(*object_id)?;
+                self.project.composition.objects[index].locked = *direction.pick(before, after);
+            }
+            (
                 HistoryPayload::PositionBaseChanged {
                     object_id,
                     before,
@@ -2129,6 +2203,79 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn object_row_visibility_lock_and_name_have_independent_undo_steps() {
+        let mut editor = editor_with_object();
+        let id = ObjectId::new(1).expect("id");
+        assert!(
+            editor
+                .execute(EditCommand::SetObjectVisible {
+                    object_id: id,
+                    visible: false
+                })
+                .expect("hide")
+        );
+        assert!(
+            editor
+                .execute(EditCommand::SetObjectLocked {
+                    object_id: id,
+                    locked: true
+                })
+                .expect("lock")
+        );
+        assert!(
+            editor
+                .execute(EditCommand::RenameObject {
+                    object_id: id,
+                    name: "Renamed".into()
+                })
+                .expect("rename")
+        );
+        assert_eq!(editor.history_len(), 3);
+        let obj = &editor.project().composition.objects[0];
+        assert!(!obj.visible && obj.locked && obj.name == "Renamed");
+
+        assert!(
+            !editor
+                .execute(EditCommand::SetObjectVisible {
+                    object_id: id,
+                    visible: false
+                })
+                .expect("no-op")
+        );
+        assert!(
+            !editor
+                .execute(EditCommand::SetObjectLocked {
+                    object_id: id,
+                    locked: true
+                })
+                .expect("no-op")
+        );
+        assert!(
+            !editor
+                .execute(EditCommand::RenameObject {
+                    object_id: id,
+                    name: "Renamed".into()
+                })
+                .expect("no-op")
+        );
+        assert_eq!(editor.history_len(), 3);
+
+        assert!(editor.undo().expect("undo rename"));
+        assert_eq!(editor.project().composition.objects[0].name, "A");
+        assert!(editor.undo().expect("undo lock"));
+        assert!(!editor.project().composition.objects[0].locked);
+        assert!(editor.undo().expect("undo visibility"));
+        assert!(editor.project().composition.objects[0].visible);
+        assert!(editor.redo().expect("redo visible"));
+        assert!(!editor.project().composition.objects[0].visible);
+        assert!(editor.redo().expect("redo lock"));
+        assert!(editor.project().composition.objects[0].locked);
+        assert!(editor.redo().expect("redo rename"));
+        assert_eq!(editor.project().composition.objects[0].name, "Renamed");
+        editor.project().validate().expect("valid project");
     }
 
     #[test]
