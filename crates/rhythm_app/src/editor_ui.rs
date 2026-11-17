@@ -1,7 +1,7 @@
 use crate::{
     editor_session::{
-        EditorSession, PreviewQuality, ViewportGroupPositionAction,
-        ViewportPositionAction, ViewportRotationAction, ViewportScaleAction,
+        EditorSession, PreviewQuality, ViewportGroupPositionAction, ViewportPositionAction,
+        ViewportRotationAction, ViewportScaleAction,
     },
     timeline::{draw_easing_preset_menu, draw_timeline},
 };
