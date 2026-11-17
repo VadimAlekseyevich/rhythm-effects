@@ -1816,7 +1816,8 @@ pub fn draw_editor_shell(
 mod tests {
     use super::{
         InspectorNumericDraft, InspectorPositionEdit, InspectorTransformEdit, PositionAxis,
-        apply_inspector_position_edits, apply_inspector_transform_edits, apply_object_click,
+        apply_inspector_animated_transform_edits, apply_inspector_position_edits,
+        apply_inspector_transform_edits, apply_object_click,
         clamped_drag_point, committed_number, composition_point_from_preview,
         fit_composition_preview, panned_preview_rect, preview_point, rotation_handle_on_preview,
         selected_outline_bounds, selected_rotation_handle_hit, selected_scale_corner_hit,
@@ -1854,6 +1855,151 @@ mod tests {
         for invalid in ["", "-", "1.2.3", "NaN", "inf", "1e999"] {
             assert_eq!(committed_number(&draft(invalid, true)), None);
         }
+    }
+
+    fn animated_inspector_fixture() -> (
+        EditorSession,
+        rhythm_core::editor::ProjectEditor,
+        ObjectId,
+    ) {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject, TransformAnimation,
+            },
+            time::{BpmMicros, GridOffsetNs, TempoMap, TimeSignature},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let id = ObjectId::new(1).expect("id");
+        let mut project = Project::new(
+            "Animated Inspector",
+            ProjectSettings::default(),
+            TempoMap::with_initial_tempo(
+                GridOffsetNs::new(0),
+                BpmMicros::new(120_000_000).expect("tempo"),
+                TimeSignature::default(),
+            ),
+        );
+        project.composition.objects.push(Object {
+            id, name: "Shape".into(), visible: true, locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(100.0, 200.0)),
+                Animated::new_static(v(1.0, 2.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(100.0, 50.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        let editor = rhythm_core::editor::ProjectEditor::new(project).expect("project");
+        let mut session = EditorSession::default();
+        session.seek_paused(rhythm_core::time::ProjectTimeNs::new(130_000_000));
+        (session, editor, id)
+    }
+
+    #[test]
+    fn animated_inspector_off_key_creates_resolved_key_and_on_key_updates_in_place() {
+        use rhythm_core::{
+            property::{
+                AnimatableProperty, PropertyValue, property_base_value,
+                property_keyframe_at_tick, property_keyframe_count,
+            },
+            time::{MusicalTick, ProjectTimeNs},
+        };
+        let v = |x, y| rhythm_core::domain::Vec2::new(x, y).expect("finite");
+        let (mut session, mut editor, id) = animated_inspector_fixture();
+        let property = AnimatableProperty::Scale;
+        editor.create_property_keyframe(
+            id, property, MusicalTick::new(0), PropertyValue::Vec2(v(1.0, 2.0)),
+        ).expect("first key");
+        editor.create_property_keyframe(
+            id, property, MusicalTick::new(480), PropertyValue::Vec2(v(1.0, 2.0)),
+        ).expect("second key");
+        let history = editor.history_len();
+        let edit = |axis, display_value| InspectorTransformEdit {
+            object_id: id, property, axis: Some(axis), display_value,
+        };
+        assert!(apply_inspector_animated_transform_edits(
+            &mut session, &mut editor,
+            [edit(PositionAxis::X, 250.0)],
+        ).expect("off-key edit"));
+        let first = property_keyframe_at_tick(
+            editor.project(), id, property, MusicalTick::new(240),
+        ).expect("property").expect("inserted key");
+        assert_eq!(first.value, PropertyValue::Vec2(v(2.5, 2.0)));
+        assert_eq!(property_keyframe_count(editor.project(), id, property), Ok(3));
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(editor.history_len(), history + 1);
+        assert_eq!(
+            property_base_value(editor.project(), id, property),
+            Ok(PropertyValue::Vec2(v(1.0, 2.0))),
+        );
+
+        assert!(apply_inspector_animated_transform_edits(
+            &mut session, &mut editor,
+            [edit(PositionAxis::Y, 300.0)],
+        ).expect("existing-key edit"));
+        let updated = property_keyframe_at_tick(
+            editor.project(), id, property, MusicalTick::new(240),
+        ).expect("property").expect("edited key");
+        assert_eq!(updated.id, first.id);
+        assert_eq!(updated.interpolation, first.interpolation);
+        assert_eq!(updated.value, PropertyValue::Vec2(v(2.5, 3.0)));
+        assert_eq!(editor.history_len(), history + 2);
+        assert!(editor.undo().expect("undo existing-key edit"));
+        let restored = property_keyframe_at_tick(
+            editor.project(), id, property, MusicalTick::new(240),
+        ).expect("property").expect("restored key");
+        assert_eq!(restored.value, first.value);
+        assert_eq!(restored.id, first.id);
+        assert!(editor.undo().expect("undo newly created key"));
+        assert_eq!(property_keyframe_count(editor.project(), id, property), Ok(2));
+        assert!(editor.redo().expect("redo new key"));
+        assert!(editor.redo().expect("redo value"));
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn inspector_keyframe_button_removes_last_key_to_static_value_and_can_undo() {
+        use rhythm_core::{
+            property::{AnimatableProperty, PropertyValue, property_base_value, property_keyframe_count},
+            time::{MusicalTick, ProjectTimeNs},
+        };
+        let (mut session, mut editor, id) = animated_inspector_fixture();
+        let property = AnimatableProperty::Opacity;
+        editor.create_property_keyframe(
+            id, property, MusicalTick::new(240), PropertyValue::Scalar(0.65),
+        ).expect("insert key");
+        let history = editor.history_len();
+        session.focus_property(id, property);
+        assert!(session.keyframe_action(&mut editor).expect("remove final key"));
+        assert_eq!(property_keyframe_count(editor.project(), id, property), Ok(0));
+        assert_eq!(
+            property_base_value(editor.project(), id, property),
+            Ok(PropertyValue::Scalar(0.65))
+        );
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(editor.history_len(), history + 1);
+        assert!(editor.undo().expect("undo removal"));
+        assert_eq!(property_keyframe_count(editor.project(), id, property), Ok(1));
+        assert_eq!(
+            property_base_value(editor.project(), id, property),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert!(editor.redo().expect("redo removal"));
+        assert_eq!(property_keyframe_count(editor.project(), id, property), Ok(0));
+        assert_eq!(
+            property_base_value(editor.project(), id, property),
+            Ok(PropertyValue::Scalar(0.65))
+        );
+        editor.project().validate().expect("valid");
     }
 
     #[test]
