@@ -642,6 +642,97 @@ pub struct InspectorTransformEdit {
     pub display_value: f32,
 }
 
+/// Animated Inspector edits update the nearest authoring-grid key, never
+/// the static base, and move the playhead after a successful commit.
+pub fn apply_inspector_animated_transform_edits(
+    session: &mut EditorSession,
+    editor: &mut ProjectEditor,
+    edits: impl IntoIterator<Item = InspectorTransformEdit>,
+) -> Result<bool, EditError> {
+    let mut changed = false;
+    for edit in edits {
+        let project = editor.project();
+        let Some(object) = project
+            .composition
+            .objects
+            .iter()
+            .find(|object| object.id == edit.object_id)
+        else {
+            continue;
+        };
+        if object.locked || property_keyframe_count(project, edit.object_id, edit.property)? == 0 {
+            continue;
+        }
+        let Ok(continuous_tick) = project
+            .tempo_map
+            .continuous_tick_position(session.playhead())
+        else {
+            continue;
+        };
+        let Ok(resolved_tick) =
+            snap_tick_position_to_grid(continuous_tick, session.authoring_division())
+        else {
+            continue;
+        };
+        let Ok(resolved_time) = project.tempo_map.project_time_for_tick(resolved_tick) else {
+            continue;
+        };
+        let existing =
+            property_keyframe_at_tick(project, edit.object_id, edit.property, resolved_tick)?;
+        let current = if let Some(key) = existing {
+            key.value
+        } else {
+            evaluate_property_at_tick(project, edit.object_id, edit.property, continuous_tick)?
+        };
+        let is_percent = matches!(
+            edit.property,
+            AnimatableProperty::Scale | AnimatableProperty::Anchor | AnimatableProperty::Opacity
+        );
+        let scalar = if is_percent {
+            edit.display_value / 100.0
+        } else {
+            edit.display_value
+        };
+        if !scalar.is_finite() {
+            continue;
+        }
+        let replacement = match (current, edit.axis) {
+            (PropertyValue::Vec2(previous), Some(axis)) => {
+                let (x, y) = match axis {
+                    PositionAxis::X => (scalar, previous.y()),
+                    PositionAxis::Y => (previous.x(), scalar),
+                };
+                let Ok(value) = Vec2::new(x, y) else { continue };
+                PropertyValue::Vec2(value)
+            }
+            (PropertyValue::Scalar(_), None) => PropertyValue::Scalar(scalar),
+            _ => continue,
+        };
+        let applied = if let Some(key) = existing {
+            editor.execute(EditCommand::SetPropertyKeyframeValue {
+                object_id: edit.object_id,
+                property: edit.property,
+                keyframe_id: key.id,
+                value: replacement,
+            })?
+        } else {
+            editor
+                .create_property_keyframe(
+                    edit.object_id,
+                    edit.property,
+                    resolved_tick,
+                    replacement,
+                )?
+                .is_some()
+        };
+        if applied {
+            session.seek_paused(resolved_time);
+        }
+        changed |= applied;
+    }
+    Ok(changed)
+}
+
 pub fn apply_inspector_transform_edits(
     editor: &mut ProjectEditor,
     edits: impl IntoIterator<Item = InspectorTransformEdit>,
@@ -717,6 +808,7 @@ fn draw_inspector_transform_field(
     property: AnimatableProperty,
     axis: Option<PositionAxis>,
     current: f32,
+    animated: bool,
     actions: &mut EditorUiActions,
 ) -> bool {
     let id = inspector_transform_id(object_id, property, axis);
@@ -747,14 +839,17 @@ fn draw_inspector_transform_field(
             .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
     } else if enter || response.lost_focus() {
         if let Some(value) = committed_number(&draft) {
-            actions
-                .inspector_transform_edits
-                .push(InspectorTransformEdit {
-                    object_id,
-                    property,
-                    axis,
-                    display_value: value,
-                });
+            let edit = InspectorTransformEdit {
+                object_id,
+                property,
+                axis,
+                display_value: value,
+            };
+            if animated {
+                actions.inspector_animated_edits.push(edit);
+            } else {
+                actions.inspector_transform_edits.push(edit);
+            }
         }
         ui.ctx()
             .data_mut(|data| data.remove::<InspectorNumericDraft>(draft_id));
@@ -801,7 +896,7 @@ fn draw_inspector_transform_row(
     let Ok(value) = value else {
         return;
     };
-    let editable = !object.locked && count == 0;
+    let editable = !object.locked && (count == 0 || project.tempo_map.initial_segment().is_some());
     let keyframe_tick = project
         .tempo_map
         .continuous_tick_position(session.playhead())
@@ -843,7 +938,7 @@ fn draw_inspector_transform_row(
                         value
                     }
                 };
-                if property == AnimatableProperty::Position {
+                if property == AnimatableProperty::Position && count == 0 {
                     if draw_inspector_position_field(ui, object.id, PositionAxis::X, v.x(), actions)
                     {
                         session.focus_property(object.id, property);
@@ -859,6 +954,7 @@ fn draw_inspector_transform_row(
                         property,
                         Some(PositionAxis::X),
                         display(v.x()),
+                        count != 0,
                         actions,
                     ) {
                         session.focus_property(object.id, property);
@@ -869,6 +965,7 @@ fn draw_inspector_transform_row(
                         property,
                         Some(PositionAxis::Y),
                         display(v.y()),
+                        count != 0,
                         actions,
                     ) {
                         session.focus_property(object.id, property);
@@ -881,7 +978,15 @@ fn draw_inspector_transform_row(
                 } else {
                     v
                 };
-                if draw_inspector_transform_field(ui, object.id, property, None, display, actions) {
+                if draw_inspector_transform_field(
+                    ui,
+                    object.id,
+                    property,
+                    None,
+                    display,
+                    count != 0,
+                    actions,
+                ) {
                     session.focus_property(object.id, property);
                 }
             }
@@ -1001,19 +1106,24 @@ fn flush_inspector_draft_on_selection_change(
             }
         }
         for property in [
+            AnimatableProperty::Position,
             AnimatableProperty::Scale,
             AnimatableProperty::Rotation,
             AnimatableProperty::Anchor,
             AnimatableProperty::Opacity,
         ] {
-            let editable = project.composition.objects.iter().any(|object| {
-                object.id == old_id
-                    && !object.locked
-                    && property_keyframe_count(project, old_id, property) == Ok(0)
-            });
+            let editable = project
+                .composition
+                .objects
+                .iter()
+                .any(|object| object.id == old_id && !object.locked);
+            let animated =
+                property_keyframe_count(project, old_id, property).is_ok_and(|count| count > 0);
             let axes = if matches!(
                 property,
-                AnimatableProperty::Scale | AnimatableProperty::Anchor
+                AnimatableProperty::Position
+                    | AnimatableProperty::Scale
+                    | AnimatableProperty::Anchor
             ) {
                 vec![Some(PositionAxis::X), Some(PositionAxis::Y)]
             } else {
@@ -1027,14 +1137,17 @@ fn flush_inspector_draft_on_selection_change(
                     draft
                 });
                 if editable && let Some(display_value) = draft.as_ref().and_then(committed_number) {
-                    actions
-                        .inspector_transform_edits
-                        .push(InspectorTransformEdit {
-                            object_id: old_id,
-                            property,
-                            axis,
-                            display_value,
-                        });
+                    let edit = InspectorTransformEdit {
+                        object_id: old_id,
+                        property,
+                        axis,
+                        display_value,
+                    };
+                    if animated {
+                        actions.inspector_animated_edits.push(edit);
+                    } else if property != AnimatableProperty::Position {
+                        actions.inspector_transform_edits.push(edit);
+                    }
                 }
             }
         }
@@ -1058,6 +1171,7 @@ pub struct EditorUiActions {
     pub viewport_rotation_actions: Vec<ViewportRotationAction>,
     pub inspector_position_edits: Vec<InspectorPositionEdit>,
     pub inspector_transform_edits: Vec<InspectorTransformEdit>,
+    pub inspector_animated_edits: Vec<InspectorTransformEdit>,
     pub inspector_keyframe_requests: Vec<(ObjectId, AnimatableProperty)>,
     pub undo_requested: bool,
     pub redo_requested: bool,
@@ -1336,7 +1450,9 @@ pub fn draw_editor_shell(
                         );
                     }
                     ui.small("Enter / focus loss commits · Escape restores. Values in %, ° or px.");
-                    ui.small("◇ Static · ◇ Anim · ◆ Key; numeric animated edits are AI-186.");
+                    ui.small(
+                        "◇ Static · ◇ Anim · ◆ Key; animated edits resolve to the nearest grid.",
+                    );
                 }
             } else {
                 ui.label("No object selected.");
@@ -1730,11 +1846,12 @@ pub fn draw_editor_shell(
 mod tests {
     use super::{
         InspectorNumericDraft, InspectorPositionEdit, InspectorTransformEdit, PositionAxis,
-        apply_inspector_position_edits, apply_inspector_transform_edits, apply_object_click,
-        clamped_drag_point, committed_number, composition_point_from_preview,
-        fit_composition_preview, panned_preview_rect, preview_point, rotation_handle_on_preview,
-        selected_outline_bounds, selected_rotation_handle_hit, selected_scale_corner_hit,
-        selection_rect_on_preview, unbounded_composition_point,
+        apply_inspector_animated_transform_edits, apply_inspector_position_edits,
+        apply_inspector_transform_edits, apply_object_click, clamped_drag_point, committed_number,
+        composition_point_from_preview, fit_composition_preview, panned_preview_rect,
+        preview_point, rotation_handle_on_preview, selected_outline_bounds,
+        selected_rotation_handle_hit, selected_scale_corner_hit, selection_rect_on_preview,
+        unbounded_composition_point,
     };
     use crate::editor_session::EditorSession;
     use rhythm_core::ids::ObjectId;
@@ -1768,6 +1885,202 @@ mod tests {
         for invalid in ["", "-", "1.2.3", "NaN", "inf", "1e999"] {
             assert_eq!(committed_number(&draft(invalid, true)), None);
         }
+    }
+
+    fn animated_inspector_fixture() -> (EditorSession, rhythm_core::editor::ProjectEditor, ObjectId)
+    {
+        use rhythm_core::{
+            animation::Animated,
+            domain::{LinearRgba, Vec2},
+            project::{
+                Object, ObjectContent, Project, ProjectSettings, RectangleObject,
+                TransformAnimation,
+            },
+            time::{BpmMicros, GridOffsetNs, TempoMap, TimeSignature},
+        };
+        let v = |x, y| Vec2::new(x, y).expect("finite");
+        let id = ObjectId::new(1).expect("id");
+        let mut project = Project::new(
+            "Animated Inspector",
+            ProjectSettings::default(),
+            TempoMap::with_initial_tempo(
+                GridOffsetNs::new(0),
+                BpmMicros::new(120_000_000).expect("tempo"),
+                TimeSignature::default(),
+            ),
+        );
+        project.composition.objects.push(Object {
+            id,
+            name: "Shape".into(),
+            visible: true,
+            locked: false,
+            transform: TransformAnimation::new(
+                Animated::new_static(v(100.0, 200.0)),
+                Animated::new_static(v(1.0, 2.0)),
+                Animated::new_static(0.0),
+                Animated::new_static(v(0.5, 0.5)),
+                Animated::new_static(1.0),
+            ),
+            content: ObjectContent::Rectangle(RectangleObject {
+                size: Animated::new_static(v(100.0, 50.0)),
+                fill: Animated::new_static(LinearRgba::black_opaque()),
+                corner_radius: Animated::new_static(0.0),
+            }),
+            effects: Vec::new(),
+        });
+        project.next_entity_id = 2;
+        let editor = rhythm_core::editor::ProjectEditor::new(project).expect("project");
+        let mut session = EditorSession::default();
+        session.seek_paused(rhythm_core::time::ProjectTimeNs::new(130_000_000));
+        (session, editor, id)
+    }
+
+    #[test]
+    fn animated_inspector_off_key_creates_resolved_key_and_on_key_updates_in_place() {
+        use rhythm_core::{
+            property::{
+                AnimatableProperty, PropertyValue, property_base_value, property_keyframe_at_tick,
+                property_keyframe_count,
+            },
+            time::{MusicalTick, ProjectTimeNs},
+        };
+        let v = |x, y| rhythm_core::domain::Vec2::new(x, y).expect("finite");
+        let (mut session, mut editor, id) = animated_inspector_fixture();
+        let property = AnimatableProperty::Scale;
+        editor
+            .create_property_keyframe(
+                id,
+                property,
+                MusicalTick::new(0),
+                PropertyValue::Vec2(v(1.0, 2.0)),
+            )
+            .expect("first key");
+        editor
+            .create_property_keyframe(
+                id,
+                property,
+                MusicalTick::new(480),
+                PropertyValue::Vec2(v(1.0, 2.0)),
+            )
+            .expect("second key");
+        let history = editor.history_len();
+        let edit = |axis, display_value| InspectorTransformEdit {
+            object_id: id,
+            property,
+            axis: Some(axis),
+            display_value,
+        };
+        assert!(
+            apply_inspector_animated_transform_edits(
+                &mut session,
+                &mut editor,
+                [edit(PositionAxis::X, 250.0)],
+            )
+            .expect("off-key edit")
+        );
+        let first =
+            property_keyframe_at_tick(editor.project(), id, property, MusicalTick::new(240))
+                .expect("property")
+                .expect("inserted key");
+        assert_eq!(first.value, PropertyValue::Vec2(v(2.5, 2.0)));
+        assert_eq!(
+            property_keyframe_count(editor.project(), id, property),
+            Ok(3)
+        );
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(editor.history_len(), history + 1);
+        assert_eq!(
+            property_base_value(editor.project(), id, property),
+            Ok(PropertyValue::Vec2(v(1.0, 2.0))),
+        );
+
+        assert!(
+            apply_inspector_animated_transform_edits(
+                &mut session,
+                &mut editor,
+                [edit(PositionAxis::Y, 300.0)],
+            )
+            .expect("existing-key edit")
+        );
+        let updated =
+            property_keyframe_at_tick(editor.project(), id, property, MusicalTick::new(240))
+                .expect("property")
+                .expect("edited key");
+        assert_eq!(updated.id, first.id);
+        assert_eq!(updated.interpolation, first.interpolation);
+        assert_eq!(updated.value, PropertyValue::Vec2(v(2.5, 3.0)));
+        assert_eq!(editor.history_len(), history + 2);
+        assert!(editor.undo().expect("undo existing-key edit"));
+        let restored =
+            property_keyframe_at_tick(editor.project(), id, property, MusicalTick::new(240))
+                .expect("property")
+                .expect("restored key");
+        assert_eq!(restored.value, first.value);
+        assert_eq!(restored.id, first.id);
+        assert!(editor.undo().expect("undo newly created key"));
+        assert_eq!(
+            property_keyframe_count(editor.project(), id, property),
+            Ok(2)
+        );
+        assert!(editor.redo().expect("redo new key"));
+        assert!(editor.redo().expect("redo value"));
+        editor.project().validate().expect("valid");
+    }
+
+    #[test]
+    fn inspector_keyframe_button_removes_last_key_to_static_value_and_can_undo() {
+        use rhythm_core::{
+            property::{
+                AnimatableProperty, PropertyValue, property_base_value, property_keyframe_count,
+            },
+            time::{MusicalTick, ProjectTimeNs},
+        };
+        let (mut session, mut editor, id) = animated_inspector_fixture();
+        let property = AnimatableProperty::Opacity;
+        editor
+            .create_property_keyframe(
+                id,
+                property,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.65),
+            )
+            .expect("insert key");
+        let history = editor.history_len();
+        session.focus_property(id, property);
+        assert!(
+            session
+                .keyframe_action(&mut editor)
+                .expect("remove final key")
+        );
+        assert_eq!(
+            property_keyframe_count(editor.project(), id, property),
+            Ok(0)
+        );
+        assert_eq!(
+            property_base_value(editor.project(), id, property),
+            Ok(PropertyValue::Scalar(0.65))
+        );
+        assert_eq!(session.playhead(), ProjectTimeNs::new(125_000_000));
+        assert_eq!(editor.history_len(), history + 1);
+        assert!(editor.undo().expect("undo removal"));
+        assert_eq!(
+            property_keyframe_count(editor.project(), id, property),
+            Ok(1)
+        );
+        assert_eq!(
+            property_base_value(editor.project(), id, property),
+            Ok(PropertyValue::Scalar(1.0))
+        );
+        assert!(editor.redo().expect("redo removal"));
+        assert_eq!(
+            property_keyframe_count(editor.project(), id, property),
+            Ok(0)
+        );
+        assert_eq!(
+            property_base_value(editor.project(), id, property),
+            Ok(PropertyValue::Scalar(0.65))
+        );
+        editor.project().validate().expect("valid");
     }
 
     #[test]

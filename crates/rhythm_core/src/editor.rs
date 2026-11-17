@@ -154,6 +154,12 @@ pub enum EditCommand {
         property: AnimatableProperty,
         keyframe: PropertyKeyframe,
     },
+    SetPropertyKeyframeValue {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        keyframe_id: KeyframeId,
+        value: PropertyValue,
+    },
     RemovePropertyKeyframe {
         object_id: ObjectId,
         property: AnimatableProperty,
@@ -191,6 +197,7 @@ impl EditCommand {
             Self::SetPropertyBase { .. } => "SetPropertyBase",
             Self::AddOpacityKeyframe { .. } => "AddOpacityKeyframe",
             Self::InsertPropertyKeyframe { .. } => "InsertPropertyKeyframe",
+            Self::SetPropertyKeyframeValue { .. } => "SetPropertyKeyframeValue",
             Self::RemovePropertyKeyframe { .. } => "RemovePropertyKeyframe",
             Self::InsertPropertyKeyframes { .. } => "InsertPropertyKeyframes",
             Self::DeletePropertyKeyframes { .. } => "DeletePropertyKeyframes",
@@ -267,6 +274,12 @@ pub enum HistoryPayload {
         object_id: ObjectId,
         property: AnimatableProperty,
         keyframe: PropertyKeyframe,
+    },
+    PropertyKeyframeValueChanged {
+        object_id: ObjectId,
+        property: AnimatableProperty,
+        before: PropertyKeyframe,
+        after: PropertyKeyframe,
     },
     PropertyKeyframeRemoved {
         object_id: ObjectId,
@@ -1233,6 +1246,54 @@ impl ProjectEditor {
                     },
                 )))
             }
+            EditCommand::SetPropertyKeyframeValue {
+                object_id,
+                property,
+                keyframe_id,
+                value,
+            } => {
+                let before =
+                    property_keyframe_by_id(&self.project, object_id, property, keyframe_id)?
+                        .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                if before.value == value {
+                    return Ok(None);
+                }
+                let after = PropertyKeyframe { value, ..before };
+                remove_property_keyframe_by_id(
+                    &mut self.project,
+                    object_id,
+                    property,
+                    keyframe_id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(keyframe_id))?;
+                if let Err(error) =
+                    insert_property_keyframe(&mut self.project, object_id, property, after)
+                {
+                    let _ =
+                        insert_property_keyframe(&mut self.project, object_id, property, before);
+                    return Err(error.into());
+                }
+                if let Err(error) = self.project.validate() {
+                    let _ = remove_property_keyframe_by_id(
+                        &mut self.project,
+                        object_id,
+                        property,
+                        keyframe_id,
+                    );
+                    let _ =
+                        insert_property_keyframe(&mut self.project, object_id, property, before);
+                    return Err(EditError::InvalidProject(error));
+                }
+                Ok(Some(PendingHistoryEntry::new(
+                    "Edit Keyframe Value",
+                    HistoryPayload::PropertyKeyframeValueChanged {
+                        object_id,
+                        property,
+                        before,
+                        after,
+                    },
+                )))
+            }
             EditCommand::InsertPropertyKeyframe {
                 object_id,
                 property,
@@ -1954,6 +2015,33 @@ impl ProjectEditor {
                     .insert_keyframe(keyframe.clone())?;
             }
             (
+                HistoryPayload::PropertyKeyframeValueChanged {
+                    object_id,
+                    property,
+                    before,
+                    after,
+                },
+                direction,
+            ) => {
+                let current = *direction.pick(after, before);
+                let replacement = *direction.pick(before, after);
+                let removed = remove_property_keyframe_by_id(
+                    &mut self.project,
+                    *object_id,
+                    *property,
+                    current.id,
+                )?
+                .ok_or(EditError::KeyframeNotFound(current.id))?;
+                if removed != current {
+                    let _ =
+                        insert_property_keyframe(&mut self.project, *object_id, *property, removed);
+                    return Err(EditError::HistoryInvariant(
+                        "keyframe value identity mismatch",
+                    ));
+                }
+                insert_property_keyframe(&mut self.project, *object_id, *property, replacement)?;
+            }
+            (
                 HistoryPayload::PropertyKeyframeInserted {
                     object_id,
                     property,
@@ -2255,6 +2343,95 @@ mod tests {
         project.composition.objects.push(object(1, "A"));
         project.next_entity_id = 2;
         ProjectEditor::new(project).expect("valid project")
+    }
+
+    #[test]
+    fn animated_inspector_value_edit_preserves_key_id_interpolation_and_undo() {
+        use crate::property::{AnimatableProperty, PropertyValue, property_keyframe_at_tick};
+        let id = ObjectId::new(1).expect("object");
+        let mut editor = editor_with_object();
+        let key_id = editor
+            .create_property_keyframe(
+                id,
+                AnimatableProperty::Opacity,
+                MusicalTick::new(240),
+                PropertyValue::Scalar(0.3),
+            )
+            .expect("insert")
+            .expect("key");
+        let history_before = editor.history_len();
+        assert!(
+            editor
+                .execute(EditCommand::SetPropertyKeyframeValue {
+                    object_id: id,
+                    property: AnimatableProperty::Opacity,
+                    keyframe_id: key_id,
+                    value: PropertyValue::Scalar(0.7),
+                })
+                .expect("edit")
+        );
+        assert_eq!(editor.history_len(), history_before + 1);
+        let key = property_keyframe_at_tick(
+            editor.project(),
+            id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
+        assert_eq!(key.id, key_id);
+        assert_eq!(key.value, PropertyValue::Scalar(0.7));
+        assert_eq!(key.interpolation, Interpolation::Linear);
+        assert!(
+            !editor
+                .execute(EditCommand::SetPropertyKeyframeValue {
+                    object_id: id,
+                    property: AnimatableProperty::Opacity,
+                    keyframe_id: key_id,
+                    value: PropertyValue::Scalar(0.7),
+                })
+                .expect("no-op")
+        );
+        assert!(editor.undo().expect("undo"));
+        let key = property_keyframe_at_tick(
+            editor.project(),
+            id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
+        assert_eq!(key.value, PropertyValue::Scalar(0.3));
+        assert!(editor.redo().expect("redo"));
+        let key = property_keyframe_at_tick(
+            editor.project(),
+            id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
+        assert_eq!(key.value, PropertyValue::Scalar(0.7));
+        assert_eq!(key.id, key_id);
+        assert!(matches!(
+            editor.execute(EditCommand::SetPropertyKeyframeValue {
+                object_id: id,
+                property: AnimatableProperty::Opacity,
+                keyframe_id: key_id,
+                value: PropertyValue::Scalar(f32::NAN),
+            }),
+            Err(super::EditError::PropertyAccess(_))
+        ));
+        let key = property_keyframe_at_tick(
+            editor.project(),
+            id,
+            AnimatableProperty::Opacity,
+            MusicalTick::new(240),
+        )
+        .expect("property")
+        .expect("key");
+        assert_eq!(key.value, PropertyValue::Scalar(0.7));
+        editor.project().validate().expect("valid");
     }
 
     #[test]
